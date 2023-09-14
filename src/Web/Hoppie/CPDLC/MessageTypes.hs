@@ -8,8 +8,6 @@ module Web.Hoppie.CPDLC.MessageTypes
 where
 
 import Web.Hoppie.Telex
-import Data.Trie (Trie (..))
-import qualified Data.Trie as Trie
 
 import Control.Applicative
 import Control.Monad
