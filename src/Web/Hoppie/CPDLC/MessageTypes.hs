@@ -23,7 +23,8 @@ import qualified Text.Megaparsec as P
 import qualified Text.Megaparsec.Byte as P
 import qualified Text.Megaparsec.Byte.Lexer as P (decimal)
 import Data.List
- 
+import Data.Maybe
+
 data ArgTy
   = ArgFlAlt
   | ArgSpeed
@@ -149,6 +150,13 @@ data ArgSpec =
     }
     deriving (Show, Read, Ord, Eq)
 
+argSpecToParser :: ArgSpec -> P.Parsec Void ByteString (Maybe ByteString)
+argSpecToParser (ArgSpec ty True) = P.optional (argTyToParser ty)
+argSpecToParser (ArgSpec ty False) = Just <$> argTyToParser ty
+
+argTyToParser :: ArgTy -> P.Parsec Void ByteString ByteString
+argTyToParser x = fail $ "Unsupported: " ++ show x
+
 data ReplyOpts
   = ReplyY
   | ReplyN
@@ -168,7 +176,7 @@ type ArgRef = Word
 
 data MessagePatternItem a
   = MessageLiteral ByteString
-  | MessageArgRef a
+  | MessageArg a
   deriving (Show, Read, Eq, Ord, Functor)
 
 messagePatternP :: P.Parsec Void ByteString (MessagePattern ArgRef)
@@ -181,7 +189,7 @@ messagePatternItemP =
 argRefItemP :: P.Parsec Void ByteString (MessagePatternItem ArgRef)
 argRefItemP = do
   void $ P.char (ord8 '$')
-  MessageArgRef <$> P.decimal
+  MessageArg <$> P.decimal
 
 litItemP :: P.Parsec Void ByteString (MessagePatternItem ArgRef)
 litItemP =
@@ -209,7 +217,7 @@ defMessageType =
   MessageType
     { msgPattern = MessagePattern []
     , msgArgs = []
-    , msgReplyOpts = ReplyR
+    , msgReplyOpts = ReplyN
     , msgReplies = []
     }
 
@@ -218,19 +226,24 @@ resolveMessagePatternArgs specs = MessagePattern . map (resolveMessagePatternIte
 
 resolveMessagePatternItemArgs :: [ArgSpec] -> MessagePatternItem ArgRef -> MessagePatternItem ArgSpec
 resolveMessagePatternItemArgs _ (MessageLiteral str) = MessageLiteral str
-resolveMessagePatternItemArgs args (MessageArgRef i) = MessageArgRef $ args !! (fromIntegral i - 1)
+resolveMessagePatternItemArgs args (MessageArg i) = MessageArg $ args !! (fromIntegral i - 1)
 
-makeMessageTrie :: Map MessageTypeID MessageType -> Trie (MessagePatternItem ArgSpec) MessageTypeID
-makeMessageTrie m =
-  foldl'
-    (\t (msgID, msgTy) -> Trie.insert (messagePatternItems . resolveMessagePatternArgs (msgArgs msgTy) $ msgPattern msgTy) msgID t)
-    mempty (Map.toList m)
+matchMessage :: MessageType -> ByteString -> ReplyOpts -> Maybe [ByteString]
+matchMessage msgTy src ropts
+  | msgReplyOpts msgTy /= ropts
+  = Nothing
+  | otherwise
+  = P.parseMaybe (messagePatternToParser (resolveMessagePatternArgs (msgArgs msgTy) $ msgPattern msgTy)) src
 
-pseudoMessageTrie :: Trie (MessagePatternItem ArgSpec) MessageTypeID
-pseudoMessageTrie = makeMessageTrie pseudoMessages
+messagePatternItemToParser :: MessagePatternItem ArgSpec -> P.Parsec Void ByteString [ByteString]
+messagePatternItemToParser (MessageLiteral lit) =
+  [] <$ P.string lit <* P.notFollowedBy (P.satisfy (not . isSpace8))
+messagePatternItemToParser (MessageArg argSpec) =
+  maybeToList <$> argSpecToParser argSpec
 
-uplinkMessageTrie :: Trie (MessagePatternItem ArgSpec) MessageTypeID
-uplinkMessageTrie = makeMessageTrie uplinkMessages
+messagePatternToParser :: MessagePattern ArgSpec -> P.Parsec Void ByteString [ByteString]
+messagePatternToParser (MessagePattern items) =
+  mconcat <$> mapM messagePatternItemToParser items
 
 pseudoMessages :: Map MessageTypeID MessageType
 pseudoMessages = Map.fromList
@@ -401,177 +414,284 @@ uplinkMessages = Map.fromList
   , ("TXTU-5", defMessageType { msgPattern = "$1", msgArgs = [ argText ], msgReplyOpts = ReplyAN } )
   ]
 
--- buildParseTrie :: [(MessageTypeID, MessagePattern)] -> Trie MessagePatternItem MessageTypeID
+downlinkMessages :: Map MessageTypeID MessageType
+downlinkMessages = Map.fromList
+  [ ( "SYSD-1" , defMessageType { msgPattern = "ERROR $1", msgArgs = [ argReason ] } )
+  , ( "SYSD-2" , defMessageType { msgPattern = "LOGICAL ACKNOWLEDGEMENT", msgArgs = [] } )
+  , ( "SYSD-3" , defMessageType { msgPattern = "NOT CURRENT DATA AUTHORITY", msgArgs = [] } )
+  , ( "SYSD-4" , defMessageType { msgPattern = "CURRENT DATA AUTHORITY", msgArgs = [] } )
+  , ( "SYSD-5" , defMessageType { msgPattern = "NOT AUTHORIZED NEXT DATA AUTHORITY $1 $2", msgArgs = [ argReason ,  argReason ] } )
+  , ( "SYSD-6" , defMessageType { msgPattern = "MESSAGE RECEIVED TOO LATE, RESEND MESSAGE OR CONTACT BY VOICE", msgArgs = [] } )
+  , ( "SYSD-7" , defMessageType { msgPattern = "AIRCRAFT CPDLC INHIBITED", msgArgs = [] } )
+  , ( "RTED-1" , defMessageType { msgPattern = "REQUEST DIRECT TO $1", msgArgs = [ argReason ], msgReplyOpts = ReplyY } )
+  , ( "RTED-2" , defMessageType { msgPattern = "REQUEST $1", msgArgs = [ argReason ], msgReplyOpts = ReplyY } )
+  , ( "RTED-3" , defMessageType { msgPattern = "REQUEST CLEARANCE $1", msgArgs = [ argReason ], msgReplyOpts = ReplyY } )
+  , ( "RTED-4" , defMessageType { msgPattern = "REQUEST $1 CLEARANCE", msgArgs = [ argReason ], msgReplyOpts = ReplyY } )
+  , ( "RTED-5" , defMessageType { msgPattern = "POSITION REPORT $1", msgArgs = [ argReason ], msgReplyOpts = ReplyY } )
+  , ( "RTED-6" , defMessageType { msgPattern = "REQUEST HEADING $1", msgArgs = [ argReason ], msgReplyOpts = ReplyY } )
+  , ( "RTED-7" , defMessageType { msgPattern = "REQUEST GROUND TRACK $1", msgArgs = [ argReason ], msgReplyOpts = ReplyY } )
+  , ( "RTED-8" , defMessageType { msgPattern = "WHEN CAN WE EXPECT BACK ON ROUTE", msgArgs = [], msgReplyOpts = ReplyY } )
+  , ( "RTED-9" , defMessageType { msgPattern = "ASSIGNED ROUTE $1", msgArgs = [ argReason ] } )
+  , ( "RTED-10" , defMessageType { msgPattern = "ETA $1 TIME $2", msgArgs = [ argReason ,  argReason ] } )
+  , ( "LATD-1" , defMessageType { msgPattern = "REQUEST OFFSET $1 $2 OF ROUTE", msgArgs = [ argReason ,  argReason ], msgReplyOpts = ReplyY } )
+  , ( "LATD-2" , defMessageType { msgPattern = "REQUEST WEATHER DEVIATION UP TO $1 OF ROUTE", msgArgs = [ argReason ], msgReplyOpts = ReplyY } )
+  , ( "LATD-3" , defMessageType { msgPattern = "CLEAR OF WEATHER", msgArgs = [] } )
+  , ( "LATD-4" , defMessageType { msgPattern = "BACK ON ROUTE", msgArgs = [] } )
+  , ( "LATD-5" , defMessageType { msgPattern = "DIVERTING TO $1 VIA $2", msgArgs = [ argReason ,  argReason ], msgReplyOpts = ReplyY } )
+  , ( "LATD-6" , defMessageType { msgPattern = "OFFSETTING $1 $2 OF ROUTE", msgArgs = [ argReason ,  argReason ], msgReplyOpts = ReplyY } )
+  , ( "LATD-7" , defMessageType { msgPattern = "DEVIATING $1 $2 OF ROUTE", msgArgs = [ argReason ,  argReason ], msgReplyOpts = ReplyY } )
+  , ( "LATD-8" , defMessageType { msgPattern = "PASSING $1", msgArgs = [ argReason ] } )
+  , ( "LVLD-1" , defMessageType { msgPattern = "REQUEST LEVEL $1", msgArgs = [ argReason ], msgReplyOpts = ReplyY } )
+  , ( "LVLD-2" , defMessageType { msgPattern = "REQUEST CLIMB TO $1", msgArgs = [ argReason ], msgReplyOpts = ReplyY } )
+  , ( "LVLD-3" , defMessageType { msgPattern = "REQUEST DESCENT TO $1", msgArgs = [ argReason ], msgReplyOpts = ReplyY } )
+  , ( "LVLD-4" , defMessageType { msgPattern = "AT $1 REQUEST $2", msgArgs = [ argReason ,  argReason ], msgReplyOpts = ReplyY } )
+  , ( "LVLD-5" , defMessageType { msgPattern = "AT TIME $1 REQUEST $2", msgArgs = [ argReason ,  argReason ], msgReplyOpts = ReplyY } )
+  , ( "LVLD-6" , defMessageType { msgPattern = "WHEN CAN WE EXPECT LOWER LEVEL", msgArgs = [], msgReplyOpts = ReplyY } )
+  , ( "LVLD-7" , defMessageType { msgPattern = "WHEN CAN WE EXPECT HIGHER LEVEL", msgArgs = [], msgReplyOpts = ReplyY } )
+  , ( "LVLD-8" , defMessageType { msgPattern = "LEAVING LEVEL $1", msgArgs = [ argReason ] } )
+  , ( "LVLD-9" , defMessageType { msgPattern = "MAINTAINING LEVEL $1", msgArgs = [ argReason ] } )
+  , ( "LVLD-10" , defMessageType { msgPattern = "REACHING BLOCK $1 TO $2", msgArgs = [ argReason ,  argReason ] } )
+  , ( "LVLD-11" , defMessageType { msgPattern = "ASSIGNED LEVEL $1", msgArgs = [ argReason ] } )
+  , ( "LVLD-12" , defMessageType { msgPattern = "PREFERRED LEVEL $1", msgArgs = [ argReason ] } )
+  , ( "LVLD-13" , defMessageType { msgPattern = "CLIMBING TO $1", msgArgs = [ argReason ] } )
+  , ( "LVLD-14" , defMessageType { msgPattern = "DESCENDING TO $1", msgArgs = [ argReason ] } )
+  , ( "LVLD-15" , defMessageType { msgPattern = "WE CAN ACCEPT $1 AT TIME $2", msgArgs = [ argReason ,  argReason ] } )
+  , ( "LVLD-16" , defMessageType { msgPattern = "WE CAN ACCEPT $1 AT $2", msgArgs = [ argReason ,  argReason ] } )
+  , ( "LVLD-17" , defMessageType { msgPattern = "WE CANNOT ACCEPT $1", msgArgs = [ argReason ] } )
+  , ( "LVLD-18" , defMessageType { msgPattern = "TOP OF DESCENT $1 TIME $2", msgArgs = [ argReason ,  argReason ] } )
+  , ( "ADVD-1" , defMessageType { msgPattern = "SQUAWKING $1", msgArgs = [ argReason ] } )
+  , ( "ADVD-2" , defMessageType { msgPattern = "TRAFFIC $1", msgArgs = [ argReason ] } )
+  , ( "SPDD-1" , defMessageType { msgPattern = "REQUEST $1", msgArgs = [ argReason ], msgReplyOpts = ReplyY } )
+  , ( "SPDD-2" , defMessageType { msgPattern = "WHEN CAN WE EXPECT $1", msgArgs = [ argReason ], msgReplyOpts = ReplyY } )
+  , ( "SPDD-3" , defMessageType { msgPattern = "$1 SPEED $2", msgArgs = [ argReason ,  argReason ] } )
+  , ( "SPDD-4" , defMessageType { msgPattern = "ASSIGNED SPEED $1", msgArgs = [ argReason ] } )
+  , ( "SPDD-5" , defMessageType { msgPattern = "WE CAN ACCEPT $1 AT TIME $2", msgArgs = [ argReason ,  argReason ] } )
+  , ( "SPDD-6" , defMessageType { msgPattern = "WE CANNOT ACCEPT $1", msgArgs = [ argReason ] } )
+  , ( "RSPD-1" , defMessageType { msgPattern = "WILCO", msgArgs = [] } )
+  , ( "RSPD-2" , defMessageType { msgPattern = "UNABLE", msgArgs = [] } )
+  , ( "RSPD-3" , defMessageType { msgPattern = "STANDBY", msgArgs = [] } )
+  , ( "RSPD-4" , defMessageType { msgPattern = "ROGER", msgArgs = [] } )
+  , ( "RSPD-5" , defMessageType { msgPattern = "AFFIRM", msgArgs = [] } )
+  , ( "RSPD-6" , defMessageType { msgPattern = "NEGATIVE", msgArgs = [] } )
+  , ( "COMD-1" , defMessageType { msgPattern = "REQUEST VOICE CONTACT $1", msgArgs = [ argReason ], msgReplyOpts = ReplyY } )
+  , ( "COMD-2" , defMessageType { msgPattern = "RELAY FROM $1", msgArgs = [ argReason ], msgReplyOpts = ReplyN } )
+  , ( "EMGD-1" , defMessageType { msgPattern = "PAN PAN PAN", msgArgs = [], msgReplyOpts = ReplyY } )
+  , ( "EMGD-2" , defMessageType { msgPattern = "MAYDAY MAYDAY MAYDAY", msgArgs = [], msgReplyOpts = ReplyY } )
+  , ( "EMGD-3" , defMessageType { msgPattern = "$1 ENDURANCE AND $2 POB", msgArgs = [ argReason ,  argReason ], msgReplyOpts = ReplyY } )
+  , ( "EMGD-4" , defMessageType { msgPattern = "CANCEL EMERGENCY", msgArgs = [], msgReplyOpts = ReplyY } )
+  , ( "SUPD-1" , defMessageType { msgPattern = "DUE TO $1", msgArgs = [ argReason ] } )
+  , ( "TXTD-1" , defMessageType { msgPattern = "$1", msgArgs = [ argReason ], msgReplyOpts = ReplyY } )
+  , ( "TXTD-2" , defMessageType { msgPattern = "$1", msgArgs = [ argReason ] } )
+  ]
 
--- -- -- messages from aircraft to ATC --
--- var downlink_messages = {
---     "SYSD-1": { txt: "ERROR $1", args: [ARG_TEXT], r_opts: [] },
---     "SYSD-2": { txt: "LOGICAL ACKNOWLEDGEMENT", args: [], r_opts: [] },
---     "SYSD-3": { txt: "NOT CURRENT DATA AUTHORITY", args: [], r_opts: [] },
---     "SYSD-4": { txt: "CURRENT DATA AUTHORITY", args: [], r_opts: [] },
---     "SYSD-5": { txt: "NOT AUTHORIZED NEXT DATA AUTHORITY $1 $2", args: [ARG_DATA_AUTHORITY, ARG_DATA_AUTHORITY], r_opts: [] },
---     "SYSD-6": { txt: "MESSAGE RECEIVED TOO LATE, RESEND MESSAGE OR CONTACT BY VOICE", args: [], r_opts: [] },
---     "SYSD-7": { txt: "AIRCRAFT CPDLC INHIBITED", args: [], r_opts: [] },
--- 
---     "RTED-1": { txt: "REQUEST DIRECT TO $1", args: [ARG_NAVPOS], r_opts: ["y"] },
---     "RTED-2": { txt: "REQUEST $1", args: [ARG_TEXT], r_opts: ["y"] },
---     "RTED-3": { txt: "REQUEST CLEARANCE $1", args: [ARG_ROUTE], r_opts: ["y"] },
---     "RTED-4": { txt: "REQUEST $1 CLEARANCE", args: [ARG_CLEARANCE_TYPE], r_opts: ["y"] },
---     "RTED-5": { txt: "POSITION REPORT $1", args: [ARG_POSREP], r_opts: ["y"] },
---     "RTED-6": { txt: "REQUEST HEADING $1", args: [ARG_DEGREES], r_opts: ["y"] },
---     "RTED-7": { txt: "REQUEST GROUND TRACK $1", args: [ARG_DEGREES], r_opts: ["y"] },
---     "RTED-8": { txt: "WHEN CAN WE EXPECT BACK ON ROUTE", args: [], r_opts: ["y"] },
---     "RTED-9": { txt: "ASSIGNED ROUTE $1", args: [ARG_ROUTE], r_opts: [] },
---     "RTED-10": { txt: "ETA $1 TIME $2", args: [ARG_NAVPOS, ARG_TIME], r_opts: [] },
--- 
---     "LATD-1": { txt: "REQUEST OFFSET $1 $2 OF ROUTE", args: [ARG_DISTANCE, ARG_DIRECTION], r_opts: ["y"] },
---     "LATD-2": { txt: "REQUEST WEATHER DEVIATION UP TO $1 OF ROUTE", args: [ARG_DISTANCE], r_opts: ["y"] },
---     "LATD-3": { txt: "CLEAR OF WEATHER", args: [], r_opts: [] },
---     "LATD-4": { txt: "BACK ON ROUTE", args: [], r_opts: [] },
---     "LATD-5": { txt: "DIVERTING TO $1 VIA $2", args: [ARG_NAVPOS, ARG_ROUTE], r_opts: ["y"] },
---     "LATD-6": { txt: "OFFSETTING $1 $2 OF ROUTE", args: [ARG_DISTANCE, ARG_DIRECTION], r_opts: ["y"] },
---     "LATD-7": { txt: "DEVIATING $1 $2 OF ROUTE", args: [ARG_DISTANCE, ARG_DIRECTION], r_opts: ["y"] },
---     "LATD-8": { txt: "PASSING $1", args: [ARG_NAVPOS], r_opts: [] },
--- 
---     "LVLD-1": { txt: "REQUEST LEVEL $1", args: [ARG_FL_ALT], r_opts: ["y"] },
---     "LVLD-2": { txt: "REQUEST CLIMB TO $1", args: [ARG_FL_ALT], r_opts: ["y"] },
---     "LVLD-3": { txt: "REQUEST DESCENT TO $1", args: [ARG_FL_ALT], r_opts: ["y"] },
---     "LVLD-4": { txt: "AT $1 REQUEST $2", args: [ARG_NAVPOS, ARG_FL_ALT], r_opts: ["y"] },
---     "LVLD-5": { txt: "AT TIME $1 REQUEST $2", args: [ARG_TIME, ARG_FL_ALT], r_opts: ["y"] },
---     "LVLD-6": { txt: "WHEN CAN WE EXPECT LOWER LEVEL", args: [], r_opts: ["y"] },
---     "LVLD-7": { txt: "WHEN CAN WE EXPECT HIGHER LEVEL", args: [], r_opts: ["y"] },
---     "LVLD-8": { txt: "LEAVING LEVEL $1", args: [ARG_FL_ALT], r_opts: [] },
---     "LVLD-9": { txt: "MAINTAINING LEVEL $1", args: [ARG_FL_ALT], r_opts: [] },
---     "LVLD-10": { txt: "REACHING BLOCK $1 TO $2", args: [ARG_FL_ALT, ARG_FL_ALT], r_opts: [] },
---     "LVLD-11": { txt: "ASSIGNED LEVEL $1", args: [ARG_FL_ALT], r_opts: [] },
---     "LVLD-12": { txt: "PREFERRED LEVEL $1", args: [ARG_FL_ALT], r_opts: [] },
---     "LVLD-13": { txt: "CLIMBING TO $1", args: [ARG_FL_ALT], r_opts: [] },
---     "LVLD-14": { txt: "DESCENDING TO $1", args: [ARG_FL_ALT], r_opts: [] },
---     "LVLD-15": { txt: "WE CAN ACCEPT $1 AT TIME $2", args: [ARG_FL_ALT, ARG_TIME], r_opts: [] },
---     "LVLD-16": { txt: "WE CAN ACCEPT $1 AT $2", args: [ARG_FL_ALT, ARG_NAVPOS], r_opts: [] },
---     "LVLD-17": { txt: "WE CANNOT ACCEPT $1", args: [ARG_FL_ALT], r_opts: [] },
---     "LVLD-18": { txt: "TOP OF DESCENT $1 TIME $2", args: [ARG_TEXT, ARG_TIME], r_opts: [] },
--- 
---     "ADVD-1": { txt: "SQUAWKING $1", args: [ARG_XPDR], r_opts: [] },
---     "ADVD-2": { txt: "TRAFFIC $1", args: [ARG_TEXT], r_opts: [] },
--- 
---     "SPDD-1": { txt: "REQUEST $1", args: [ARG_SPEED], r_opts: ["y"] },
---     "SPDD-2": { txt: "WHEN CAN WE EXPECT $1", args: [ARG_SPEED], r_opts: ["y"] },
---     "SPDD-3": { txt: "$1 SPEED $2", args: [ARG_SPEED_TYPE, ARG_SPEED], r_opts: [] },
---     "SPDD-4": { txt: "ASSIGNED SPEED $1", args: [ARG_SPEED], r_opts: [] },
---     "SPDD-5": { txt: "WE CAN ACCEPT $1 AT TIME $2", args: [ARG_SPEED, ARG_TIME], r_opts: [] },
---     "SPDD-6": { txt: "WE CANNOT ACCEPT $1", args: [ARG_SPEED], r_opts: [] },
--- 
---     "RSPD-1": { txt: "WILCO", args: [], r_opts: [] }, 
---     "RSPD-2": { txt: "UNABLE", args: [], r_opts: [] }, 
---     "RSPD-3": { txt: "STANDBY", args: [], r_opts: [] }, 
---     "RSPD-4": { txt: "ROGER", args: [], r_opts: [] }, 
---     "RSPD-5": { txt: "AFFIRM", args: [], r_opts: [] }, 
---     "RSPD-6": { txt: "NEGATIVE", args: [], r_opts: [] },    
---     
---     "COMD-1": { txt: "REQUEST VOICE CONTACT $1", args: [ARG_FREQ], r_opts: ["y"] }, 
---     "COMD-2": { txt: "RELAY FROM $1", args: [ARG_TEXT], r_opts: ["n"] }, 
--- 
---     "EMGD-1": { txt: "PAN PAN PAN", args: [], r_opts: ["y"] }, 
---     "EMGD-2": { txt: "MAYDAY MAYDAY MAYDAY", args: [], r_opts: ["y"] }, 
---     "EMGD-3": { txt: "$1 ENDURANCE AND $2 POB", args: [ARG_ENDURANCE, ARG_INTEGER], r_opts: ["y"] }, 
---     "EMGD-4": { txt: "CANCEL EMERGENCY", args: [], r_opts: ["y"] }, 
--- 
---     "SUPD-1": { txt: "DUE TO $1", args: [ARG_REASON], r_opts: [] },
--- 
---     "TXTD-1": { txt: "$1", args: [ARG_TEXT], r_opts: ["y"] },
---     "TXTD-2": { txt: "$1", args: [ARG_TEXT], r_opts: [] },
--- };
--- 
--- var formatMessagePart = func (type, args) {
---     if (args == nil) args = [];
---     var messageType =
---             contains(pseudo_messages, type) ? pseudo_messages[type] :
---             contains(uplink_messages, type) ? uplink_messages[type] :
---             contains(downlink_messages, type) ? downlink_messages[type] :
---             nil;
---     if (messageType == nil) {
---         return '[' ~ type ~ '] ' ~ string.join(' ', args);
---     }
---     var txt = messageType.txt;
---     for (var i = 0; i < size(args); i += 1) {
---         txt = string.replace(txt, '$' ~ (i + 1), args[i]);
---     }
---     # debug.dump("FORMAT", type, args, messageType, txt);
---     return txt;
--- };
--- 
--- var formatMessage = func (parts) {
---     var formattedParts = [];
---     foreach (var part; parts) {
---         append(formattedParts, formatMessagePart(part.type, part.args));
---     }
---     return string.join(' ', formattedParts);
--- };
--- 
--- var formatMessagePartFancy = func (type, args) {
---     if (args == nil) args = [];
---     var messageType =
---             contains(pseudo_messages, type) ? pseudo_messages[type] :
---             contains(uplink_messages, type) ? uplink_messages[type] :
---             contains(downlink_messages, type) ? downlink_messages[type] :
---             nil;
---     if (messageType == nil) {
---         logprint(4, 'INVALID MESSAGE', type, debug.string(args));
---         return [];
---     }
---     var words = split(' ', messageType.txt);
---     if (substr(type, 0, 3) == 'TXT') {
---         words = ['FREE', 'TEXT'] ~ words;
---     }
---     var line = [];
---     var elems = [];
---     foreach (var word; words) {
---         if (substr(word, 0, 1) == '$') {
---             if (size(line) > 0) {
---                 append(elems, { type: 0, value: string.join(' ', line) });
---                 line = [];
---             }
---             var i = int(substr(word, 1)) - 1;
---             var value = args[i];
---             if (value == nil or value == '') {
---                 value = '----------------';
---             }
---             append(elems, { type: messageType.args[i], value: value });
---         }
---         else {
---             append(line, word);
---         }
---     }
---     if (size(line) > 0) {
---         append(elems, { type: 0, value: string.join(' ', line) });
---         line = [];
---     }
---     return elems;
--- };
--- 
--- var formatMessageFancy = func (parts) {
---     var formattedParts = [];
---     foreach (var part; parts) {
---         append(formattedParts, formatMessagePartFancy(part.type, part.args));
---     }
---     return formattedParts;
--- };
--- 
--- var messageRA = func (type) {
---     var messageType =
---             contains(uplink_messages, type) ? uplink_messages[type] :
---             contains(downlink_messages, type) ? downlink_messages[type] :
---             nil;
---     if (messageType == nil) return '';
---     return string.uc(string.join('', messageType.r_opts));
--- };
--- 
--- var messageFromNode = func (node) {
---     var msg = node.getValues();
---     if (typeof(msg.parts) != 'vector') msg.parts = [msg.parts];
---     foreach (var part; msg.parts) {
---         if (typeof(part.args) != 'vector') part.args = [part.args];
---     }
---     return msg;
--- };
+smokeTestMessages :: [ByteString]
+smokeTestMessages = [
+    "AIR TRAFFIC SERVICE TERMINATED MONITOR UNICOM 122.800",
+    "AT @1257@ DESCEND TO AND MAINTAIN @FL290",
+    "ATC REQUEST STATUS . . FSM 1104 230123 EFHK @FIN7RA@ CDA RECEIVED @CLEARANCE CONFIRMED",
+    "CALL ATC ON FREQUENCY",
+    "CALL ME ON VOICE",
+    "CLEARANCE DELIVERED VIA TELEX",
+    "CLEARED TO DESTINATION  DEPART VIA ARA1X RWY 16 CLIMB FL150 SQK 1447",
+    "CLEARED TO DESTINATION  DEPART VIA PIMOS2H RWY 13 CLIMB FL90 SQK 2621 ATIS INFO D",
+    "CLEARED TO @GCLP@ VIA @OSPEN4C OSPEN FP ROUTE CLIMB INIT 5000FT SQUAWK 4024",
+    "CLEARED TO @IFR FLIGHT TO PARIS@ VIA @RTE 1 AS FILED",
+    "CLEARED TO @KORD@ VIA @HYLND CAM PAYGE Q822 FNT WYNDE2 EMMMA@ SQUAWK @2654@",
+    "CLIMB TO AND MAINTAIN @30000FT@ REPORT LEVEL @30000FT@",
+    "CLIMB TO AND MAINTAIN @32000FT@ REPORT LEVEL @32000FT@",
+    "CLIMB TO AND MAINTAIN @34000FT@ REPORT LEVEL @34000FT@",
+    "CLIMB TO AND MAINTAIN @36000FT@ REPORT LEVEL @36000FT@",
+    "CLIMB TO AND MAINTAIN @FL400@ REPORT LEVEL @FL400@",
+    "CLIMB TO @FL240",
+    "CLIMB TO @FL290@",
+    "CLIMB TO @FL300@",
+    "CLIMB TO @FL300@ | PROCEED DIRECT TO @VELIS@",
+    "CLIMB TO @FL310@ CLIMB AT @1000 FT|MIN MAXIMUM",
+    "CLIMB TO @FL320",
+    "CLIMB TO @FL330",
+    "CLIMB TO @FL330@ RESUME OWN NAVIGATION",
+    "CLIMB TO @FL340",
+    "CLIMB TO @FL350",
+    "CLIMB TO @FL350@",
+    "CLIMB TO @FL360",
+    "CLIMB TO @FL360@",
+    "CLIMB TO @FL370",
+    "CLIMB TO @FL380",
+    "CLIMB TO @FL390",
+    "CLRD TO @ZBAA@ OFF @01@ VIA @YIN1A@ SQUAWK @@ INITIAL ALT @@ NEXT FREQ @121.950@",
+    "CONTACT @121.375@_@COPENHAGEN CTL",
+    "CONTACT @121.375@_@COPENHAGEN CTR",
+    "CONTACT @127.725@_@EDGG_H1F_CTR",
+    "CONTACT @127.725@_@EDGG_HEF_CTR",
+    "CONTACT @128.100@_@PARIS CTL",
+    "CONTACT @128.625@_@SWEDEN CTL",
+    "CONTACT @129.425@_@LON_S_CTR",
+    "CONTACT @129.675@_@LGGG_CTR",
+    "CONTACT @130.000@_@ADRIA",
+    "CONTACT @131.225@_@SOFIA",
+    "CONTACT @131.900@_@NAT_FSS",
+    "CONTACT @132.850@_@LPPC_E_CTR",
+    "CONTACT @132.975@_@LECM_CTR",
+    "CONTACT @134.125@_@LTC_S_CTR",
+    "CONTACT @134.700@_@EDYY_J_CTR",
+    "CONTACT @134.700@_@MAASTRICHT CTR",
+    "CONTACT @136.955@ @@",
+    "CONTACT @EDGD 125.200@_@LANGEN CTR",
+    "CONTACT @EDGG 124.725@_@LANGEN CTR",
+    "CONTACT EDGG_CTR @136.955@",
+    "CONTACT @EDYC 133.950@_@MAASTRICHT CTR",
+    "CONTACT @EDYJ 134.700@_@MAASTRICHT CTR",
+    "CONTACT @EGPX 135.525@_@SCOTTISH CTL",
+    "CONTACT @EKDB 121.375@_@COPENHAGEN CTR",
+    "CONTACT @EUROCONTROL@ @135.125@",
+    "CONTACT @EUWN 135.125@_@EUROCONTROL CTL",
+    "CONTACT @GENEVA ARRIVAL@ @131.325@",
+    "CONTACT LECM_R1_CTR @135.700@",
+    "CONTACT @LFFF@ @128.100@",
+    "CONTACT LFMM_NW_CTR @123.805@",
+    "CONTACT @LFXX 128.100@_@PARIS CTL",
+    "CONTACT @LON@ @129.425@",
+    "CONTACT @LONC 127.100@_@LONDON CTL",
+    "CONTACT @LONDON CONTROL@ @127.100",
+    "CONTACT @LONN 133.700@_@LONDON CTL",
+    "CONTACT @LONS 129.425@_@LONDON CTL",
+    "CONTACT @LPZE 132.850@_@LISBOA CTL",
+    "CONTACT ME BY RADIO I HAVE BEEN TRYING TO CALL YOU",
+    "CONTACT @REIMS CONTROL@ @128.300@",
+    "CONTLR CHANGE RESEND REQ OR REVERT TO VOICE",
+    "CURRENT ATC UNIT@_@ADRA@_@ADRIA",
+    "CURRENT ATC UNIT@_@ADRW@_@ADRIA",
+    "CURRENT ATC UNIT@_@BIRD@_@REYKJAVIK OCA",
+    "CURRENT ATC UNIT@_@CBRA@_@BARCELONA CTL",
+    "CURRENT ATC UNIT@_@CMRM@_@MADRID CTL",
+    "CURRENT ATC UNIT@_@EDGD@_@LANGEN CTR",
+    "CURRENT ATC UNIT@_@EDGG@_@LANGEN CTR",
+    "CURRENT ATC UNIT@_@EDUW@_@RHEIN RADAR CTR",
+    "CURRENT ATC UNIT@_@EDYC@_@MAASTRICHT CTR",
+    "CURRENT ATC UNIT@_@EDYJ@_@MAASTRICHT CTR",
+    "CURRENT ATC UNIT@_@EFIN@_@HELSINKI CTL",
+    "CURRENT ATC UNIT@_@EGPX",
+    "CURRENT ATC UNIT@_@EGPX@_@SCOTTISH CONTROL",
+    "CURRENT ATC UNIT@_@EGPX@_@SCOTTISH CTL",
+    "CURRENT ATC UNIT@_@EISE@_@SHANNON CTL",
+    "CURRENT ATC UNIT@_@EKCH",
+    "CURRENT ATC UNIT@_@EKCH1",
+    "CURRENT ATC UNIT@_@EKCH2",
+    "CURRENT ATC UNIT@_@EKDB@_@COPENHAGEN CTL",
+    "CURRENT ATC UNIT@_@EPWW@_@WARSZAWA RADAR",
+    "CURRENT ATC UNIT@_@ESOS@_@SWEDEN CTL",
+    "CURRENT ATC UNIT@_@EUWN",
+    "CURRENT ATC UNIT@_@LGGG@_@ATHINAI",
+    "CURRENT ATC UNIT@_@LONC@_@LONDON CTL",
+    "CURRENT ATC UNIT@_@LONE@_@LONDON CTL",
+    "CURRENT ATC UNIT@_@LONM@_@LONDON CTL",
+    "CURRENT ATC UNIT@_@LONN@_@LONDON CTL",
+    "CURRENT ATC UNIT@_@LONS@_@LONDON CTL",
+    "CURRENT ATC UNIT@_@LOVE@_@WIEN",
+    "CURRENT ATC UNIT@_@LPZE@_@LISBOA CTL",
+    "CURRENT ATC UNIT@_@LPZW@_@LISBOA CTL",
+    "CURRENT ATC UNIT@_@LTBB@_@ANKARA CTR",
+    "DESCEND TO @12000 FT",
+    "DESCEND TO @3000 FT",
+    "DESCEND TO @4000 FT",
+    "DESCEND TO AND MAINTAIN @FL200@",
+    "DESCEND TO @FL080",
+    "DESCEND TO @FL100",
+    "DESCEND TO @FL110",
+    "DESCEND TO @FL110@",
+    "DESCEND TO @FL120",
+    "DESCEND TO @FL140",
+    "DESCEND TO @FL180",
+    "DESCEND TO @FL200",
+    "DESCEND TO @FL210",
+    "DESCEND TO @FL250",
+    "DESCEND TO @FL260",
+    "DESCEND TO @FL280",
+    "DESCEND TO @FL290",
+    "DESCEND TO @FL300",
+    "DESCEND TO @FL320",
+    "DESCEND TO @FL330",
+    "DESCEND TO @FL340",
+    "DESCEND TO @FL350",
+    "DESCEND TO REACH @FL190@ BY @DJL@",
+    "DESCENT FL100",
+    "DOWNLINK REJECTED - @USE VOICE",
+    "ERROR @REVERT TO VOICE PROCEDURES",
+    "FLIGHT PLAN NOT HELD",
+    "FLY HEADING @120",
+    "FREE SPEED",
+    "FSM 1133 230123 EDVK @AIB1010@ RCD REJECTED @TYPE MISMATCH @UPDATE RCD AND RESEND",
+    "FSM 1140 230123 EDVK @AIB1010@ RCD REJECTED @REVERT TO VOICE PROCEDURES",
+    "FSM 1337 230122 EDDK @WAT585@ RCD RECEIVED @REQUEST BEING PROCESSED @STANDBY",
+    "FSM 1648 230122 EDDM @DLH09W@ RCD RECEIVED @REQUEST BEING PROCESSED @STANDBY",
+    "HANDOVER @EDGD",
+    "HANDOVER @EGPX",
+    "INCREASE SPEED TO @250 KTS",
+    "INCREASE SPEED TO @M.74",
+    "LEAVING AIRSPACE MONITOR UNICOM 122.8",
+    "LOGOFF",
+    "LOGON ACCEPTED",
+    "MAINTAIN @210 KTS",
+    "MAINTAIN @FL100",
+    "MAINTAIN @FL280",
+    "MAINTAIN @M.72",
+    "MAINTAIN @M.75",
+    "MAINTAIN @M77@",
+    "MESSAGE NOT SUPPORTED BY THIS ATS UNIT",
+    "MONITOR @UNICOM@ @122.8@",
+    "MONITOR UNICOM 122.8",
+    "MONITOR UNICOM @122.800@",
+    "MONITOR UNICOM 122.800",
+    "MONITOR UNICOM 122.8 BYE",
+    "MONITOR UNICOM 122.8. NICE DAY",
+    "NEXT DATA AUTHORITY @EKCH2@",
+    "OCEAN REQUEST ENTRY POINT: BALIX AT:1431 REQ: M.78 FL360  BALIX 61N014W EXIT",
+    "PLS CONTACT ME BY QQ",
+    "POSITION AM059 AT 1638 FL 85M EST RINIS AT 1656 NEXT IDESI",
+    "PROCEED DIRECT TO @AHVEC@",
+    "PROCEED DIRECT TO @HELEN@ DESCEND TO @FL200",
+    "REDUCE SPEED TO @M.77",
+    "REQUEST 10000",
+    "REQUEST AGAIN WITH NEXT UNIT",
+    "REQUEST CLB TO 34000FT",
+    "REQUEST CRUISE CLIMB TO FL380",
+    "REQUEST DEPARTURE CLEARANCE",
+    "REQUEST DIRECT TO@EVRIN",
+    "REQUEST DIRECT TO HMM",
+    "REQUEST DIR TO TOPTU",
+    "REQUEST FL110",
+    "REQUEST FL320 DUE TO WEATHER",
+    "REQUEST FL360 DUE TO AIRCRAFT PERFORMANCE",
+    "REQUEST KBOS-KORD KBOS.HYLND.CAM.PAYGE.Q822.FNT.WYNDE2.EMMMA.KORD",
+    "REQUEST KMCI-KATL KMCI.KATL",
+    "REQUEST LOGON",
+    "REQUEST URB7A",
+    "REQUEST VOICE CONTACT ON 126.425",
+    "RESUME NORMAL SPEED",
+    "REVERT TO VOICE",
+    "ROGER",
+    "SERVICE TERMINATED",
+    "SERVICE TERMINATED FREQ CHG APPROVED",
+    "SERVICE TERMINATED. MONITOR UNICOM 122.800",
+    "SQUAWK @1000",
+    "SQUAWK IDENT",
+    "STANDBY",
+    "STBY",
+    "STDBY",
+    "THANKS FOR USING MAASTRICHT CPDLC",
+    "THANK YOU FOR USING CPDLC. BEST REGARDS FROM PLVACC.",
+    "TIMEDOUT RESEND REQUEST OR REVERT TO VOICE",
+    "UNABLE",
+    "UNABLE AT EGAA",
+    "UNABLE DUE AIRSPACE",
+    "UNABLE DUE TO AIRSPACE",
+    "UNABLE DUE TRAFFIC",
+    "UNABLE REVERT TO VOICE",
+    "WHEN CAN WE EXPECT CLIMB TO CRZ ALT 32000",
+    "WHEN CAN WE EXPECT HIGHER ALT",
+    "WHEN CAN WE EXPECT LOWER ALT",
+    "WHEN CAN WE EXPECT LOWER ALT AT PILOT DISCRETION",
+    "WHEN READY DESCEND TO REACH FL250 AT RIMET",
+    "WILCO",
+    "YOU ARE LEAVING MY AIRSPACE NO FURTHER ATC MONITOR UNICOM 122.800 BYE BYE"
+  ]
