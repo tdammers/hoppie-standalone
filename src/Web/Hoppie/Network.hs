@@ -4,14 +4,7 @@ module Web.Hoppie.Network
 where
 
 import Data.ByteString (ByteString)
-import qualified Data.ByteString.Char8 as Char8
-import qualified Data.ByteString as BS
 import qualified Network.HTTP.Simple as HTTP
-import Data.Word
-import qualified Text.Megaparsec as P
-import qualified Text.Megaparsec.Byte as P
-import qualified Text.Megaparsec.Byte.Lexer as P (decimal)
-import Data.Void (Void)
 
 data Config =
   Config
@@ -68,33 +61,3 @@ sendRequest config rq = do
         <$> HTTP.parseRequest (url config)
   rp <- HTTP.httpBS httpRq
   return $ HTTP.getResponseBody rp
-
-data PollResponse =
-  PollResponse
-    { pollMessages :: [Message]
-    }
-
-data Message =
-  Message
-    { messageID :: Word
-    , messageFrom :: ByteString
-    , messageType :: RequestType
-    , messageText :: ByteString
-    }
-
-messageP :: P.Parsec Void ByteString Message
-messageP =
-  Message
-    <$> P.decimal
-    <* P.space1
-    <*> barewordP
-    <* P.space1
-    <*> requestTypeP
-    <* P.space
-    <*> openBraceP
-    <*> messageTextP
-    <*> closeBraceP
-    <* P.space
-
-barewordP :: P.Parsec Void ByteString ByteString
-barewordP = P.manyTill P.any P.space

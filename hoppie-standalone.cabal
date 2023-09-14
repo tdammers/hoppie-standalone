@@ -20,6 +20,8 @@ library
     import:           warnings
     exposed-modules: Web.Hoppie
                    , Web.Hoppie.Network
+                   , Web.Hoppie.Response
+                   , Web.Hoppie.Telex
     -- other-modules:
     -- other-extensions:
     build-depends: base ^>=4.17.0.0
