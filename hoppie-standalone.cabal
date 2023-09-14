@@ -24,7 +24,6 @@ library
                    , Web.Hoppie.Telex
                    , Web.Hoppie.CPDLC.Message
                    , Web.Hoppie.CPDLC.MessageTypes
-                   , Data.Trie
     -- other-modules:
     -- other-extensions:
     build-depends: base ^>=4.17.0.0
