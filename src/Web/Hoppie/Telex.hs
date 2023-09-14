@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 module Web.Hoppie.Telex
 where
 
@@ -7,20 +8,20 @@ import qualified Data.ByteString as BS
 import Data.Char
 
 telexFilter :: ByteString -> ByteString
-telexFilter = BS.map toTelex
+telexFilter = mconcat . map toTelex . BS.unpack
 
-toTelex :: Word8 -> Word8
+toTelex :: Word8 -> ByteString
 toTelex c
   | isSpace8 c
-  = ord8 ' '
+  = BS.singleton $ ord8 ' '
   | c >= ord8 'a' && c <= ord8 'z'
-  = c + ord8 'A' - ord8 'a'
+  = BS.singleton $ c + ord8 'A' - ord8 'a'
   | c >= ord8 'A' && c <= ord8 'Z'
-  = c
+  = BS.singleton $ c
   | c `elem` telexFigures
-  = c
+  = BS.singleton $ c
   | otherwise
-  = ord8 '?'
+  = ""
 
 telexFigures :: [Word8]
 telexFigures = map ord8 "1234567890-'()+/:=?,.;\"'$#"
