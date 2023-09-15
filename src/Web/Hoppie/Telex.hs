@@ -24,7 +24,7 @@ toTelex c
   = ""
 
 telexFigures :: [Word8]
-telexFigures = map ord8 "1234567890-'()+/:=?,.;\"'$#"
+telexFigures = map ord8 "1234567890-'()+/:=?,.;\"'$#_"
 
 chr8 :: Word8 -> Char
 chr8 = chr . fromIntegral
@@ -34,3 +34,7 @@ ord8 = fromIntegral . ord
 
 isSpace8 :: Word8 -> Bool
 isSpace8 = isSpace . chr8
+
+isNum8 :: Word8 -> Bool
+isNum8 c =
+  c >= ord8 '0' && c <= ord8 '9'
