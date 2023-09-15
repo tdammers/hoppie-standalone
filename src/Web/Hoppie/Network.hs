@@ -8,9 +8,10 @@ import qualified Network.HTTP.Simple as HTTP
 
 data Config =
   Config
-    { logon ::ByteString
-    , url :: String
+    { configLogon ::ByteString
+    , configURL :: String
     }
+    deriving (Show)
 
 defURL :: String
 defURL = "http://www.hoppie.nl/acars/system/connect.html"
@@ -52,12 +53,12 @@ sendRequest :: Config -> Request -> IO ByteString
 sendRequest config rq = do
   httpRq <-
         HTTP.setRequestQueryString
-          [ ("logon", Just (logon config))
+          [ ("logon", Just (configLogon config))
           , ("from", Just (requestFrom rq))
           , ("to", Just (requestTo rq))
           , ("type", Just (requestTypeBS $ requestType rq))
           , ("packet", Just (requestPacket rq))
           ]
-        <$> HTTP.parseRequest (url config)
+        <$> HTTP.parseRequest (configURL config)
   rp <- HTTP.httpBS httpRq
   return $ HTTP.getResponseBody rp

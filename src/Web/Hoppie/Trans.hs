@@ -8,6 +8,8 @@ module Web.Hoppie.Trans
 , ReplyOpts (..)
 , CPDLCPart (..)
 , WithMeta (..)
+, Network.defURL
+, Network.Config (..)
 )
 where
 
@@ -71,6 +73,7 @@ data WithMeta status a =
     , metaTimestamp :: !UTCTime
     , payload :: !a
     }
+    deriving (Show)
 
 data HoppieEnv =
   HoppieEnv

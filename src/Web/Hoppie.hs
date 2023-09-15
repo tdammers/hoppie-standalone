@@ -29,7 +29,7 @@ sendTestPeekRequest l = do
             , requestType = Peek
             , requestPacket = ""
             }
-  rp <- sendRequest Config { url = defURL, logon = BS8.pack l } rq
+  rp <- sendRequest Config { configURL = defURL, configLogon = BS8.pack l } rq
   BS.putStr rp
   putStrLn ""
   return rp
@@ -42,7 +42,7 @@ sendTestInfoRequest l = do
             , requestType = Inforeq
             , requestPacket = "VATATIS EDDL"
             }
-  sendRequest Config { url = defURL, logon = BS8.pack l } rq
+  sendRequest Config { configURL = defURL, configLogon = BS8.pack l } rq
 
 runNetworkTest :: String -> IO ()
 runNetworkTest l = do
@@ -102,6 +102,6 @@ runNetworkTest l = do
   -- runSmokeTests
 
 runTest :: String -> IO ()
-runTest l = runHoppieT "KLM123" (Config { logon = BS8.pack l, url = defURL }) $ do
+runTest l = runHoppieT "KLM123" (Config { configLogon = BS8.pack l, configURL = defURL }) $ do
   return ()
 
