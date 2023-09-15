@@ -1,9 +1,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Web.Hoppie.Response
-( PollResponse (..)
+( Response (..)
 , Message (..)
-, parsePollResponse
+, parseResponse
 , TypedMessage (..)
 , TypedPayload (..)
 , toTypedMessage
@@ -12,6 +12,7 @@ module Web.Hoppie.Response
 where
 
 import Web.Hoppie.Telex
+import Web.Hoppie.CPDLC.Message
 
 import Control.Applicative
 import Control.Monad
@@ -24,9 +25,9 @@ import Data.Void (Void)
 import Data.Char
 import Data.Bifunctor
 
-parsePollResponse :: ByteString -> Either String PollResponse
-parsePollResponse src =
-  first P.errorBundlePretty $ P.parse (pollResponseP <* P.eof) "input" src
+parseResponse :: ByteString -> Either String Response
+parseResponse src =
+  first P.errorBundlePretty $ P.parse (responseP <* P.eof) "input" src
 
 data MessageType
   = Progress
@@ -42,11 +43,10 @@ data MessageType
 messageTypeCode :: MessageType -> ByteString
 messageTypeCode = BS8.pack . map toLower . show
 
-newtype PollResponse =
-  PollResponse
-    { pollMessages :: [Message]
-    }
-    deriving (Show)
+data Response
+  = Response ![Message]
+  | ErrorResponse !ByteString
+  deriving (Show)
 
 data TypedMessage =
   TypedMessage
@@ -59,11 +59,14 @@ data TypedMessage =
 data TypedPayload
   = TelexPayload !ByteString
   | InfoPayload !ByteString
+  | CPDLCPayload !CPDLCMessage
   | UnsupportedPayload !MessageType !ByteString
+  | ErrorPayload !(Maybe MessageType) !ByteString !String
   deriving (Show)
 
-toTypedResponse :: PollResponse -> [TypedMessage]
-toTypedResponse (PollResponse msgs) = map toTypedMessage msgs
+toTypedResponse :: Response -> [TypedMessage]
+toTypedResponse (Response msgs) = map toTypedMessage msgs
+toTypedResponse (ErrorResponse err) = [TypedMessage Nothing "server" (ErrorPayload Nothing err "Server reported an error")]
 
 toTypedMessage :: Message -> TypedMessage
 toTypedMessage msg =
@@ -75,6 +78,10 @@ toTypedMessage msg =
     payload = case messageType msg of
                 Telex -> TelexPayload $ telexFilter (messagePayload msg)
                 Info -> InfoPayload $ telexFilter (messagePayload msg)
+                Cpdlc -> either
+                            (ErrorPayload (Just $ messageType msg) (messagePayload msg))
+                            CPDLCPayload
+                            (parseCPDLCMessage (messagePayload msg))
                 ty -> UnsupportedPayload ty (messagePayload msg)
 
 data Message =
@@ -86,11 +93,26 @@ data Message =
     }
     deriving (Show)
 
-pollResponseP :: P.Parsec Void ByteString PollResponse
-pollResponseP = do
+responseP :: P.Parsec Void ByteString Response
+responseP =
+  P.choice
+    [ P.try errorResponseP
+    , P.try okResponseP
+    ]
+
+errorResponseP :: P.Parsec Void ByteString Response
+errorResponseP = do
+  void $ P.string "error"
+  P.space1
+  bracedP $
+    ErrorResponse <$> messagePayloadP
+    
+
+okResponseP :: P.Parsec Void ByteString Response
+okResponseP = do
   void $ P.string "ok"
   P.space1
-  PollResponse <$>
+  Response <$>
     P.many messageP
 
 messageP :: P.Parsec Void ByteString Message
