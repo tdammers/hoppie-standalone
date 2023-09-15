@@ -8,11 +8,13 @@ module Web.Hoppie.Response
 , TypedPayload (..)
 , toTypedMessage
 , toTypedResponse
+, toUntypedRequest
 )
 where
 
 import Web.Hoppie.Telex
 import Web.Hoppie.CPDLC.Message
+import qualified Web.Hoppie.Network as Network
 
 import Control.Applicative
 import Control.Monad
@@ -83,6 +85,28 @@ toTypedMessage msg =
                             CPDLCPayload
                             (parseCPDLCMessage (messagePayload msg))
                 ty -> UnsupportedPayload ty (messagePayload msg)
+
+toUntypedRequest :: ByteString -> TypedMessage -> Network.Request
+toUntypedRequest sender tm =
+  Network.Request
+    { Network.requestFrom = sender
+    , Network.requestTo = typedMessageCallsign tm
+    , Network.requestType = ty
+    , Network.requestPacket = payload
+    }
+  where
+    (ty, payload) =
+      case typedMessagePayload tm of
+        CPDLCPayload cpdlc ->
+          (Network.Cpdlc, renderCPDLCMessage cpdlc)
+        TelexPayload body ->
+          (Network.Telex, body)
+        InfoPayload body ->
+          (Network.Inforeq, body)
+        UnsupportedPayload {} ->
+          error "Unsupported payload type"
+        ErrorPayload {} ->
+          error "Error payload"
 
 data Message =
   Message
