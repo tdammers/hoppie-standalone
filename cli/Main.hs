@@ -45,11 +45,10 @@ handleUplink = liftIO . print
 hoppieMain :: TChan MCDUEvent -> (TypedMessage -> Hoppie ()) -> Hoppie ()
 hoppieMain _eventChan _sendMessage = do
   let paint = do
-        forM_ [0..7] $ \y -> do
-          mcduPrintC
-              (screenW `div` 2) y
-              (fromIntegral $ y + 8)
-              (BS8.pack $ printf "COLOR %2i" (y + 8))
+        mcduPrintC (screenW `div` 2) 0 green "MENU"
+        mcduPrintLskL 1 "DLK"
+        mcduPrintLskR 1 "ATC"
+    
   let screenBuf = runMCDUDraw paint emptyMCDUScreenBuffer
   liftIO $ drawMCDU screenBuf
   -- forever $ do

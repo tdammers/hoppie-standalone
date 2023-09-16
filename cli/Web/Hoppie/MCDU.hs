@@ -1,5 +1,6 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module Web.Hoppie.MCDU
 where
@@ -93,6 +94,31 @@ mcduPrintC :: Int -> Int -> Word8 -> ByteString -> MCDUDraw s ()
 mcduPrintC x y fg bs = do
   let x' = x - (BS.length bs `div` 2)
   mcduPrint x' y fg bs
+
+mcduPrintLskL :: Int -> ByteString -> MCDUDraw s ()
+mcduPrintLskL n msg =
+  mcduPrint 0 (mcduLskSY' n) green ("< " <> msg)
+
+mcduPrintLskR :: Int -> ByteString -> MCDUDraw s ()
+mcduPrintLskR n msg =
+  mcduPrintR screenW (mcduLskSY' n) green (msg <> " >")
+
+mcduLskSY :: Int -> Maybe Int
+mcduLskSY n = (subtract 1) <$> mcduLskY n
+
+mcduLskSY' :: Int -> Int
+mcduLskSY' = (subtract 1) . mcduLskY'
+
+mcduLskY :: Int -> Maybe Int
+mcduLskY 1 = Just 3
+mcduLskY 2 = Just 5
+mcduLskY 3 = Just 7
+mcduLskY 4 = Just 9
+mcduLskY 5 = Just 11
+mcduLskY _ = Nothing
+
+mcduLskY' :: Int -> Int
+mcduLskY' = fromMaybe (error "Invalid LSK") . mcduLskY
 
 redrawMCDU :: MCDUScreenBuffer -> IO ()
 redrawMCDU buf = do
