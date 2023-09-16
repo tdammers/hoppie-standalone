@@ -2,6 +2,7 @@
 module Main where
 
 import Web.Hoppie.System
+import Web.Hoppie.Telex
 import Web.Hoppie.TUI.Output
 import Web.Hoppie.TUI.Input
 import Web.Hoppie.TUI.MCDU
@@ -15,11 +16,6 @@ import System.Environment
 import Control.Monad.IO.Class
 import Data.Word
 
-data MCDUEvent
-  = InputCommandEvent InputCommand
-  | UplinkEvent (WithMeta UplinkStatus TypedMessage)
-  deriving (Show)
-
 main :: IO ()
 main = do
   inputChan <- newTChanIO
@@ -32,26 +28,21 @@ main = do
     `race_`
     runInputPusher inputChan eventChan
     `race_`
-    runSystem (BS8.pack callsign) config handleUplink (hoppieMain eventChan)
+    runSystem (BS8.pack callsign) config (handleUplink eventChan) (hoppieMain eventChan)
 
 runInputPusher :: TChan Word8 -> TChan MCDUEvent -> IO ()
 runInputPusher inputChan eventChan = forever $ do
   readCommand inputChan >>= atomically . writeTChan eventChan . InputCommandEvent
 
-handleUplink :: WithMeta UplinkStatus TypedMessage -> Hoppie ()
-handleUplink = liftIO . print
+handleUplink :: TChan MCDUEvent -> WithMeta UplinkStatus TypedMessage -> Hoppie ()
+handleUplink eventChan = do
+  liftIO . atomically . writeTChan eventChan . UplinkEvent
 
 hoppieMain :: TChan MCDUEvent -> (TypedMessage -> Hoppie ()) -> Hoppie ()
-hoppieMain _eventChan _sendMessage = do
-  let paint = do
-        mcduPrintC (screenW `div` 2) 0 green "MENU"
-        mcduPrintLskL 1 "DLK"
-        mcduPrintLskR 1 "ATC"
-    
-  let screenBuf = runMCDUDraw paint emptyMCDUScreenBuffer
-  liftIO $ drawMCDU screenBuf
-  -- forever $ do
-  --   liftIO $ putStr "SERVER> "
-  --   liftIO $ hFlush stdout
-  --   msg <- liftIO $ BS8.pack <$> getLine
-  --   sendMessage (TypedMessage Nothing "SERVER" $ InfoPayload msg)
+hoppieMain eventChan sendMessage = do
+  runMCDU sendMessage $ do
+    loadView mainMenuView
+    flushAll
+    forever $ do
+      ev <- liftIO . atomically $ readTChan eventChan
+      handleMCDUEvent ev

@@ -48,13 +48,17 @@ executable hoppie-mcdu
                  , Web.Hoppie.TUI.Output
                  , Web.Hoppie.TUI.TerminalSize
                  , Web.Hoppie.TUI.MCDU
+                 , Web.Hoppie.TUI.MCDU.Draw
+                 , Web.Hoppie.TUI.MCDU.Monad
     -- other-extensions:
     build-depends: base ^>=4.17.0.0
                  , hoppie-standalone
                  , async >=2.2.4 && <2.3
                  , bytestring >=0.11.0 && <0.13
+                 , containers >=0.6.7 && <0.7
                  , mtl >=2.3.1 && <2.4
                  , stm >=2.5 && <2.6
+                 , time >=1.12 && <1.14
                  , unix >=2.8 && <2.9
                  , vector >=0.13 && <0.14
 
