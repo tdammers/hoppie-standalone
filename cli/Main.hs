@@ -4,7 +4,7 @@ module Main where
 import Web.Hoppie.System
 import Web.Hoppie.TUI.Output
 import Web.Hoppie.TUI.Input
-import Web.Hoppie.MCDU
+import Web.Hoppie.TUI.MCDU
 
 import Control.Concurrent.STM
 import Control.Concurrent.Async (race_)
@@ -14,7 +14,6 @@ import qualified Data.ByteString.Char8 as BS8
 import System.Environment
 import Control.Monad.IO.Class
 import Data.Word
-import Text.Printf
 
 data MCDUEvent
   = InputCommandEvent InputCommand

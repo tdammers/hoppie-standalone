@@ -2,7 +2,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module Web.Hoppie.MCDU
+module Web.Hoppie.TUI.MCDU
 where
 
 import Web.Hoppie.TUI.Output

@@ -47,7 +47,7 @@ executable hoppie-mcdu
     other-modules: Web.Hoppie.TUI.Input
                  , Web.Hoppie.TUI.Output
                  , Web.Hoppie.TUI.TerminalSize
-                 , Web.Hoppie.MCDU
+                 , Web.Hoppie.TUI.MCDU
     -- other-extensions:
     build-depends: base ^>=4.17.0.0
                  , hoppie-standalone
