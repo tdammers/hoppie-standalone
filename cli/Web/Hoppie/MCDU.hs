@@ -27,6 +27,27 @@ screenW = 24
 screenH :: Int
 screenH = 12
 
+red :: Word8
+red = 9
+
+green :: Word8
+green = 10
+
+yellow :: Word8
+yellow = 11
+
+blue :: Word8
+blue = 12
+
+magenta :: Word8
+magenta = 13
+
+cyan :: Word8
+cyan = 14
+
+white :: Word8
+white = 15
+
 data MCDUCell =
   MCDUCell
     { cellFG :: Word8
@@ -61,7 +82,7 @@ mcduPutChar x y fg c =
 mcduPrint :: Int -> Int -> Word8 -> ByteString -> MCDUDraw s ()
 mcduPrint x y fg bs =
   unless (y < 0 || y >= screenH) $ do
-    zipWithM_ (\x c -> mcduPutChar x y fg c) [x, x+1 ..] (BS.unpack bs)
+    zipWithM_ (\xx c -> mcduPutChar xx y fg c) [x, x+1 ..] (BS.unpack bs)
 
 mcduPrintR :: Int -> Int -> Word8 -> ByteString -> MCDUDraw s ()
 mcduPrintR x y fg bs = do
@@ -80,7 +101,7 @@ redrawMCDU buf = do
     forM_ [0..screenW-1] $ \x -> do
       let cell = fromMaybe defCell $ mcduScreenLines buf !? (x + screenW * y)
       printCell (x + 7) (y + 1) cell
-  moveTo 0 (screenH + 3)
+  moveTo 0 (screenH + 6)
   hFlush stdout
   where
     printCell x y cell = do
@@ -88,11 +109,34 @@ redrawMCDU buf = do
       setFG (cellFG cell)
       BS8.putStr . BS.singleton . cellChar $ cell
 
+drawKey :: Int -> Int -> String -> String -> IO ()
+drawKey x y key label = do
+  moveTo x y
+  setBG 7
+  setFG 8
+  putStr key
+
+  moveTo x (y+1)
+  setBG 0
+  setFG 15
+  putStr (centerTo 6 label)
+
+centerTo :: Int -> String -> String
+centerTo w xs
+  | length xs == w
+  = xs
+  | length xs < w
+  = let l = replicate ((w - length xs) `div` 2) ' '
+        r = replicate (w - length xs - length l) ' '
+    in l ++ xs ++ r
+  | otherwise
+  = take w xs
+
 drawMCDU :: MCDUScreenBuffer -> IO ()
 drawMCDU screenBuf = do
   clearScreen
 
-  fillRect 7 0 0 (screenW + 13) (screenH + 1)
+  fillRect 7 0 0 (screenW + 13) (screenH + 5)
 
   fillRect 0 7 1 (screenW + 6) (screenH + 0)
 
@@ -146,6 +190,10 @@ drawMCDU screenBuf = do
   moveTo (screenW + 7) 11
   putStr "-"
 
-  moveTo 0 (screenH + 3)
+  drawKey 1 (screenH + 1) "PgUp" "PREV"
+  drawKey 1 (screenH + 3) "PgDn" "NEXT"
+  drawKey 8 (screenH + 1) "Esc" "MENU"
+  drawKey 15 (screenH + 1) "F11" "DLK"
+  drawKey 22 (screenH + 1) "F12" "ATC"
 
   redrawMCDU screenBuf

@@ -12,7 +12,6 @@ import Control.Monad
 import Data.Maybe
 import qualified Data.ByteString.Char8 as BS8
 import System.Environment
-import System.IO
 import Control.Monad.IO.Class
 import Data.Word
 import Text.Printf
