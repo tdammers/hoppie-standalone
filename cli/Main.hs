@@ -28,7 +28,12 @@ main = do
     `race_`
     runInputPusher inputChan eventChan
     `race_`
-    runSystem (BS8.pack callsign) config (handleUplink eventChan) (hoppieMain eventChan)
+    runSystem
+      (BS8.pack callsign)
+      config
+      (handleUplink eventChan)
+      (handleNetworkStatus eventChan)
+      (hoppieMain eventChan)
 
 runInputPusher :: TChan Word8 -> TChan MCDUEvent -> IO ()
 runInputPusher inputChan eventChan = forever $ do
@@ -37,6 +42,10 @@ runInputPusher inputChan eventChan = forever $ do
 handleUplink :: TChan MCDUEvent -> WithMeta UplinkStatus TypedMessage -> Hoppie ()
 handleUplink eventChan = do
   liftIO . atomically . writeTChan eventChan . UplinkEvent
+
+handleNetworkStatus :: TChan MCDUEvent -> NetworkStatus -> Hoppie ()
+handleNetworkStatus eventChan = do
+  liftIO . atomically . writeTChan eventChan . NetworkStatusEvent
 
 hoppieMain :: TChan MCDUEvent -> (TypedMessage -> Hoppie ()) -> Hoppie ()
 hoppieMain eventChan sendMessage = do

@@ -36,6 +36,7 @@ import Control.Monad.Trans.Maybe
 data MCDUEvent
   = InputCommandEvent InputCommand
   | UplinkEvent (WithMeta UplinkStatus TypedMessage)
+  | NetworkStatusEvent NetworkStatus
   deriving (Show)
 
 data ScratchVal
@@ -61,6 +62,7 @@ data MCDUState =
     , mcduClearanceStand :: Maybe ByteString
     , mcduClearanceAtis :: Maybe Word8
     , mcduSendMessage :: TypedMessage -> Hoppie ()
+    , mcduNetworkStatus :: NetworkStatus
     }
 
 defMCDUState :: MCDUState
@@ -81,6 +83,7 @@ defMCDUState =
     Nothing
     Nothing
     (const $ return ())
+    NetworkOK
 
 data MCDUView =
   MCDUView
@@ -517,7 +520,7 @@ dlkMessageView uid =
                   ErrorPayload _ response err ->
                     ( red
                     , "ERROR"
-                    , (BS8.pack . map toUpper . show) err <> " " <> response
+                    , BS8.pack err <> "\n" <> response
                     )
                 msgLines' = lineWrap screenW msgText
                 statusLine = 
@@ -721,6 +724,18 @@ handleMCDUEvent ev = do
     moveTo 0 (screenH + 6)
     putStrLn $ centerTo (screenW + 12) (show ev)
   case ev of
+    NetworkStatusEvent ns' -> do
+      ns <- gets mcduNetworkStatus
+      when (ns /= ns') $ do
+        case ns' of
+          NetworkError err -> do
+            lift . void $ makeErrorResponse Nothing (BS8.pack err) "NETWORK ERROR"
+            scratchWarn "NETWORK ERROR"
+          _ ->
+            return ()
+      modify $ \s -> s { mcduNetworkStatus = ns' }
+      
+
     UplinkEvent mtm -> do
       case typedMessagePayload (payload mtm) of
         CPDLCPayload {} -> do

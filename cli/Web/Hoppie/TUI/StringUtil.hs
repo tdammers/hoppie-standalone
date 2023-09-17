@@ -20,6 +20,10 @@ class WordSplit a where
   wordSplit :: a -> [a]
   wordJoin :: [a] -> a
 
+class LineSplit a where
+  lineSplit :: a -> [a]
+  lineJoin :: [a] -> a
+
 class Substring a where
   takeSubstr :: Int -> a -> a
   dropSubstr :: Int -> a -> a
@@ -30,6 +34,10 @@ instance StrLength ByteString where
 instance WordSplit ByteString where
   wordSplit = BS8.words
   wordJoin = BS8.unwords
+
+instance LineSplit ByteString where
+  lineSplit = BS8.lines
+  lineJoin = BS8.unlines
 
 instance Substring ByteString where
   takeSubstr = BS.take
@@ -42,15 +50,19 @@ instance WordSplit [Char] where
   wordSplit = words
   wordJoin = unwords
 
+instance LineSplit [Char] where
+  lineSplit = lines
+  lineJoin = unlines
+
 instance Substring [a] where
   takeSubstr = take
   dropSubstr = drop
 
 lineWrap :: forall a.
-            (StrLength a, WordSplit a, Substring a)
+            (StrLength a, WordSplit a, LineSplit a, Substring a)
          => Int -> a -> [a]
 lineWrap w src =
-  map wordJoin$ go (wordSplit src)
+  concat $ map (map wordJoin . go . wordSplit) $ lineSplit src
   where
     go :: [a] -> [[a]]
     go [] = []

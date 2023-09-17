@@ -44,6 +44,7 @@ makeHoppieEnv callsign config =
     <*> newMVar mempty
     <*> newMVar mempty
     <*> newMVar 0
+    <*> newMVar NetworkOK
 
 runHoppieTWith :: HoppieEnv -> HoppieT m a -> m a
 runHoppieTWith = flip runReaderT
@@ -111,7 +112,18 @@ data HoppieEnv =
     , hoppieCPDLCUplinks :: !(MVar (Map Word Word))
     , hoppieCPDLCDownlinks :: !(MVar (Map Word Word))
     , hoppieNextUID :: !(MVar Word)
+    , hoppieNetworkStatus :: !(MVar NetworkStatus)
     }
+
+data NetworkStatus
+  = NetworkOK
+  | NetworkError String
+  deriving (Show, Eq)
+
+setNetworkStatus :: MonadIO m => NetworkStatus -> HoppieT m ()
+setNetworkStatus s = do
+  statusVar <- asks hoppieNetworkStatus
+  liftIO $ modifyMVar_ statusVar (const . return $ s)
 
 getAllMessages :: MonadIO m => HoppieT m [HoppieMessage]
 getAllMessages = do
@@ -197,9 +209,15 @@ send tm = do
   config <- asks hoppieNetworkConfig
   sender <- asks hoppieCallsign
   saveDownlink rq
-  rawResponse <- liftIO $ Network.sendRequest config (toUntypedRequest sender tm)
-  setDownlinkStatus uid SentDownlink
-  processResponse (Just uid) rawResponse
+  rawResponse <- liftIO $ Network.sendRequestEither config (toUntypedRequest sender tm)
+  case rawResponse of
+    Left err -> do
+      setDownlinkStatus uid ErrorDownlink
+      setNetworkStatus $ NetworkError err
+      return []
+    Right response -> do
+      setDownlinkStatus uid SentDownlink
+      processResponse (Just uid) response
 
 makeErrorResponse :: MonadIO m => Maybe MessageType -> ByteString -> String -> HoppieT m [Word]
 makeErrorResponse tyM body err = do
@@ -234,11 +252,16 @@ poll :: MonadIO m => HoppieT m [Word]
 poll = do
   config <- asks hoppieNetworkConfig
   receiver <- asks hoppieCallsign
-  rawResponse <- liftIO $ Network.sendRequest config
+  rawResponse <- liftIO $ Network.sendRequestEither config
                     Network.Request
                       { Network.requestFrom = receiver
                       , Network.requestTo = "SERVER"
                       , Network.requestType = Network.Poll
                       , Network.requestPacket = ""
                       }
-  processResponse Nothing rawResponse
+  case rawResponse of
+    Left err -> do
+      setNetworkStatus $ NetworkError err
+      return []
+    Right response -> do
+      processResponse Nothing response
