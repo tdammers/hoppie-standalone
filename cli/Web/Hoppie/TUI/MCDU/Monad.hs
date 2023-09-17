@@ -29,6 +29,9 @@ import Data.Char
 import Text.Printf
 import Data.Time
 import Data.Maybe
+import Control.Monad.Trans.Maybe
+
+{-# ANN module ("HLint: ignore redundant <$>" :: String) #-}
 
 data MCDUEvent
   = InputCommandEvent InputCommand
@@ -52,6 +55,11 @@ data MCDUState =
     , mcduReferenceAirport :: Maybe ByteString
     , mcduTelexRecipient :: Maybe ByteString
     , mcduTelexBody :: Maybe ByteString
+    , mcduClearanceType :: Maybe ByteString
+    , mcduClearanceFacility :: Maybe ByteString
+    , mcduClearanceDestination :: Maybe ByteString
+    , mcduClearanceStand :: Maybe ByteString
+    , mcduClearanceAtis :: Maybe Word8
     , mcduSendMessage :: TypedMessage -> Hoppie ()
     }
 
@@ -62,6 +70,11 @@ defMCDUState =
     Nothing
     emptyMCDUScreenBuffer
     defView
+    Nothing
+    Nothing
+    Nothing
+    Nothing
+    Nothing
     Nothing
     Nothing
     Nothing
@@ -123,16 +136,21 @@ dlkMenuView = defView
   { mcduViewTitle = "DLK MENU"
   , mcduViewLSKBindings = Map.fromList
       [ (0, ("MSG LOG", loadView dlkMessageLogView))
-      , (1, ("TELEX", loadView $ telexSendView False))
+      , (1, ("TELEX", clearTelexBody >> loadView (telexSendView False)))
       , (4, ("MAIN MENU", loadView mainMenuView))
       , (5, ("ATIS", loadView $ infoMenuView "ATIS" "VATATIS"))
       , (6, ("METAR", loadView $ infoMenuView "METAR" "METAR"))
       , (7, ("TAF", loadView $ infoMenuView "TAF" "TAF"))
-      , (8, ("DLC", return ()))
+      , (8, ("DCL", loadView (clearanceSendView False)))
       ]
   , mcduViewOnLoad = do
       loadUplinkLSK 9
   }
+
+clearTelexBody :: MCDU ()
+clearTelexBody =
+  modify $ \s -> s
+    { mcduTelexBody = Nothing }
 
 telexSendView :: Bool -> MCDUView
 telexSendView sent = defView
@@ -141,6 +159,7 @@ telexSendView sent = defView
       [ (4, ("DLK MENU", loadView dlkMenuView))
       ]
   , mcduViewOnLoad = do
+      callsign <- asks hoppieCallsign
       unless sent $ do
         addLskBinding 8 "SEND" $ do
           sendSuccess <- sendTelex
@@ -149,13 +168,13 @@ telexSendView sent = defView
 
       addLskBinding 5 "" $ do
         scratchInteract 
-          (\val -> modify $ \s -> s { mcduTelexRecipient = val })
+          (\val -> True <$ (modify $ \s -> s { mcduTelexRecipient = val }))
           (gets mcduTelexRecipient)
         reloadView
 
       addLskBinding 1 "" $ do
         scratchInteract 
-          (\val -> modify $ \s -> s { mcduTelexBody = val })
+          (\val -> True <$ (modify $ \s -> s { mcduTelexBody = val }))
           (gets mcduTelexBody)
         reloadView
 
@@ -164,10 +183,84 @@ telexSendView sent = defView
       let bodyLines = lineWrap (screenW - 2) bodyStr
       modifyView $ \v -> v {
         mcduViewDraw = do
+          mcduPrint 1 2 white callsign
           mcduPrintR (screenW - 1) 2 green recipientStr
           zipWithM_
             (\n l -> mcduPrint 1 (n + 4) green l)
             [0..4] bodyLines
+      }
+      loadUplinkLSK 9
+  }
+
+clearanceSendView :: Bool -> MCDUView
+clearanceSendView sent = defView
+  { mcduViewTitle = "DATALINK CLEARANCE"
+  , mcduViewLSKBindings = Map.fromList
+      [ (4, ("DLK MENU", loadView dlkMenuView))
+      ]
+  , mcduViewOnLoad = do
+      callsign <- asks hoppieCallsign
+      unless sent $ do
+        addLskBinding 8 "SEND" $ do
+          sendSuccess <- sendClearanceRequest
+          when sendSuccess $ do
+            loadView (clearanceSendView True)
+
+      addLskBinding 1 "" $ do
+        scratchInteract 
+          (\val -> True <$ (modify $ \s -> s { mcduClearanceType = val }))
+          (gets mcduClearanceType)
+        reloadView
+
+      addLskBinding 2 "" $ do
+        scratchInteract 
+          (\val -> True <$ (modify $ \s -> s { mcduClearanceStand = val }))
+          (gets mcduClearanceStand)
+        reloadView
+
+      addLskBinding 3 "" $ do
+        scratchInteract 
+          (\case
+              Nothing -> True <$ (modify $ \s -> s { mcduClearanceAtis = Nothing })
+              Just val -> case BS.unpack val of
+                [letter] -> True <$ (modify $ \s -> s { mcduClearanceAtis = Just letter })
+                _ -> return False
+          )
+          (fmap BS.singleton <$> gets mcduClearanceAtis)
+        reloadView
+
+      addLskBinding 5 "" $ do
+        scratchInteract 
+          (\val -> True <$ (modify $ \s -> s { mcduClearanceFacility = val }))
+          (gets mcduClearanceFacility)
+        reloadView
+
+      addLskBinding 6 "" $ do
+        scratchInteract 
+          (\val -> True <$ (modify $ \s -> s { mcduClearanceDestination = val }))
+          (gets mcduClearanceDestination)
+        reloadView
+
+      typeStr <- fromMaybe "------" <$> gets mcduClearanceType
+      facilityStr <- fromMaybe "----" <$> gets mcduClearanceFacility
+      destinationStr <- fromMaybe "----" <$> gets mcduClearanceDestination
+      atisStr <- maybe "-" BS.singleton <$> gets mcduClearanceAtis
+      standStr <- fromMaybe "-" <$> gets mcduClearanceStand
+
+      modifyView $ \v -> v {
+        mcduViewDraw = do
+          mcduPrint 1 1 white "CALLSIGN"
+          mcduPrint 1 2 green callsign
+          mcduPrint 1 3 white "TYPE"
+          mcduPrint 1 4 green typeStr
+          mcduPrint 1 5 white "GATE"
+          mcduPrint 1 6 green standStr
+          mcduPrint 1 7 white "ATIS"
+          mcduPrint 1 8 green atisStr
+          mcduPrintR (screenW - 1) 1 white "FACILITY"
+          mcduPrintR (screenW - 1) 2 green facilityStr
+          mcduPrintR (screenW - 1) 3 white "DESTINATION"
+          mcduPrintR (screenW - 1) 4 green destinationStr
       }
       loadUplinkLSK 9
   }
@@ -248,13 +341,48 @@ sendTelex = do
         TypedMessage Nothing to (TelexPayload body)
       return True
 
+sendClearanceRequest :: MCDU Bool
+sendClearanceRequest = do
+  toBodyMay <- runMaybeT $ do
+    callsign <- asks hoppieCallsign
+    clearanceType <- MaybeT $ gets mcduClearanceType
+    clearanceFacility <- MaybeT $ gets mcduClearanceFacility
+    clearanceDestination <- MaybeT $ gets mcduClearanceDestination
+    clearanceStand <- MaybeT $ gets mcduClearanceStand
+    clearanceAtis <- MaybeT $ gets mcduClearanceAtis
+    let body =
+          mconcat
+            [ "REQUEST PREDEP CLEARANCE "
+            , callsign
+            , " "
+            , clearanceType
+            , " TO "
+            , clearanceDestination
+            , " AT "
+            , clearanceFacility
+            , " STAND "
+            , clearanceStand
+            , " ATIS "
+            , BS.singleton clearanceAtis
+            ]
+    return (clearanceFacility, body)
+  case toBodyMay of
+    Nothing -> do
+      scratchWarn "INVALID"
+      return False
+    Just (to, body) -> do
+      sendMessage <- gets mcduSendMessage
+      lift $ sendMessage $
+        TypedMessage Nothing to (TelexPayload body)
+      return True
+
 setReferenceAirport :: MCDU ()
 setReferenceAirport =
   scratchInteract
-    (\val -> modify $ \s -> s { mcduReferenceAirport = val })
+    (\val -> True <$ modify (\s -> s { mcduReferenceAirport = val }))
     (gets mcduReferenceAirport)
 
-scratchInteract :: (Maybe ByteString -> MCDU ()) -> MCDU (Maybe ByteString) -> MCDU ()
+scratchInteract :: (Maybe ByteString -> MCDU Bool) -> MCDU (Maybe ByteString) -> MCDU ()
 scratchInteract setVal getVal = do
   scratchGet >>= \case
     ScratchEmpty -> do
@@ -262,11 +390,9 @@ scratchInteract setVal getVal = do
       forM_ valMay scratchSetStr
       redrawScratch
     ScratchStr scratchStr -> do
-      setVal (Just scratchStr)
-      scratchClear
+      setVal (Just scratchStr) >>= flip when scratchClear
     ScratchDel -> do
-      setVal Nothing
-      scratchClear
+      setVal Nothing >>= flip when scratchClear
 
 dlkMessageLogView :: MCDUView
 dlkMessageLogView = defView
@@ -275,7 +401,7 @@ dlkMessageLogView = defView
       [ (4, ("DLK MENU", loadView dlkMenuView))
       ]
   , mcduViewOnLoad = do
-      myCallsign <- lift $ asks hoppieCallsign
+      myCallsign <- asks hoppieCallsign
       messages <- reverse <$> lift getAllMessages
       curPage <- gets (mcduViewPage . mcduView)
       let curMessages = take 4 . drop (4 * curPage) $ messages
@@ -354,7 +480,7 @@ dlkMessageView uid =
               , mcduViewPage = 0
               }
           Just message -> do
-            myCallsign <- lift $ asks hoppieCallsign
+            myCallsign <- asks hoppieCallsign
             unread <- gets mcduUnreadDLK
             when (Just (messageUID message) == unread) $ do
               modify $ \s -> s { mcduUnreadDLK = Nothing }

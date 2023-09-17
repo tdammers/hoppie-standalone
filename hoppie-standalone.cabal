@@ -60,6 +60,7 @@ executable hoppie-mcdu
                  , mtl >=2.3.1 && <2.4
                  , stm >=2.5 && <2.6
                  , time >=1.12 && <1.14
+                 , transformers >=0.6 && <0.7
                  , unix >=2.8 && <2.9
                  , vector >=0.13 && <0.14
 
