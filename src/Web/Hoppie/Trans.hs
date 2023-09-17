@@ -22,7 +22,6 @@ import Control.Applicative
 import Control.Monad
 import Control.Monad.Reader
 import Data.ByteString (ByteString)
-import qualified Data.ByteString.Char8 as BS8
 import Data.Time (UTCTime)
 import Data.Time.Clock (getCurrentTime)
 import Data.Map (Map)
@@ -137,23 +136,23 @@ getAllMessages = do
 
 saveUplink :: MonadIO m => WithMeta UplinkStatus TypedMessage -> HoppieT m ()
 saveUplink tsm = do
-  uplinksVar <- asks hoppieUplinks
-  liftIO $ modifyMVar_ uplinksVar $ return . Map.insert (metaUID tsm) tsm
   case typedMessagePayload (payload tsm) of
     CPDLCPayload cpdlc -> do
       cpdlcUplinksVar <- asks hoppieCPDLCUplinks
       liftIO $ modifyMVar_ cpdlcUplinksVar $ return . Map.insert (cpdlcMIN cpdlc) (metaUID tsm)
-    _ -> return ()
+    _ -> do
+      uplinksVar <- asks hoppieUplinks
+      liftIO $ modifyMVar_ uplinksVar $ return . Map.insert (metaUID tsm) tsm
 
 saveDownlink :: MonadIO m => WithMeta DownlinkStatus TypedMessage -> HoppieT m ()
 saveDownlink tsm = do
-  downlinksVar <- asks hoppieDownlinks
-  liftIO $ modifyMVar_ downlinksVar $ return . Map.insert (metaUID tsm) tsm
   case typedMessagePayload (payload tsm) of
     CPDLCPayload cpdlc -> do
       cpdlcDownlinksVar <- asks hoppieCPDLCDownlinks
       liftIO $ modifyMVar_ cpdlcDownlinksVar $ return . Map.insert (cpdlcMIN cpdlc) (metaUID tsm)
-    _ -> return ()
+    _ -> do
+      downlinksVar <- asks hoppieDownlinks
+      liftIO $ modifyMVar_ downlinksVar $ return . Map.insert (metaUID tsm) tsm
 
 setUplinkStatus :: MonadIO m => Word -> UplinkStatus -> HoppieT m ()
 setUplinkStatus uid status = do
@@ -196,6 +195,12 @@ getCPDLCDownlink cMIN = do
   case uidMay of
     Nothing -> return Nothing
     Just uid -> getDownlink uid
+
+getCPDLCMessage :: MonadIO m => Word -> HoppieT m (Maybe HoppieMessage)
+getCPDLCMessage uid = do
+  dl <- getCPDLCDownlink uid
+  ul <- getCPDLCUplink uid
+  return $ (UplinkMessage <$> ul) <|> (DownlinkMessage <$> dl)
 
 makeUID :: MonadIO m => HoppieT m Word
 makeUID = do

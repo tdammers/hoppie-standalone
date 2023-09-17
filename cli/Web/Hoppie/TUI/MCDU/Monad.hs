@@ -130,9 +130,23 @@ testView :: MCDUView
 testView = defView
   { mcduViewTitle = "TEST"
   , mcduViewDraw = do
-      let lns = lineWrap screenW "THIS ATIS IS NOT AVAILABLE"
-      zipWithM_ (\n l -> mcduPrint 0 (n + 1) cyan l) [0,1..] lns
+      let lns = lineWrap screenW $
+                  ColoredBS
+                    [ ColoredBSFragment white "THIS ATIS "
+                    , ColoredBSFragment red " IS NOT AVAILABLE"
+                    ]
+      zipWithM_ (\n cbs -> mcduPrintColored 0 (n + 1) cbs) [0,1..] lns
   }
+
+mcduPrintColored :: Int -> Int -> ColoredBS -> MCDUDraw s ()
+mcduPrintColored _ _ (ColoredBS []) =
+  return ()
+mcduPrintColored x y (ColoredBS (f:fs)) = do
+  mcduPrint x y (cbfColor f) bs
+  mcduPrintColored (x + BS.length bs) y (ColoredBS fs)
+  where
+    bs = cbfData f
+  
 
 dlkMenuView :: MCDUView
 dlkMenuView = defView

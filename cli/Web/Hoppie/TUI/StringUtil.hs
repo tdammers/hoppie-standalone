@@ -12,6 +12,9 @@ where
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BS8
+import Data.Word
+import Data.String
+import Data.List
 
 class StrLength a where
   strLength :: a -> Int
@@ -93,4 +96,85 @@ breakWrappedLineCont w (x:xs)
   = let (x', xs') = breakWrappedLineCont (w - strLength x - 1) xs
     in (x : x', xs')
 
+
+newtype ColoredBS =
+  ColoredBS { coloredBSFragments :: [ColoredBSFragment] }
+  deriving newtype (Eq, Ord, Monoid, Semigroup)
+
+data ColoredBSFragment =
+  ColoredBSFragment
+    { cbfColor :: !Word8
+    , cbfData :: !ByteString
+    }
+    deriving (Eq, Ord)
+
+instance IsString ColoredBS where
+  fromString str = ColoredBS [ColoredBSFragment 15 $ BS8.pack str]
+
+coloredTake :: Int -> ColoredBS -> ColoredBS
+coloredTake _ (ColoredBS [])
+  = ColoredBS []
+coloredTake 0 (ColoredBS {})
+  = ColoredBS []
+coloredTake n (ColoredBS (x:xs))
+  | BS.length (cbfData x) > n
+  = ColoredBS [ColoredBSFragment (cbfColor x) (BS.take n (cbfData x))]
+  | otherwise
+  = let ColoredBS xs' = coloredTake (n - BS.length (cbfData x)) (ColoredBS xs)
+    in ColoredBS (x : xs')
+
+coloredDrop :: Int -> ColoredBS -> ColoredBS
+coloredDrop _ (ColoredBS [])
+  = ColoredBS []
+coloredDrop 0 x
+  = x
+coloredDrop n (ColoredBS (x:xs))
+  | BS.length (cbfData x) <= n
+  = ColoredBS [ColoredBSFragment (cbfColor x) (BS.drop n (cbfData x))]
+  | otherwise
+  = coloredDrop (n - BS.length (cbfData x)) (ColoredBS xs)
+
+coloredLineSplit :: ColoredBS -> [ColoredBS]
+coloredLineSplit (ColoredBS []) = []
+coloredLineSplit (ColoredBS (x:xs)) =
+  let xSplit = map (ColoredBSFragment (cbfColor x)) (lineSplit $ cbfData x)
+      xsSplit = coloredLineSplit $ ColoredBS xs
+      lefts = map (ColoredBS . (:[])) $ init xSplit
+      leftLast = ColoredBS $ takeEnd 1 xSplit
+  in case xsSplit of
+    [] -> lefts ++ [leftLast]
+    (x':xs') -> lefts ++ [leftLast <> x'] ++ xs'
+
+coloredWordSplit :: ColoredBS -> [ColoredBS]
+coloredWordSplit (ColoredBS []) = []
+coloredWordSplit (ColoredBS (x:xs)) =
+  let xSplit = map (ColoredBSFragment (cbfColor x)) (wordSplit $ cbfData x)
+      xsSplit = coloredWordSplit $ ColoredBS xs
+      lefts = map (ColoredBS . (:[])) $ init xSplit
+      leftLast = ColoredBS $ takeEnd 1 xSplit
+  in case xsSplit of
+    [] -> lefts ++ [leftLast]
+    (x':xs') -> lefts ++ [leftLast <> x'] ++ xs'
+
+takeEnd :: Int -> [a] -> [a]
+takeEnd n xs = drop (length xs - n) xs
+
+coloredLength :: ColoredBS -> Int
+coloredLength (ColoredBS fragments) =
+  sum $ map (BS.length . cbfData) fragments
+
+instance StrLength ColoredBS where
+  strLength = coloredLength
+
+instance WordSplit ColoredBS where
+  wordSplit = coloredWordSplit
+  wordJoin = mconcat . intersperse (ColoredBS [ColoredBSFragment 15 " "])
+
+instance LineSplit ColoredBS where
+  lineSplit = coloredLineSplit
+  lineJoin = mconcat . intersperse (ColoredBS [ColoredBSFragment 15 "\n"])
+
+instance Substring ColoredBS where
+  takeSubstr = coloredTake
+  dropSubstr = coloredDrop
 
