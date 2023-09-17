@@ -18,14 +18,17 @@ import Web.Hoppie.CPDLC.Message (CPDLCMessage (..), CPDLCPart (..))
 import Web.Hoppie.CPDLC.MessageTypes (ReplyOpts (..))
 import Web.Hoppie.Response
 
+import Control.Applicative
 import Control.Monad
 import Control.Monad.Reader
-import Data.ByteString.Char8 as BS8
+import Data.ByteString (ByteString)
+import qualified Data.ByteString.Char8 as BS8
 import Data.Time (UTCTime)
 import Data.Time.Clock (getCurrentTime)
 import Data.Map (Map)
 import qualified Data.Map.Strict as Map
 import Control.Concurrent.MVar
+import Data.List
 
 type HoppieT = ReaderT HoppieEnv
 
@@ -75,6 +78,30 @@ data WithMeta status a =
     }
     deriving (Show)
 
+data HoppieMessage
+  = UplinkMessage (WithMeta UplinkStatus TypedMessage)
+  | DownlinkMessage (WithMeta DownlinkStatus TypedMessage)
+
+messageUID :: HoppieMessage -> Word
+messageUID (UplinkMessage m) = metaUID m
+messageUID (DownlinkMessage m) = metaUID m
+
+messageTimestamp :: HoppieMessage -> UTCTime
+messageTimestamp (UplinkMessage m) = metaTimestamp m
+messageTimestamp (DownlinkMessage m) = metaTimestamp m
+
+messageFrom :: ByteString -> HoppieMessage -> ByteString
+messageFrom myCallsign (DownlinkMessage _) = myCallsign
+messageFrom _ (UplinkMessage m) = typedMessageCallsign . payload $ m
+
+messageTo :: ByteString -> HoppieMessage -> ByteString
+messageTo myCallsign (UplinkMessage _) = myCallsign
+messageTo _ (DownlinkMessage m) = typedMessageCallsign . payload $ m
+
+messagePayload :: HoppieMessage -> TypedMessage
+messagePayload (UplinkMessage m) = payload m
+messagePayload (DownlinkMessage m) = payload m
+
 data HoppieEnv =
   HoppieEnv
     { hoppieNetworkConfig :: !Network.Config
@@ -85,6 +112,14 @@ data HoppieEnv =
     , hoppieCPDLCDownlinks :: !(MVar (Map Word Word))
     , hoppieNextUID :: !(MVar Word)
     }
+
+getAllMessages :: MonadIO m => HoppieT m [HoppieMessage]
+getAllMessages = do
+  uplinks <- fmap (map UplinkMessage . Map.elems) $
+              asks hoppieUplinks >>= liftIO . readMVar
+  downlinks <- fmap (map DownlinkMessage . Map.elems) $
+              asks hoppieDownlinks >>= liftIO . readMVar
+  return $ sortOn messageUID $ uplinks ++ downlinks
 
 saveUplink :: MonadIO m => WithMeta UplinkStatus TypedMessage -> HoppieT m ()
 saveUplink tsm = do
@@ -125,6 +160,12 @@ getDownlink :: MonadIO m => Word -> HoppieT m (Maybe (WithMeta DownlinkStatus Ty
 getDownlink uid = do
   downlinkVar <- asks hoppieDownlinks
   Map.lookup uid <$> liftIO (readMVar downlinkVar)
+
+getMessage :: MonadIO m => Word -> HoppieT m (Maybe HoppieMessage)
+getMessage uid = do
+  dl <- getDownlink uid
+  ul <- getUplink uid
+  return $ (UplinkMessage <$> ul) <|> (DownlinkMessage <$> dl)
 
 getCPDLCUplink :: MonadIO m => Word -> HoppieT m (Maybe (WithMeta UplinkStatus TypedMessage))
 getCPDLCUplink cMIN = do

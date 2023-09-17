@@ -103,15 +103,15 @@ mcduPrintC x y fg bs = do
 
 mcduPrintLskL :: Int -> ByteString -> MCDUDraw s ()
 mcduPrintLskL n "" =
-  mcduPrint 0 (mcduLskY n) green "<"
+  mcduPrint 0 (mcduLskY n) white "<"
 mcduPrintLskL n msg =
-  mcduPrint 0 (mcduLskY n) green ("<" <> msg)
+  mcduPrint 0 (mcduLskY n) white ("<" <> msg)
 
 mcduPrintLskR :: Int -> ByteString -> MCDUDraw s ()
 mcduPrintLskR n "" =
-  mcduPrintR screenW (mcduLskY n) green ">"
+  mcduPrintR screenW (mcduLskY n) white ">"
 mcduPrintLskR n msg =
-  mcduPrintR screenW (mcduLskY n) green (msg <> ">")
+  mcduPrintR screenW (mcduLskY n) white (msg <> ">")
 
 mcduLskSY :: Int -> Int
 mcduLskSY = screenY . mcduLskY

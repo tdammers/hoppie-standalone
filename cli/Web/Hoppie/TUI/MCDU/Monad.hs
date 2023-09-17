@@ -2,6 +2,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TupleSections #-}
 
 module Web.Hoppie.TUI.MCDU.Monad
 where
@@ -29,6 +30,7 @@ import Data.Char
 import Text.Printf
 import Data.Time
 import Data.Maybe
+import Data.List
 
 data MCDUEvent
   = InputCommandEvent InputCommand
@@ -91,8 +93,8 @@ defGoToPage :: Int -> MCDU ()
 defGoToPage n = do
   view <- gets mcduView
   let n' = max 0 . min (mcduViewNumPages view - 1) $ n
-  let view' = view { mcduViewPage = n' }
-  loadView view'
+  modifyView $ \v -> v { mcduViewPage = n' }
+  reloadView
 
 mainMenuView :: MCDUView
 mainMenuView = defView
@@ -118,32 +120,34 @@ dlkMenuView = defView
   , mcduViewLSKBindings = Map.fromList
       [ (0, ("MSG LOG", loadView dlkMessageLogView))
       , (4, ("MAIN MENU", loadView mainMenuView))
-      , (5, ("ATIS", loadView atisMenuView))
-      , (6, ("METAR", return ()))
-      , (7, ("TAF", return ()))
+      , (5, ("ATIS", loadView $ infoMenuView "ATIS" "VATATIS"))
+      , (6, ("METAR", loadView $ infoMenuView "METAR" "METAR"))
+      , (7, ("TAF", loadView $ infoMenuView "TAF" "TAF"))
       , (8, ("DLC", return ()))
       ]
   }
 
-atisMenuView :: MCDUView
-atisMenuView = defView
-  { mcduViewTitle = "ATIS"
+infoMenuView :: ByteString -> ByteString -> MCDUView
+infoMenuView title infotype = defView
+  { mcduViewTitle = title
   , mcduViewLSKBindings = Map.fromList
-      [ (9, ("SEND", sendAtisRequest >> reloadView ))
+      [ (9, ("SEND", sendInfoRequest infotype>> reloadView ))
       , (4, ("DLK MENU", loadView dlkMenuView))
       ]
   , mcduViewOnLoad = do
-      refAirport <- gets mcduReferenceAirport
-      modifyView $ \v -> v {
-        mcduViewLSKBindings =
+      refAirport <- gets (fromMaybe "----" . mcduReferenceAirport)
+      modifyView $ \v -> v
+        { mcduViewLSKBindings =
           Map.insert
-            5 (fromMaybe "----" refAirport, setReferenceAirport >> reloadView)
+            5 ("", setReferenceAirport >> reloadView)
             (mcduViewLSKBindings v)
-      }
+        , mcduViewDraw = do
+            mcduPrintR (screenW - 1) (mcduLskY 5) green refAirport
+        }
   }
 
-sendAtisRequest :: MCDU ()
-sendAtisRequest = do
+sendInfoRequest :: ByteString -> MCDU ()
+sendInfoRequest infotype = do
   sendMessage <- gets mcduSendMessage
   gets mcduReferenceAirport >>= \case
     Nothing -> scratchWarn "INVALID"
@@ -152,7 +156,7 @@ sendAtisRequest = do
         TypedMessage
           Nothing
           "SERVER"
-          (InfoPayload $ "VATATIS " <> airport)
+          (InfoPayload $ infotype <> " " <> airport)
 
 setReferenceAirport :: MCDU ()
 setReferenceAirport =
@@ -181,44 +185,55 @@ dlkMessageLogView = defView
       [ (4, ("DLK MENU", loadView dlkMenuView))
       ]
   , mcduViewOnLoad = do
-      uplinks <- fmap Map.toDescList $ lift (asks hoppieUplinks) >>= liftIO . readMVar
+      myCallsign <- lift $ asks hoppieCallsign
+      messages <- reverse <$> lift getAllMessages
       curPage <- gets (mcduViewPage . mcduView)
-      let curUplinks = take 4 . drop (4 * curPage) $ uplinks
-          numPages = (length uplinks + 3) `div` 4
+      let curMessages = take 4 . drop (4 * curPage) $ messages
+          numPages = (length messages + 3) `div` 4
       modifyView $ \s -> s
         { mcduViewNumPages = numPages
         , mcduViewLSKBindings =
-            mcduViewLSKBindings s <>
-              Map.fromList
-                ( zip
-                  [0..3]
-                  [ ("", loadView $ dlkMessageView (metaUID . snd $ uplink) ) | uplink <- curUplinks ]
-                )
+            Map.fromList
+              [ (4, ("DLK MENU", loadView dlkMenuView))
+              ]
+            <>
+            Map.fromList
+              ( zip
+                [0..3]
+                [ ("", loadView $ dlkMessageView (messageUID message) ) | message <- curMessages ]
+              )
         , mcduViewDraw = do
-            zipWithM_ (\n (_, uplink) -> do
-                let daySecond = floor . utctDayTime $ metaTimestamp uplink
+            zipWithM_ (\n message -> do
+                let daySecond = floor . utctDayTime $ messageTimestamp message
                     (hours, minutes) = (daySecond `quot` 60 :: Int) `quotRem` 60
-                    callsign = typedMessageCallsign $ payload uplink
+                    from = messageFrom myCallsign message
+                    to = messageFrom myCallsign message
 
-                let (color, msgTyStr) = case typedMessagePayload $ payload uplink of
-                      InfoPayload {} -> (green, "INFO" :: String)
-                      TelexPayload {} -> (green, "TELEX")
-                      CPDLCPayload {} -> (green, "CPDLC")
+                let (color', callsign) = case message of
+                      UplinkMessage {} -> (green, from)
+                      DownlinkMessage {} -> (cyan, to)
+
+                let (color, msgTyStr) = case typedMessagePayload $ messagePayload message of
+                      InfoPayload {} -> (color', "INFO" :: String)
+                      TelexPayload {} -> (color', "TELEX")
+                      CPDLCPayload {} -> (color', "CPDLC")
                       UnsupportedPayload {} -> (yellow, "UNSUPPORTED")
                       ErrorPayload {} -> (red, "ERROR")
 
                 mcduPrint 1 (n * 2 + 1) color $
                   BS8.pack $
-                  printf "%02i%02iZ %6s %s"
+                  printf "%02i%02iZ %-6s %s"
                     hours minutes
                     (map toUpper $ BS8.unpack callsign)
                     msgTyStr
-                case typedMessagePayload $ payload uplink of
+                case typedMessagePayload $ messagePayload message of
                   InfoPayload msg ->
-                    mcduPrint 1 (n * 2 + 2) green msg
+                    mcduPrint 1 (n * 2 + 2) white msg
+                  TelexPayload msg ->
+                    mcduPrint 1 (n * 2 + 2) white msg
                   _ ->
                     mcduPrint 1 (n * 2 + 2) red "-----"
-              ) [0,1..] curUplinks
+              ) [0,1..] curMessages
         }
   }
 
@@ -230,8 +245,8 @@ dlkMessageView uid =
         [ (4, ("DLK LOG", loadView dlkMessageLogView))
         ]
     , mcduViewOnLoad = do
-        uplinkMay <- lift $ getUplink uid
-        case uplinkMay of
+        messageMay <- lift $ getMessage uid
+        case messageMay of
           Nothing ->
             modifyView $ \v -> v
               { mcduViewDraw = do
@@ -240,14 +255,21 @@ dlkMessageView uid =
               , mcduViewNumPages = 1
               , mcduViewPage = 0
               }
-          Just uplink -> do
-            let daySecond = floor . utctDayTime $ metaTimestamp uplink
+          Just message -> do
+            myCallsign <- lift $ asks hoppieCallsign
+            let daySecond = floor . utctDayTime $ messageTimestamp message
                 (hours, minutes) = (daySecond `quot` 60 :: Int) `quotRem` 60
-                callsign = typedMessageCallsign $ payload uplink
-            let (color, msgTyStr, msgText) = case typedMessagePayload $ payload uplink of
-                  InfoPayload msg -> (green, "INFO" :: String, msg)
-                  TelexPayload msg -> (green, "TELEX", msg)
-                  CPDLCPayload cpdlc -> (green, "CPDLC", renderCPDLCMessage cpdlc)
+                from = messageFrom myCallsign message
+                to = messageFrom myCallsign message
+
+            let (color', callsign) = case message of
+                  UplinkMessage {} -> (green, from)
+                  DownlinkMessage {} -> (cyan, to)
+
+            let (color, msgTyStr, msgText) = case typedMessagePayload $ messagePayload message of
+                  InfoPayload msg -> (color', "INFO" :: String, msg)
+                  TelexPayload msg -> (color', "TELEX", msg)
+                  CPDLCPayload cpdlc -> (color', "CPDLC", renderCPDLCMessage cpdlc)
                   UnsupportedPayload ty msg ->
                     ( yellow
                     , "UNSUPPORTED"
@@ -261,18 +283,18 @@ dlkMessageView uid =
                 msgLines' = lineWrap screenW msgText
                 statusLine = 
                   BS8.pack $
-                  printf "%02i%02iZ %6s %s"
+                  printf "%02i%02iZ %-6s %s"
                     hours minutes
                     (map toUpper $ BS8.unpack callsign)
                     msgTyStr
-                msgLines = statusLine : msgLines'
+                msgLines = (color, statusLine) : map (white,) msgLines'
                 numPages = (length msgLines + 7) `div` 8
 
             page <- gets $ mcduViewPage . mcduView
             let curLines = take 8 . drop (page * 8) $ msgLines
             modifyView $ \v -> v
               { mcduViewDraw = do
-                  zipWithM_ (\n line -> mcduPrint 0 (n+1) color line)
+                  zipWithM_ (\n (c, line) -> mcduPrint 0 (n+1) c line)
                     [0,1..] curLines
               , mcduViewNumPages = numPages
               }
@@ -307,9 +329,9 @@ getScratchColorAndString = do
       return (yellow, msg)
     Nothing ->
       gets mcduScratchpad >>= \case
-        ScratchEmpty -> return (green, "")
-        ScratchStr str -> return (green, str)
-        ScratchDel -> return (white, "*DELETE*")
+        ScratchEmpty -> return (white, "")
+        ScratchStr str -> return (white, str)
+        ScratchDel -> return (cyan, "*DELETE*")
 
 flushScratch :: MCDU ()
 flushScratch = do
@@ -399,8 +421,7 @@ scratchClearWarn = do
 loadView :: MCDUView -> MCDU ()
 loadView view = do
   modify $ \s -> s { mcduView = view }
-  mcduViewOnLoad view
-  redrawView
+  reloadView
 
 reloadView :: MCDU ()
 reloadView = do
@@ -413,10 +434,10 @@ redrawView = do
   view <- gets mcduView
   draw $ do
     mcduClearScreen
-    mcduPrintC (screenW `div` 2) 0 green (mcduViewTitle view)
+    mcduPrintC (screenW `div` 2) 0 white (mcduViewTitle view)
     when (mcduViewNumPages view > 1) $ do
       let pageInfoStr = printf "%i/%i" (mcduViewPage view + 1) (mcduViewNumPages view)
-      mcduPrintR screenW 0 green (BS8.pack pageInfoStr)
+      mcduPrintR screenW 0 white (BS8.pack pageInfoStr)
     mcduViewDraw view
     forM_ (Map.toList $ mcduViewLSKBindings view) $ \(n, (label, _)) -> do
       if n `div` 5 == 0 then
