@@ -104,6 +104,8 @@ mainMenuView = defView
       , (5, ("ATC", return ()))
       , (3, ("TEST", loadView testView))
       ]
+  , mcduViewOnLoad = do
+      loadUplinkLSK 9
   }
 
 testView :: MCDUView
@@ -119,19 +121,22 @@ dlkMenuView = defView
   { mcduViewTitle = "DLK MENU"
   , mcduViewLSKBindings = Map.fromList
       [ (0, ("MSG LOG", loadView dlkMessageLogView))
+      , (1, ("TELEX", return ()))
       , (4, ("MAIN MENU", loadView mainMenuView))
       , (5, ("ATIS", loadView $ infoMenuView "ATIS" "VATATIS"))
       , (6, ("METAR", loadView $ infoMenuView "METAR" "METAR"))
       , (7, ("TAF", loadView $ infoMenuView "TAF" "TAF"))
       , (8, ("DLC", return ()))
       ]
+  , mcduViewOnLoad = do
+      loadUplinkLSK 9
   }
 
 infoMenuView :: ByteString -> ByteString -> MCDUView
 infoMenuView title infotype = defView
   { mcduViewTitle = title
   , mcduViewLSKBindings = Map.fromList
-      [ (9, ("SEND", sendInfoRequest infotype>> reloadView ))
+      [ (8, ("SEND", sendInfoRequest infotype>> reloadView ))
       , (4, ("DLK MENU", loadView dlkMenuView))
       ]
   , mcduViewOnLoad = do
@@ -144,7 +149,31 @@ infoMenuView title infotype = defView
         , mcduViewDraw = do
             mcduPrintR (screenW - 1) (mcduLskY 5) green refAirport
         }
+      loadUplinkLSK 9
   }
+
+loadUplinkLSK :: Int -> MCDU ()
+loadUplinkLSK lsk = do
+  unreadDLK <- gets mcduUnreadDLK
+  unreadCPDLC <- gets mcduUnreadCPDLC
+  case unreadCPDLC of
+    Just _cpdlcUID ->
+      modifyView $ \v -> v
+        { mcduViewLSKBindings =
+            Map.insert lsk ("ATC UPLINK", return ()) (mcduViewLSKBindings v)
+        }
+    Nothing ->
+      case unreadDLK of
+        Just dlkUID ->
+          modifyView $ \v -> v
+            { mcduViewLSKBindings =
+                Map.insert lsk ("DLK UPLINK", loadView $ dlkMessageView dlkUID) (mcduViewLSKBindings v)
+            }
+        Nothing ->
+          modifyView $ \v -> v
+            { mcduViewLSKBindings =
+                Map.delete lsk (mcduViewLSKBindings v)
+            }
 
 sendInfoRequest :: ByteString -> MCDU ()
 sendInfoRequest infotype = do
@@ -209,9 +238,16 @@ dlkMessageLogView = defView
                     from = messageFrom myCallsign message
                     to = messageFrom myCallsign message
 
-                let (color', callsign) = case message of
-                      UplinkMessage {} -> (green, from)
-                      DownlinkMessage {} -> (cyan, to)
+                let (color', callsign, statusStr) = case message of
+                      UplinkMessage m ->
+                        case metaStatus m of
+                          NewUplink -> (green, from, "NEW" :: String)
+                          OldUplink -> (white, from, "OLD")
+                      DownlinkMessage m ->
+                        case metaStatus m of
+                          UnsentDownlink -> (blue, to, "QUED")
+                          SentDownlink -> (cyan, to, "SENT")
+                          ErrorDownlink -> (red, to, "ERR")
 
                 let (color, msgTyStr) = case typedMessagePayload $ messagePayload message of
                       InfoPayload {} -> (color', "INFO" :: String)
@@ -222,10 +258,11 @@ dlkMessageLogView = defView
 
                 mcduPrint 1 (n * 2 + 1) color $
                   BS8.pack $
-                  printf "%02i%02iZ %-6s %s"
+                  printf "%02i%02iZ %-6s %-5s %-4s"
                     hours minutes
                     (map toUpper $ BS8.unpack callsign)
                     msgTyStr
+                    statusStr
                 case typedMessagePayload $ messagePayload message of
                   InfoPayload msg ->
                     mcduPrint 1 (n * 2 + 2) white msg
@@ -257,14 +294,29 @@ dlkMessageView uid =
               }
           Just message -> do
             myCallsign <- lift $ asks hoppieCallsign
+            unread <- gets mcduUnreadDLK
+            when (Just (messageUID message) == unread) $ do
+              modify $ \s -> s { mcduUnreadDLK = Nothing }
+            case message of
+              UplinkMessage {} ->
+                lift $ setUplinkStatus (messageUID message) OldUplink
+              DownlinkMessage {} ->
+                return ()
             let daySecond = floor . utctDayTime $ messageTimestamp message
                 (hours, minutes) = (daySecond `quot` 60 :: Int) `quotRem` 60
                 from = messageFrom myCallsign message
                 to = messageFrom myCallsign message
 
-            let (color', callsign) = case message of
-                  UplinkMessage {} -> (green, from)
-                  DownlinkMessage {} -> (cyan, to)
+            let (color', callsign, statusStr) = case message of
+                  UplinkMessage m ->
+                    case metaStatus m of
+                      NewUplink -> (green, from, "NEW" :: String)
+                      OldUplink -> (white, from, "OLD")
+                  DownlinkMessage m ->
+                    case metaStatus m of
+                      UnsentDownlink -> (blue, to, "QUED")
+                      SentDownlink -> (cyan, to, "SENT")
+                      ErrorDownlink -> (red, to, "ERR")
 
             let (color, msgTyStr, msgText) = case typedMessagePayload $ messagePayload message of
                   InfoPayload msg -> (color', "INFO" :: String, msg)
@@ -283,10 +335,11 @@ dlkMessageView uid =
                 msgLines' = lineWrap screenW msgText
                 statusLine = 
                   BS8.pack $
-                  printf "%02i%02iZ %-6s %s"
+                  printf "%02i%02iZ %-6s %-5s %-4s"
                     hours minutes
                     (map toUpper $ BS8.unpack callsign)
                     msgTyStr
+                    statusStr
                 msgLines = (color, statusLine) : map (white,) msgLines'
                 numPages = (length msgLines + 7) `div` 8
 
@@ -483,10 +536,13 @@ handleMCDUEvent ev = do
   case ev of
     UplinkEvent mtm -> do
       case typedMessagePayload (payload mtm) of
-        CPDLCPayload {} ->
+        CPDLCPayload {} -> do
+          modify $ \s -> s { mcduUnreadCPDLC = Just (metaUID mtm) }
           scratchWarn "ATC UPLINK"
-        _ ->
+        _ -> do
+          modify $ \s -> s { mcduUnreadDLK = Just (metaUID mtm) }
           scratchWarn "UPLINK"
+      reloadView
 
     InputCommandEvent InputPgUp ->
       prevPage
