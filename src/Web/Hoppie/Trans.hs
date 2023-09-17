@@ -34,6 +34,24 @@ type HoppieT = ReaderT HoppieEnv
 
 type Hoppie = HoppieT IO
 
+data HoppieEnv =
+  HoppieEnv
+    { hoppieNetworkConfig :: !Network.Config
+    , hoppieCallsign :: !ByteString
+    , hoppieUplinks :: !(MVar (Map Word (WithMeta UplinkStatus TypedMessage)))
+    , hoppieDownlinks :: !(MVar (Map Word (WithMeta DownlinkStatus TypedMessage)))
+    , hoppieCPDLCUplinks :: !(MVar (Map Word Word))
+    , hoppieCPDLCDownlinks :: !(MVar (Map Word Word))
+    , hoppieNextUID :: !(MVar Word)
+    , hoppieNetworkStatus :: !(MVar NetworkStatus)
+    , hoppieFastPollingCounter :: !(MVar Int)
+    }
+
+data NetworkStatus
+  = NetworkOK
+  | NetworkError String
+  deriving (Show, Eq)
+
 makeHoppieEnv :: MonadIO m => ByteString -> Network.Config -> m HoppieEnv
 makeHoppieEnv callsign config =
   liftIO $ HoppieEnv
@@ -45,6 +63,7 @@ makeHoppieEnv callsign config =
     <*> newMVar mempty
     <*> newMVar 0
     <*> newMVar NetworkOK
+    <*> newMVar 0
 
 runHoppieTWith :: HoppieEnv -> HoppieT m a -> m a
 runHoppieTWith = flip runReaderT
@@ -102,23 +121,6 @@ messageTo _ (DownlinkMessage m) = typedMessageCallsign . payload $ m
 messagePayload :: HoppieMessage -> TypedMessage
 messagePayload (UplinkMessage m) = payload m
 messagePayload (DownlinkMessage m) = payload m
-
-data HoppieEnv =
-  HoppieEnv
-    { hoppieNetworkConfig :: !Network.Config
-    , hoppieCallsign :: !ByteString
-    , hoppieUplinks :: !(MVar (Map Word (WithMeta UplinkStatus TypedMessage)))
-    , hoppieDownlinks :: !(MVar (Map Word (WithMeta DownlinkStatus TypedMessage)))
-    , hoppieCPDLCUplinks :: !(MVar (Map Word Word))
-    , hoppieCPDLCDownlinks :: !(MVar (Map Word Word))
-    , hoppieNextUID :: !(MVar Word)
-    , hoppieNetworkStatus :: !(MVar NetworkStatus)
-    }
-
-data NetworkStatus
-  = NetworkOK
-  | NetworkError String
-  deriving (Show, Eq)
 
 setNetworkStatus :: MonadIO m => NetworkStatus -> HoppieT m ()
 setNetworkStatus s = do

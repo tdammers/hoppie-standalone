@@ -397,7 +397,7 @@ renderMessage msgTypes msgID args =
     renderItem (MessageOptional True _) = []
     renderItem (MessageOptional False lits) = lits
     renderItem (MessageArg ("", _)) = []
-    renderItem (MessageArg (val, ty)) = ["[" <> bold <> val <> regular <> " (" <> (BS8.pack . map toLower . drop 3 $ show ty) <> ")]"]
+    renderItem (MessageArg (val, _ty)) = [val]
 
 scrub :: ByteString -> ByteString
 scrub =

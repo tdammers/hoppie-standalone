@@ -21,6 +21,15 @@ import qualified Data.Map.Strict as Map
 import Data.Maybe
 import Data.List
 
+mkConfig :: String -> Config
+mkConfig l =
+  Config
+    { configURL = defURL
+    , configLogon = BS8.pack l
+    , configFastPollingInterval = 20
+    , configPollingInterval = 60
+    }
+
 sendTestPeekRequest :: String -> IO ByteString
 sendTestPeekRequest l = do
   let rq = Request
@@ -29,7 +38,7 @@ sendTestPeekRequest l = do
             , requestType = Peek
             , requestPacket = ""
             }
-  rp <- sendRequest Config { configURL = defURL, configLogon = BS8.pack l } rq
+  rp <- sendRequest (mkConfig l) rq
   BS.putStr rp
   putStrLn ""
   return rp
@@ -42,7 +51,7 @@ sendTestInfoRequest l = do
             , requestType = Inforeq
             , requestPacket = "VATATIS EDDL"
             }
-  sendRequest Config { configURL = defURL, configLogon = BS8.pack l } rq
+  sendRequest (mkConfig l) rq
 
 runNetworkTest :: String -> IO ()
 runNetworkTest l = do
@@ -102,6 +111,6 @@ runNetworkTest l = do
   -- runSmokeTests
 
 runTest :: String -> IO ()
-runTest l = runHoppieT "KLM123" (Config { configLogon = BS8.pack l, configURL = defURL }) $ do
+runTest l = runHoppieT "KLM123" (mkConfig l) $ do
   return ()
 

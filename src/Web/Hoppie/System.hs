@@ -46,7 +46,16 @@ runSystem callsign config onUplink onNetworkStatus runUI = do
 
     runPolling = forever $ do
       messageIDs <- withStatusCheck poll
+      pollingIntervalVar <- asks hoppieFastPollingCounter
+
       forM_ messageIDs $ \messageID -> do
         msgMay <- getUplink messageID
         forM_ msgMay onUplink
-      liftIO $ threadDelay $ 60 * 1000000
+
+      fastPolling <- asks (configFastPollingInterval . hoppieNetworkConfig)
+      slowPolling <- asks (configPollingInterval . hoppieNetworkConfig)
+      liftIO $ do
+        counter <- takeMVar pollingIntervalVar
+        let interval = if counter > 0 then fastPolling else slowPolling
+        putMVar pollingIntervalVar (max 0 $ pred counter)
+        threadDelay $ interval * 1000000

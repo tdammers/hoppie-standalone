@@ -17,6 +17,8 @@ data Config =
   Config
     { configLogon ::ByteString
     , configURL :: String
+    , configPollingInterval :: Int
+    , configFastPollingInterval :: Int
     }
     deriving (Show)
 

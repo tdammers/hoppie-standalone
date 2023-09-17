@@ -23,7 +23,9 @@ main = do
   logon <- fromMaybe (error "No logon configured") <$> lookupEnv "HOPPIE_LOGON"
   callsign <- fromMaybe "TEST" <$> lookupEnv "HOPPIE_CALLSIGN"
   url <- fromMaybe defURL <$> lookupEnv "HOPPIE_URL"
-  let config = Config (BS8.pack logon) url
+  pollingInterval <- maybe 60 read <$> lookupEnv "HOPPIE_POLLINT_INTERVAL"
+  fastPollingInterval <- maybe 20 read <$> lookupEnv "HOPPIE_FAST_POLLING_INTERVAL"
+  let config = Config (BS8.pack logon) url pollingInterval fastPollingInterval
   runInput inputChan
     `race_`
     runInputPusher inputChan eventChan
