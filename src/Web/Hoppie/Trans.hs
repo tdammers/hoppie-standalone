@@ -198,16 +198,26 @@ send tm = do
   sender <- asks hoppieCallsign
   saveDownlink rq
   rawResponse <- liftIO $ Network.sendRequest config (toUntypedRequest sender tm)
+  setDownlinkStatus uid SentDownlink
   processResponse (Just uid) rawResponse
+
+makeErrorResponse :: MonadIO m => Maybe MessageType -> ByteString -> String -> HoppieT m [Word]
+makeErrorResponse tyM body err = do
+  uid <- makeUID
+  ts <- liftIO getCurrentTime
+  saveUplink $
+    WithMeta uid NewUplink ts
+      (TypedMessage (Just uid) "SYSTEM" (ErrorPayload tyM body err))
+  return [uid]
 
 processResponse :: MonadIO m => Maybe Word -> ByteString -> HoppieT m [Word]
 processResponse uidMay rawResponse = do
   ts <- liftIO getCurrentTime
   case parseResponse rawResponse of
     Left err ->
-      error err
+      makeErrorResponse Nothing "PARSER ERROR" err
     Right (ErrorResponse err) ->
-      error (BS8.unpack err)
+      makeErrorResponse Nothing err "SERVER ERROR"
     Right (Response []) -> do
       return []
     Right (Response messages) -> do

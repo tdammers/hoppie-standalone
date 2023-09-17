@@ -3,6 +3,7 @@
 module Web.Hoppie.Response
 ( Response (..)
 , Message (..)
+, MessageType (..)
 , parseResponse
 , TypedMessage (..)
 , TypedPayload (..)
@@ -135,7 +136,7 @@ errorResponseP = do
 okResponseP :: P.Parsec Void ByteString Response
 okResponseP = do
   void $ P.string "ok"
-  P.space1
+  P.space1 <|> P.eof
   Response <$>
     P.many messageP
 

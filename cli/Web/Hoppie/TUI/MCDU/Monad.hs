@@ -21,7 +21,6 @@ import qualified Data.ByteString.Char8 as BS8
 import Control.Monad
 import Control.Monad.State
 import Control.Monad.Reader
-import Control.Concurrent.MVar
 import Data.Word
 import System.IO
 import Data.Map (Map)
@@ -30,7 +29,6 @@ import Data.Char
 import Text.Printf
 import Data.Time
 import Data.Maybe
-import Data.List
 
 data MCDUEvent
   = InputCommandEvent InputCommand
@@ -52,6 +50,8 @@ data MCDUState =
     , mcduUnreadDLK :: Maybe Word
     , mcduUnreadCPDLC :: Maybe Word
     , mcduReferenceAirport :: Maybe ByteString
+    , mcduTelexRecipient :: Maybe ByteString
+    , mcduTelexBody :: Maybe ByteString
     , mcduSendMessage :: TypedMessage -> Hoppie ()
     }
 
@@ -62,6 +62,8 @@ defMCDUState =
     Nothing
     emptyMCDUScreenBuffer
     defView
+    Nothing
+    Nothing
     Nothing
     Nothing
     Nothing
@@ -121,7 +123,7 @@ dlkMenuView = defView
   { mcduViewTitle = "DLK MENU"
   , mcduViewLSKBindings = Map.fromList
       [ (0, ("MSG LOG", loadView dlkMessageLogView))
-      , (1, ("TELEX", return ()))
+      , (1, ("TELEX", loadView $ telexSendView False))
       , (4, ("MAIN MENU", loadView mainMenuView))
       , (5, ("ATIS", loadView $ infoMenuView "ATIS" "VATATIS"))
       , (6, ("METAR", loadView $ infoMenuView "METAR" "METAR"))
@@ -132,21 +134,70 @@ dlkMenuView = defView
       loadUplinkLSK 9
   }
 
+telexSendView :: Bool -> MCDUView
+telexSendView sent = defView
+  { mcduViewTitle = "TELEX"
+  , mcduViewLSKBindings = Map.fromList
+      [ (4, ("DLK MENU", loadView dlkMenuView))
+      ]
+  , mcduViewOnLoad = do
+      unless sent $ do
+        addLskBinding 8 "SEND" $ do
+          sendSuccess <- sendTelex
+          when sendSuccess $ do
+            loadView (telexSendView True)
+
+      addLskBinding 5 "" $ do
+        scratchInteract 
+          (\val -> modify $ \s -> s { mcduTelexRecipient = val })
+          (gets mcduTelexRecipient)
+        reloadView
+
+      addLskBinding 1 "" $ do
+        scratchInteract 
+          (\val -> modify $ \s -> s { mcduTelexBody = val })
+          (gets mcduTelexBody)
+        reloadView
+
+      recipientStr <- fromMaybe "------" <$> gets mcduTelexRecipient
+      bodyStr <- fromMaybe (BS.replicate (screenW - 2) (ord8 '-')) <$> gets mcduTelexBody
+      let bodyLines = lineWrap (screenW - 2) bodyStr
+      modifyView $ \v -> v {
+        mcduViewDraw = do
+          mcduPrintR (screenW - 1) 2 green recipientStr
+          zipWithM_
+            (\n l -> mcduPrint 1 (n + 4) green l)
+            [0..4] bodyLines
+      }
+      loadUplinkLSK 9
+  }
+
+addLskBinding :: Int -> ByteString -> MCDU () -> MCDU ()
+addLskBinding lsk label action =
+  modifyView $ \v -> v {
+    mcduViewLSKBindings =
+      Map.insert lsk (label, action) (mcduViewLSKBindings v)
+  }
+
+removeLskBinding :: Int -> MCDU ()
+removeLskBinding lsk =
+  modifyView $ \v -> v {
+    mcduViewLSKBindings =
+      Map.delete lsk (mcduViewLSKBindings v)
+  }
+
 infoMenuView :: ByteString -> ByteString -> MCDUView
 infoMenuView title infotype = defView
   { mcduViewTitle = title
   , mcduViewLSKBindings = Map.fromList
-      [ (8, ("SEND", sendInfoRequest infotype>> reloadView ))
+      [ (8, ("SEND", sendInfoRequest infotype >> reloadView ))
       , (4, ("DLK MENU", loadView dlkMenuView))
       ]
   , mcduViewOnLoad = do
       refAirport <- gets (fromMaybe "----" . mcduReferenceAirport)
+      addLskBinding 5 "" (setReferenceAirport >> reloadView)
       modifyView $ \v -> v
-        { mcduViewLSKBindings =
-          Map.insert
-            5 ("", setReferenceAirport >> reloadView)
-            (mcduViewLSKBindings v)
-        , mcduViewDraw = do
+        { mcduViewDraw =
             mcduPrintR (screenW - 1) (mcduLskY 5) green refAirport
         }
       loadUplinkLSK 9
@@ -158,22 +209,15 @@ loadUplinkLSK lsk = do
   unreadCPDLC <- gets mcduUnreadCPDLC
   case unreadCPDLC of
     Just _cpdlcUID ->
-      modifyView $ \v -> v
-        { mcduViewLSKBindings =
-            Map.insert lsk ("ATC UPLINK", return ()) (mcduViewLSKBindings v)
-        }
+      addLskBinding lsk "ATC UPLINK" $
+        return ()
     Nothing ->
       case unreadDLK of
         Just dlkUID ->
-          modifyView $ \v -> v
-            { mcduViewLSKBindings =
-                Map.insert lsk ("DLK UPLINK", loadView $ dlkMessageView dlkUID) (mcduViewLSKBindings v)
-            }
+          addLskBinding lsk "DLK UPLINK" $
+            loadView (dlkMessageView dlkUID)
         Nothing ->
-          modifyView $ \v -> v
-            { mcduViewLSKBindings =
-                Map.delete lsk (mcduViewLSKBindings v)
-            }
+          removeLskBinding lsk
 
 sendInfoRequest :: ByteString -> MCDU ()
 sendInfoRequest infotype = do
@@ -186,6 +230,23 @@ sendInfoRequest infotype = do
           Nothing
           "SERVER"
           (InfoPayload $ infotype <> " " <> airport)
+
+sendTelex :: MCDU Bool
+sendTelex = do
+  toMay <- gets mcduTelexRecipient
+  bodyMay <- gets mcduTelexBody
+  case (toMay, bodyMay) of
+    (Nothing, _) -> do
+      scratchWarn "NO RECIPIENT"
+      return False
+    (_, Nothing) -> do
+      scratchWarn "NO MESSAGE"
+      return False
+    (Just to, Just body) -> do
+      sendMessage <- gets mcduSendMessage
+      lift $ sendMessage $
+        TypedMessage Nothing to (TelexPayload body)
+      return True
 
 setReferenceAirport :: MCDU ()
 setReferenceAirport =
