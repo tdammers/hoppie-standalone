@@ -105,13 +105,13 @@ mcduPrintLskL :: Int -> ByteString -> MCDUDraw s ()
 mcduPrintLskL n "" =
   mcduPrint 0 (mcduLskY n) green "<"
 mcduPrintLskL n msg =
-  mcduPrint 0 (mcduLskY n) green ("< " <> msg)
+  mcduPrint 0 (mcduLskY n) green ("<" <> msg)
 
 mcduPrintLskR :: Int -> ByteString -> MCDUDraw s ()
 mcduPrintLskR n "" =
   mcduPrintR screenW (mcduLskY n) green ">"
 mcduPrintLskR n msg =
-  mcduPrintR screenW (mcduLskY n) green (msg <> " >")
+  mcduPrintR screenW (mcduLskY n) green (msg <> ">")
 
 mcduLskSY :: Int -> Int
 mcduLskSY = screenY . mcduLskY

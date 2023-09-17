@@ -47,6 +47,7 @@ executable hoppie-mcdu
     other-modules: Web.Hoppie.TUI.Input
                  , Web.Hoppie.TUI.Output
                  , Web.Hoppie.TUI.TerminalSize
+                 , Web.Hoppie.TUI.StringUtil
                  , Web.Hoppie.TUI.MCDU
                  , Web.Hoppie.TUI.MCDU.Draw
                  , Web.Hoppie.TUI.MCDU.Monad

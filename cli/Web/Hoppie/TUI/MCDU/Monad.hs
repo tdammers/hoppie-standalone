@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Web.Hoppie.TUI.MCDU.Monad
 where
@@ -10,6 +11,8 @@ import Web.Hoppie.Telex
 import Web.Hoppie.TUI.MCDU.Draw
 import Web.Hoppie.TUI.Output
 import Web.Hoppie.TUI.Input
+import Web.Hoppie.TUI.StringUtil
+import Web.Hoppie.CPDLC.Message (renderCPDLCMessage)
 
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
@@ -32,9 +35,15 @@ data MCDUEvent
   | UplinkEvent (WithMeta UplinkStatus TypedMessage)
   deriving (Show)
 
+data ScratchVal
+  = ScratchEmpty
+  | ScratchStr ByteString
+  | ScratchDel
+  deriving (Show, Read, Eq, Ord)
+
 data MCDUState =
   MCDUState
-    { mcduScratchpad :: ByteString
+    { mcduScratchpad :: ScratchVal
     , mcduScratchMessage :: Maybe ByteString
     , mcduScreenBuffer :: MCDUScreenBuffer
     , mcduView :: MCDUView
@@ -47,7 +56,7 @@ data MCDUState =
 defMCDUState :: MCDUState
 defMCDUState =
   MCDUState
-    ""
+    ScratchEmpty
     Nothing
     emptyMCDUScreenBuffer
     defView
@@ -91,7 +100,16 @@ mainMenuView = defView
   , mcduViewLSKBindings = Map.fromList
       [ (0, ("DLK", loadView dlkMenuView))
       , (5, ("ATC", return ()))
+      , (3, ("TEST", loadView testView))
       ]
+  }
+
+testView :: MCDUView
+testView = defView
+  { mcduViewTitle = "TEST"
+  , mcduViewDraw = do
+      let lns = lineWrap screenW "THIS ATIS IS NOT AVAILABLE"
+      zipWithM_ (\n l -> mcduPrint 0 (n + 1) cyan l) [0,1..] lns
   }
 
 dlkMenuView :: MCDUView
@@ -116,7 +134,6 @@ atisMenuView = defView
       ]
   , mcduViewOnLoad = do
       refAirport <- gets mcduReferenceAirport
-      debugPrint $ "Ref airport: " ++ show refAirport
       modifyView $ \v -> v {
         mcduViewLSKBindings =
           Map.insert
@@ -138,18 +155,24 @@ sendAtisRequest = do
           (InfoPayload $ "VATATIS " <> airport)
 
 setReferenceAirport :: MCDU ()
-setReferenceAirport = do
-  val <- scratchGet
-  if BS.null val then do
-    refAirport <- gets mcduReferenceAirport
-    forM_ refAirport scratchSet
-    redrawScratch
-    debugPrint $ "Cleared ref airport"
-  else do
-    modify $ \s -> s { mcduReferenceAirport = Just val }
-    scratchClear
-    refAirport <- gets mcduReferenceAirport
-    debugPrint $ "Ref airport: " ++ show refAirport
+setReferenceAirport =
+  scratchInteract
+    (\val -> modify $ \s -> s { mcduReferenceAirport = val })
+    (gets mcduReferenceAirport)
+
+scratchInteract :: (Maybe ByteString -> MCDU ()) -> MCDU (Maybe ByteString) -> MCDU ()
+scratchInteract setVal getVal = do
+  scratchGet >>= \case
+    ScratchEmpty -> do
+      valMay <- getVal
+      forM_ valMay scratchSetStr
+      redrawScratch
+    ScratchStr scratchStr -> do
+      setVal (Just scratchStr)
+      scratchClear
+    ScratchDel -> do
+      setVal Nothing
+      scratchClear
 
 dlkMessageLogView :: MCDUView
 dlkMessageLogView = defView
@@ -169,7 +192,7 @@ dlkMessageLogView = defView
               Map.fromList
                 ( zip
                   [0..3]
-                  [ ("", showUplink (metaUID . snd $ uplink) ) | uplink <- curUplinks ]
+                  [ ("", loadView $ dlkMessageView (metaUID . snd $ uplink) ) | uplink <- curUplinks ]
                 )
         , mcduViewDraw = do
             zipWithM_ (\n (_, uplink) -> do
@@ -180,7 +203,7 @@ dlkMessageLogView = defView
                 let (color, msgTyStr) = case typedMessagePayload $ payload uplink of
                       InfoPayload {} -> (green, "INFO" :: String)
                       TelexPayload {} -> (green, "TELEX")
-                      CPDLCPayload {} -> (cyan, "CPDLC")
+                      CPDLCPayload {} -> (green, "CPDLC")
                       UnsupportedPayload {} -> (yellow, "UNSUPPORTED")
                       ErrorPayload {} -> (red, "ERROR")
 
@@ -199,8 +222,61 @@ dlkMessageLogView = defView
         }
   }
 
-showUplink :: Word -> MCDU ()
-showUplink n = scratchWarn $ BS8.pack $ printf "UPLINK %i" n
+dlkMessageView :: Word -> MCDUView
+dlkMessageView uid =
+  defView
+    { mcduViewTitle = "DLK MESSAGE"
+    , mcduViewLSKBindings = Map.fromList
+        [ (4, ("DLK LOG", loadView dlkMessageLogView))
+        ]
+    , mcduViewOnLoad = do
+        uplinkMay <- lift $ getUplink uid
+        case uplinkMay of
+          Nothing ->
+            modifyView $ \v -> v
+              { mcduViewDraw = do
+                  mcduPrintC (screenW `div` 2) (screenH `div` 2) red
+                    "MESSAGE NOT FOUND"
+              , mcduViewNumPages = 1
+              , mcduViewPage = 0
+              }
+          Just uplink -> do
+            let daySecond = floor . utctDayTime $ metaTimestamp uplink
+                (hours, minutes) = (daySecond `quot` 60 :: Int) `quotRem` 60
+                callsign = typedMessageCallsign $ payload uplink
+            let (color, msgTyStr, msgText) = case typedMessagePayload $ payload uplink of
+                  InfoPayload msg -> (green, "INFO" :: String, msg)
+                  TelexPayload msg -> (green, "TELEX", msg)
+                  CPDLCPayload cpdlc -> (green, "CPDLC", renderCPDLCMessage cpdlc)
+                  UnsupportedPayload ty msg ->
+                    ( yellow
+                    , "UNSUPPORTED"
+                    , (BS8.pack . map toUpper . show) ty <> " " <> msg
+                    )
+                  ErrorPayload _ response err ->
+                    ( red
+                    , "ERROR"
+                    , (BS8.pack . map toUpper . show) err <> " " <> response
+                    )
+                msgLines' = lineWrap screenW msgText
+                statusLine = 
+                  BS8.pack $
+                  printf "%02i%02iZ %6s %s"
+                    hours minutes
+                    (map toUpper $ BS8.unpack callsign)
+                    msgTyStr
+                msgLines = statusLine : msgLines'
+                numPages = (length msgLines + 7) `div` 8
+
+            page <- gets $ mcduViewPage . mcduView
+            let curLines = take 8 . drop (page * 8) $ msgLines
+            modifyView $ \v -> v
+              { mcduViewDraw = do
+                  zipWithM_ (\n line -> mcduPrint 0 (n+1) color line)
+                    [0,1..] curLines
+              , mcduViewNumPages = numPages
+              }
+    }
 
 type MCDU = StateT MCDUState Hoppie
 
@@ -223,10 +299,23 @@ flushScreen = do
   buf <- gets mcduScreenBuffer
   liftIO $ redrawMCDU buf
 
+getScratchColorAndString :: MCDU (Word8, ByteString)
+getScratchColorAndString = do
+  msgMay <- gets mcduScratchMessage
+  case msgMay of
+    Just msg ->
+      return (yellow, msg)
+    Nothing ->
+      gets mcduScratchpad >>= \case
+        ScratchEmpty -> return (green, "")
+        ScratchStr str -> return (green, str)
+        ScratchDel -> return (white, "*DELETE*")
+
 flushScratch :: MCDU ()
 flushScratch = do
   buf <- gets mcduScreenBuffer
-  scratchX <- min (screenW - 1) . BS.length <$> gets mcduScratchpad
+  (_, str) <- getScratchColorAndString
+  let scratchX = min (screenW - 1) . BS.length $ str
   let scratchY = screenH - 1
   liftIO $ do
     redrawMCDULine (screenH - 1) buf
@@ -235,47 +324,50 @@ flushScratch = do
 
 redrawScratch :: MCDU ()
 redrawScratch = do
-  warnMay <- gets mcduScratchMessage
-  case warnMay of
-    Nothing -> do
-      scratch <- gets mcduScratchpad
-      let scratch' = BS.takeEnd screenW scratch
-          scratch'' = scratch' <> BS.replicate (screenW - BS.length scratch') (ord8 ' ')
-      draw $ mcduPrint 0 (screenH - 1) green scratch''
-    Just msg -> do
-      draw $ mcduPrint 0 (screenH - 1) yellow msg
+  (color, scratch) <- getScratchColorAndString
+  let scratch' = BS.takeEnd screenW scratch
+      scratch'' = scratch' <> BS.replicate (screenW - BS.length scratch') (ord8 ' ')
+  draw $ mcduPrint 0 (screenH - 1) color scratch''
   flushScratch
 
 modifyView :: (MCDUView -> MCDUView) -> MCDU ()
 modifyView f =  do
   modify $ \s -> s { mcduView = f (mcduView s) }
 
-modifyScratchpad :: (ByteString -> ByteString) -> MCDU ()
+modifyScratchpad :: (ScratchVal -> ScratchVal) -> MCDU ()
 modifyScratchpad f =  do
   modify $ \s -> s { mcduScratchpad = f (mcduScratchpad s) }
   redrawScratch
 
-scratchGet :: MCDU ByteString
+scratchGet :: MCDU ScratchVal
 scratchGet = do
   gets mcduScratchpad
 
 scratchAppend :: Word8 -> MCDU ()
 scratchAppend c = do
   modify $ \s -> s { mcduScratchMessage = Nothing }
-  modifyScratchpad (`BS.snoc` c)
+  modifyScratchpad $ \case
+    ScratchEmpty -> ScratchStr (BS.singleton c)
+    ScratchDel -> ScratchDel
+    ScratchStr str -> ScratchStr (BS.snoc str c)
   redrawScratch
 
-scratchSet :: ByteString -> MCDU ()
-scratchSet bs = do
+scratchSet :: ScratchVal -> MCDU ()
+scratchSet val = do
   modify $ \s -> s { mcduScratchMessage = Nothing }
-  modifyScratchpad (const bs)
+  modifyScratchpad (const val)
   redrawScratch
+
+scratchSetStr :: ByteString -> MCDU ()
+scratchSetStr bs = scratchSet (ScratchStr bs)
 
 scratchClear :: MCDU ()
 scratchClear = do
   gets mcduScratchMessage >>= \case
     Nothing ->
-      modifyScratchpad (const "")
+      modifyScratchpad $ \case
+        ScratchEmpty -> ScratchDel
+        _ -> ScratchEmpty
     Just _ ->
       modify $ \s -> s { mcduScratchMessage = Nothing }
   redrawScratch
@@ -283,7 +375,15 @@ scratchClear = do
 scratchDel :: MCDU ()
 scratchDel = do
   modify $ \s -> s { mcduScratchMessage = Nothing }
-  modifyScratchpad (BS.dropEnd 1)
+  modifyScratchpad $ \case
+    ScratchStr str ->
+      let str' = BS.dropEnd 1 str
+      in
+        if BS.null str' then
+          ScratchEmpty
+        else
+          ScratchStr str'
+    _ -> ScratchEmpty
   redrawScratch
 
 scratchWarn :: ByteString -> MCDU ()
