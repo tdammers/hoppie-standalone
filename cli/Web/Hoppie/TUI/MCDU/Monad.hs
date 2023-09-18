@@ -481,6 +481,9 @@ handleMCDUEvent mainMenuView dlkMenuView atcMenuView ev = do
     InputCommandEvent InputF11 -> loadView dlkMenuView
     InputCommandEvent InputF12 -> loadView atcMenuView
     InputCommandEvent InputEscape -> loadView mainMenuView
+
+    InputCommandEvent InputRedraw -> do
+      flushAll
       
     InputCommandEvent InputBackspace ->
       scratchDel
