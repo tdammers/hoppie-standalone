@@ -536,6 +536,10 @@ allMessageTypes :: Map MessageTypeID MessageType
 allMessageTypes =
   pseudoMessages <> uplinkMessages <> downlinkMessages
 
+sendableMessageTypes :: Map MessageTypeID MessageType
+sendableMessageTypes =
+  uplinkMessages <> downlinkMessages
+
 pseudoMessages :: Map MessageTypeID MessageType
 pseudoMessages = Map.fromList
   [ ( "CONX-1", defMessageType { msgPattern = "LOGON TO $1", msgArgs = [ argFacility ] } )

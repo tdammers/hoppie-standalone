@@ -71,7 +71,7 @@ cpdlcMessageP = do
   ra <- raP
   slashP
   payloadRaw <- P.takeWhileP Nothing (const True)
-  case listToMaybe (parseMessage (Just ra) allMessageTypes payloadRaw) of
+  case listToMaybe (parseMessage (Just ra) sendableMessageTypes payloadRaw) of
     Just partsRaw ->
       return
         CPDLCMessage

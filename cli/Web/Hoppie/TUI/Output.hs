@@ -64,6 +64,15 @@ setBold = printf "\27[1m"
 setRegular :: PrintfType p => p
 setRegular = printf "\27[22m"
 
+clearRect :: Int -> Int -> Int -> Int -> IO ()
+clearRect left top right bottom = do
+  resetBG
+  moveTo left top
+  forM_ ([top .. bottom] :: [Int]) $ \y -> do
+    moveTo left y
+    putStr $ replicate (right - left + 1) ' '
+  resetAll
+
 fillRect :: Word8 -> Int -> Int -> Int -> Int -> IO ()
 fillRect color left top right bottom = do
   setBG color

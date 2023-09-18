@@ -636,8 +636,35 @@ atcMenuView = defView
       , (8, ("WHEN CAN WE", loadView cpdlcWhenCanWeMenuView))
       ]
   , mcduViewOnLoad = do
+      online <- haveCpdlcLogon
+      if online then
+        modifyView $ \v -> v
+          { mcduViewLSKBindings = Map.fromList
+              [ (0, ("MSG LOG", loadView cpdlcMessageLogView))
+              , (1, ("LOGON", loadView cpdlcLogonView))
+              , (3, ("FREE TEXT", loadCpdlcComposeViewByID "TXTD-2" Nothing Nothing))
+              , (4, ("MAIN MENU", loadView mainMenuView))
+              , (5, ("EMERGENCY", return ())) -- TODO
+              , (6, ("REQUEST", loadView cpdlcRequestMenuView))
+              , (7, ("REPORT", loadView cpdlcReportMenuView))
+              , (8, ("WHEN CAN WE", loadView cpdlcWhenCanWeMenuView))
+              ]
+          }
+      else
+        modifyView $ \v -> v
+          { mcduViewLSKBindings = Map.fromList
+              [ (0, ("MSG LOG", loadView cpdlcMessageLogView))
+              , (1, ("LOGON", loadView cpdlcLogonView))
+              ]
+          }
       loadUplinkLSK 9
   }
+
+haveCpdlcLogon :: MCDU Bool
+haveCpdlcLogon = do
+  currentDA <- asks hoppieCpdlcDataAuthorities >>=
+                fmap currentDataAuthority . liftIO . readMVar
+  return $ isJust currentDA
 
 cpdlcLogonView :: MCDUView
 cpdlcLogonView = defView
@@ -684,36 +711,40 @@ cpdlcRequestMenuView = defView
   { mcduViewTitle = "ATC REQUEST"
   , mcduViewNumPages = 2
   , mcduViewOnLoad = do
-      page <- gets (mcduViewPage . mcduView)
-      modifyView $ \v -> v
-        { mcduViewLSKBindings = Map.fromList $
-            case page of
-              0 ->
-                [ (0, ("DIRECT", loadCpdlcComposeViewByID "RTED-1" Nothing Nothing))
-                , (1, ("LEVEL", loadCpdlcComposeViewByID "LVLD-1" Nothing Nothing))
-                , (2, ("CLIMB", loadCpdlcComposeViewByID "LVLD-2" Nothing Nothing))
-                , (3, ("DESCENT", loadCpdlcComposeViewByID "LVLD-3" Nothing Nothing))
-                , (5, ("LVL AT POS", loadCpdlcComposeViewByID "LVLD-4" Nothing Nothing))
-                , (6, ("LVL AT TIME", loadCpdlcComposeViewByID "LVLD-5" Nothing Nothing))
-                , (7, ("SPEED", loadCpdlcComposeViewByID "SPDD-1" Nothing Nothing))
-                , (8, ("VOICE CNT", loadCpdlcComposeViewByID "COMD-1" Nothing Nothing))
+      online <- haveCpdlcLogon
+      if online then do
+        page <- gets (mcduViewPage . mcduView)
+        modifyView $ \v -> v
+          { mcduViewLSKBindings = Map.fromList $
+              case page of
+                0 ->
+                  [ (0, ("DIRECT", loadCpdlcComposeViewByID "RTED-1" Nothing Nothing))
+                  , (1, ("LEVEL", loadCpdlcComposeViewByID "LVLD-1" Nothing Nothing))
+                  , (2, ("CLIMB", loadCpdlcComposeViewByID "LVLD-2" Nothing Nothing))
+                  , (3, ("DESCENT", loadCpdlcComposeViewByID "LVLD-3" Nothing Nothing))
+                  , (5, ("LVL AT POS", loadCpdlcComposeViewByID "LVLD-4" Nothing Nothing))
+                  , (6, ("LVL AT TIME", loadCpdlcComposeViewByID "LVLD-5" Nothing Nothing))
+                  , (7, ("SPEED", loadCpdlcComposeViewByID "SPDD-1" Nothing Nothing))
+                  , (8, ("VOICE CNT", loadCpdlcComposeViewByID "COMD-1" Nothing Nothing))
 
-                , (4, ("ATC MENU", loadView atcMenuView))
-                ]
-              1 ->
-                [ (0, ("ROUTE", loadCpdlcComposeViewByID "RTED-2" Nothing Nothing))
-                , (1, ("RTE CLX", loadCpdlcComposeViewByID "RTED-3" Nothing Nothing))
-                , (2, ("CLEARANCE", loadCpdlcComposeViewByID "RTED-4" Nothing Nothing))
-                , (3, ("HEADING", loadCpdlcComposeViewByID "RTED-6" Nothing Nothing))
-                , (4, ("GROUND TRK", loadCpdlcComposeViewByID "RTED-7" Nothing Nothing))
-                , (5, ("OFFSET", loadCpdlcComposeViewByID "LATD-1" Nothing Nothing))
-                , (6, ("WX DEVIATION", loadCpdlcComposeViewByID "LATD-2" Nothing Nothing))
-                , (7, ("FREE TEXT", loadCpdlcComposeViewByID "TXTD-1" Nothing Nothing))
-                ]
-              _ ->
-                []
-        }
-      loadUplinkLSK 9
+                  , (4, ("ATC MENU", loadView atcMenuView))
+                  ]
+                1 ->
+                  [ (0, ("ROUTE", loadCpdlcComposeViewByID "RTED-2" Nothing Nothing))
+                  , (1, ("RTE CLX", loadCpdlcComposeViewByID "RTED-3" Nothing Nothing))
+                  , (2, ("CLEARANCE", loadCpdlcComposeViewByID "RTED-4" Nothing Nothing))
+                  , (3, ("HEADING", loadCpdlcComposeViewByID "RTED-6" Nothing Nothing))
+                  , (4, ("GROUND TRK", loadCpdlcComposeViewByID "RTED-7" Nothing Nothing))
+                  , (5, ("OFFSET", loadCpdlcComposeViewByID "LATD-1" Nothing Nothing))
+                  , (6, ("WX DEVIATION", loadCpdlcComposeViewByID "LATD-2" Nothing Nothing))
+                  , (7, ("FREE TEXT", loadCpdlcComposeViewByID "TXTD-1" Nothing Nothing))
+                  ]
+                _ ->
+                  []
+          }
+        loadUplinkLSK 9
+      else
+        loadView atcMenuView
   }
 
 cpdlcReportMenuView :: MCDUView
@@ -728,7 +759,11 @@ cpdlcReportMenuView = defView
       , (5, ("BACK ON RTE", loadCpdlcComposeViewByID "LATD-4" Nothing Nothing))
       ]
   , mcduViewOnLoad = do
-      loadUplinkLSK 9
+      online <- haveCpdlcLogon
+      if online then do
+        loadUplinkLSK 9
+      else
+        loadView atcMenuView
   }
 
 cpdlcWhenCanWeMenuView :: MCDUView
@@ -739,6 +774,10 @@ cpdlcWhenCanWeMenuView = defView
       , (4, ("ATC MENU", loadView atcMenuView))
       ]
   , mcduViewOnLoad = do
-      loadUplinkLSK 9
+      online <- haveCpdlcLogon
+      if online then do
+        loadUplinkLSK 9
+      else
+        loadView atcMenuView
   }
 

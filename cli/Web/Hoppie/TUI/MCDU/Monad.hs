@@ -68,6 +68,7 @@ data MCDUState =
     , mcduClearanceAtis :: Maybe Word8
     , mcduSendMessage :: TypedMessage -> Hoppie ()
     , mcduNetworkStatus :: NetworkStatus
+    , mcduDebugLog :: [String]
     }
 
 defMCDUState :: MCDUState
@@ -89,6 +90,7 @@ defMCDUState =
     Nothing
     (const $ return ())
     NetworkOK
+    []
 
 data MCDUView =
   MCDUView
@@ -276,6 +278,7 @@ flushAll :: MCDU ()
 flushAll = do
   buf <- gets mcduScreenBuffer
   liftIO $ drawMCDU buf
+  redrawLog
 
 flushScreen :: MCDU ()
 flushScreen = do
@@ -312,6 +315,21 @@ redrawScratch = do
       scratch'' = scratch' <> BS.replicate (screenW - BS.length scratch') (ord8 ' ')
   draw $ mcduPrint 0 (screenH - 1) color scratch''
   flushScratch
+
+redrawLog :: MCDU ()
+redrawLog = do
+  (terminalW, terminalH) <- liftIO $ getScreenSize
+  let logW = terminalW - screenW - 14
+  logLines <- gets $ reverse . take terminalH . concat . map (reverse . lineWrap logW) . mcduDebugLog
+  liftIO $ do
+    clearRect (screenW + 13) 0 (terminalW - 1) (terminalH - 1)
+    resetFG
+    resetBG
+    zipWithM_ (\y l -> liftIO $ do
+        moveTo (screenW + 13) y
+        putStr (take logW l)
+      ) [0..] logLines
+    hFlush stdout
 
 modifyView :: (MCDUView -> MCDUView) -> MCDU ()
 modifyView f =  do
@@ -427,24 +445,18 @@ handleLSK n = do
     Just (_, action) -> action
 
 debugPrint :: String -> MCDU ()
-debugPrint str =
-  liftIO $ do
-    resetFG
-    resetBG
-    moveTo 0 (screenH + 7)
-    putStrLn $ centerTo (screenW + 12) str
+debugPrint str = do
+  modify $ \s -> s
+    { mcduDebugLog = str : mcduDebugLog s }
+  redrawLog
 
 handleMCDUEvent :: MCDUView -> MCDUView -> MCDUView -> MCDUEvent -> MCDU ()
 handleMCDUEvent mainMenuView dlkMenuView atcMenuView ev = do
-  liftIO $ do
-    resetFG
-    resetBG
-    moveTo 0 (screenH + 6)
-    putStrLn $ centerTo (screenW + 12) (show ev)
   case ev of
     NetworkStatusEvent ns' -> do
       ns <- gets mcduNetworkStatus
       when (ns /= ns') $ do
+        debugPrint (show ns')
         case ns' of
           NetworkError err -> do
             lift . void $ makeErrorResponse Nothing (BS8.pack err) "NETWORK ERROR"
@@ -455,6 +467,7 @@ handleMCDUEvent mainMenuView dlkMenuView atcMenuView ev = do
       
 
     UplinkEvent mtm -> do
+      debugPrint (show mtm)
       case typedMessagePayload (payload mtm) of
         CPDLCPayload {} -> do
           modify $ \s -> s { mcduUnreadCPDLC = Just (metaUID mtm) }
@@ -462,6 +475,10 @@ handleMCDUEvent mainMenuView dlkMenuView atcMenuView ev = do
         _ -> do
           modify $ \s -> s { mcduUnreadDLK = Just (metaUID mtm) }
           scratchWarn "UPLINK"
+      reloadView
+
+    CurrentDataAuthorityEvent cda -> do
+      debugPrint (show cda)
       reloadView
 
     InputCommandEvent InputPgUp ->
