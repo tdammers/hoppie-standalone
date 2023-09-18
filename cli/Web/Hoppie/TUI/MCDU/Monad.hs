@@ -7,29 +7,33 @@
 module Web.Hoppie.TUI.MCDU.Monad
 where
 
+import qualified Web.Hoppie.CPDLC.Message as CPDLC
+import qualified Web.Hoppie.CPDLC.MessageTypes as CPDLC
 import Web.Hoppie.System
-import Web.Hoppie.Telex
+import Web.Hoppie.TUI.Input
 import Web.Hoppie.TUI.MCDU.Draw
 import Web.Hoppie.TUI.Output
-import Web.Hoppie.TUI.Input
 import Web.Hoppie.TUI.StringUtil
-import Web.Hoppie.CPDLC.Message (renderCPDLCMessage)
+import Web.Hoppie.Telex
 
+import Control.Applicative
+import Control.Concurrent.MVar
+import Control.Monad
+import Control.Monad.Reader
+import Control.Monad.State
+import Control.Monad.Trans.Maybe
+import Control.Monad.Except
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BS8
-import Control.Monad
-import Control.Monad.State
-import Control.Monad.Reader
-import Data.Word
-import System.IO
+import Data.Char
 import Data.Map (Map)
 import qualified Data.Map.Strict as Map
-import Data.Char
-import Text.Printf
-import Data.Time
 import Data.Maybe
-import Control.Monad.Trans.Maybe
+import Data.Time
+import Data.Word
+import System.IO
+import Text.Printf
 
 {-# ANN module ("HLint: ignore redundant <$>" :: String) #-}
 
@@ -205,6 +209,38 @@ sendClearanceRequest = do
       lift $ sendMessage $
         TypedMessage Nothing to (TelexPayload body)
       return True
+
+sendCpdlc :: CPDLC.MessageTypeID -> Maybe ByteString -> Maybe Word -> Map Word ByteString -> MCDU Bool
+sendCpdlc tyID toMay mrnMay varDict = do
+  sendMessage <- gets mcduSendMessage
+  dataAuthority <- asks hoppieCPDLCDataAuthority >>= liftIO . readMVar
+  cpdlcToMay <- runExceptT $ do
+    ty <- ExceptT . return . maybe (Left "TYPE") Right $ Map.lookup tyID CPDLC.downlinkMessages
+    to <- ExceptT . return . maybe (Left "TO") Right $ toMay <|> dataAuthority
+    argValues <- zipWithM
+          (\n _ -> ExceptT . return . maybe (Left "ARGS") Right $ Map.lookup n varDict)
+          [0,1..] (CPDLC.msgArgs ty)
+    nextMin <- lift . lift $ makeMIN
+    let cpdlc = CPDLC.CPDLCMessage
+            { cpdlcMIN = nextMin
+            , cpdlcMRN = mrnMay
+            , cpdlcReplyOpts = CPDLC.msgReplyOpts ty
+            , cpdlcParts =
+                [ CPDLC.CPDLCPart
+                    { cpdlcType = tyID
+                    , cpdlcArgs = argValues
+                    }
+                ]
+            }
+    return (cpdlc, to)
+  case cpdlcToMay of
+    Right (cpdlc, to) -> do
+      lift $ sendMessage $
+        TypedMessage Nothing to (CPDLCPayload cpdlc)
+      return True
+    Left err-> do
+      scratchWarn $ "INVALID " <> err
+      return False
 
 setReferenceAirport :: MCDU ()
 setReferenceAirport =

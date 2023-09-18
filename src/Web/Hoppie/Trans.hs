@@ -49,6 +49,8 @@ data HoppieEnv =
     , hoppieDownlinks :: !(MVar (Map Word (WithMeta DownlinkStatus TypedMessage)))
     , hoppieCPDLCUplinks :: !(MVar (Map Word Word))
     , hoppieCPDLCDownlinks :: !(MVar (Map Word Word))
+    , hoppieCPDLCNextMIN :: !(MVar Word)
+    , hoppieCPDLCDataAuthority :: !(MVar (Maybe ByteString))
     , hoppieNextUID :: !(MVar Word)
     , hoppieNetworkStatus :: !(MVar NetworkStatus)
     , hoppieFastPollingCounter :: !(MVar Int)
@@ -68,6 +70,8 @@ makeHoppieEnv callsign config =
     <*> newMVar mempty
     <*> newMVar mempty
     <*> newMVar mempty
+    <*> newMVar 0
+    <*> newMVar Nothing
     <*> newMVar 0
     <*> newMVar NetworkOK
     <*> newMVar 0
@@ -226,6 +230,12 @@ makeUID = do
   uidVar <- asks hoppieNextUID
   liftIO $ modifyMVar uidVar $ \uid -> do
     return (succ uid, uid)
+
+makeMIN :: MonadIO m => HoppieT m Word
+makeMIN = do
+  minVar <- asks hoppieCPDLCNextMIN
+  liftIO $ modifyMVar minVar $ \minVal -> do
+    return (succ minVal, minVal)
 
 send :: MonadIO m => TypedMessage -> HoppieT m [Word]
 send tm = do

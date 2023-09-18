@@ -33,7 +33,6 @@ import qualified Data.ByteString.Char8 as BS8
 import Data.Word
 import Data.String
 import Data.List
-import Debug.Trace
 import Data.Char
 
 isSpace8 :: Word8 -> Bool

@@ -7,29 +7,28 @@
 module Web.Hoppie.TUI.MCDU.Views
 where
 
-import Web.Hoppie.System
-import Web.Hoppie.Telex
-import Web.Hoppie.TUI.StringUtil
-import Web.Hoppie.TUI.MCDU.Monad
-import Web.Hoppie.TUI.MCDU.Draw
 import qualified Web.Hoppie.CPDLC.Message as CPDLC
 import qualified Web.Hoppie.CPDLC.MessageTypes as CPDLC
+import Web.Hoppie.System
+import Web.Hoppie.TUI.MCDU.Draw
+import Web.Hoppie.TUI.MCDU.Monad
+import Web.Hoppie.TUI.StringUtil
+import Web.Hoppie.Telex
 
+import Control.Concurrent.MVar
+import Control.Monad
+import Control.Monad.Reader
+import Control.Monad.State
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BS8
-import Control.Monad
-import Control.Monad.State
-import Control.Monad.Reader
-import Data.Word
-import System.IO
+import Data.Char
 import Data.Map (Map)
 import qualified Data.Map.Strict as Map
-import Data.Char
-import Text.Printf
-import Data.Time
 import Data.Maybe
-import Control.Monad.Trans.Maybe
+import Data.Time
+import Text.Printf
+import Data.Word
 
 {-# ANN module ("HLint: ignore redundant <$>" :: String) #-}
 
@@ -89,6 +88,122 @@ dlkMenuView = defView
   , mcduViewOnLoad = do
       loadUplinkLSK 9
   }
+
+data CPDLCEditorState =
+  CPDLCEditorState
+    { cpdlcEditorVars :: Map Word ByteString
+    }
+
+defCPDLCEditorState :: CPDLCEditorState
+defCPDLCEditorState =
+  CPDLCEditorState
+    { cpdlcEditorVars = mempty
+    }
+
+loadCpdlcComposeViewByID :: CPDLC.MessageTypeID -> Maybe ByteString -> Maybe Word -> MCDU ()
+loadCpdlcComposeViewByID tyID toMay mrnMay = do
+  let tyMay = Map.lookup tyID CPDLC.downlinkMessages
+  case tyMay of
+    Just ty -> do
+      loadView =<< mkCpdlcComposeView tyID ty toMay mrnMay
+    Nothing -> do
+      scratchWarn "INVALID"
+
+mkCpdlcComposeView :: CPDLC.MessageTypeID -> CPDLC.MessageType -> Maybe ByteString -> Maybe Word -> MCDU MCDUView
+mkCpdlcComposeView tyID ty toMay mrnMay = do
+  editorStateVar <- liftIO $ newMVar defCPDLCEditorState
+  let getVar index = Map.lookup index . cpdlcEditorVars <$> liftIO (readMVar editorStateVar)
+      setVar index (Just val) = do
+        liftIO $
+          modifyMVar_ editorStateVar (\s -> return s
+            { cpdlcEditorVars = Map.insert index val (cpdlcEditorVars s) })
+        return True
+      setVar index Nothing = do
+        liftIO $
+          modifyMVar_ editorStateVar (\s -> return s
+            { cpdlcEditorVars = Map.delete index (cpdlcEditorVars s) })
+        return True
+      entrySpec = getEntryItems ty
+      hydrate = do
+        vars <- cpdlcEditorVars <$> liftIO (readMVar editorStateVar)
+        return [ (label, varMay, varMay >>= \i -> Map.lookup i vars)
+               | (label, varMay) <- entrySpec
+               ]
+  let numPages = (length entrySpec + 5) `div` 5
+  return defView
+            { mcduViewTitle = "CPDLC COMPOSE"
+            , mcduViewNumPages = numPages
+            , mcduViewOnLoad = do
+                entryItems <- hydrate
+                curPage <- gets (mcduViewPage . mcduView)
+                let curEntryItems = take 5 . drop (curPage * 5) $ entryItems
+                    lastPage = curPage == numPages - 1
+                modifyView $ \v -> v
+                    { mcduViewLSKBindings = mempty
+                    , mcduViewDraw = do
+                        zipWithM_ (\y (label, varMay, valMay) -> do
+                            mcduPrint 1 (y * 2 + 1) white label
+                            forM_ varMay $ \_var -> do
+                              let valFmt = fromMaybe "----" valMay
+                              mcduPrintR (screenW - 1) (y * 2 + 2) green valFmt
+                          )
+                          [0..4] curEntryItems
+                    }
+                let mkBinding n (_, varMay, _) = do
+                      forM_ varMay $ \index -> do
+                        addLskBinding (n + 5) "" $ do
+                          scratchInteract
+                            (setVar index)
+                            (getVar index)
+                          reloadView
+                zipWithM_ mkBinding [0..4] curEntryItems
+                when lastPage $ do
+                  vars <- liftIO $ cpdlcEditorVars <$> readMVar editorStateVar
+                  addLskBinding 8 "SEND"
+                    (sendCpdlc tyID toMay mrnMay vars >>= \case
+                      True -> loadView cpdlcMessageLogView
+                      False -> reloadView
+                    )
+                  loadUplinkLSK 9
+            }
+
+getEntryItems :: CPDLC.MessageType -> [(ByteString, Maybe Word)]
+getEntryItems ty =
+  go (CPDLC.messagePatternItems $ CPDLC.msgPattern ty)
+  where
+    go :: [CPDLC.MessagePatternItem Word] -> [(ByteString, Maybe Word)]
+    go [] = []
+    go xs =
+      let literalLines :: [ByteString]
+          literalLines =
+            lineWrap (screenW - 2) .
+            wordJoin .
+            concatMap getLiteralBS .
+            takeWhile isLiteral $
+            xs
+      in
+        case (literalLines, dropWhile isLiteral xs) of
+          (_, []) ->
+            [(lit, Nothing) | lit <- literalLines]
+          ([], (CPDLC.MessageArg i:xs')) ->
+            ("", Just i) : go xs'
+          (_, (CPDLC.MessageArg i:xs')) ->
+            [(lit, Nothing) | lit <- init literalLines] ++
+            [(lit, Just i) | lit <- drop (length literalLines - 1) literalLines] ++
+            go xs'
+          (_, _:xs') ->
+            [(lit, Nothing) | lit <- literalLines] ++
+            go xs'
+
+    isLiteral :: CPDLC.MessagePatternItem Word -> Bool
+    isLiteral (CPDLC.MessageLiteral {}) = True
+    isLiteral (CPDLC.MessageOptional {}) = True
+    isLiteral _ = False
+
+    getLiteralBS :: CPDLC.MessagePatternItem Word -> [ByteString]
+    getLiteralBS (CPDLC.MessageLiteral lit) = wordSplit lit
+    getLiteralBS (CPDLC.MessageOptional False xs) = xs
+    getLiteralBS _ = []
 
 telexSendView :: Bool -> MCDUView
 telexSendView sent = defView
@@ -363,31 +478,38 @@ formatMessage message =
 messageBindings :: HoppieMessage -> [(ByteString, MCDU ())]
 messageBindings (UplinkMessage mtm) =
   case typedMessagePayload . payload $ mtm of
-    CPDLCPayload cpdlc -> 
-      case CPDLC.cpdlcParts cpdlc of
-        [] -> []
-        (part:_) ->
-          let tyMay = Map.lookup (CPDLC.cpdlcType part) CPDLC.allMessageTypes
-          in case tyMay of
-            Nothing -> []
-            Just ty -> case CPDLC.msgReplyOpts ty of
-              CPDLC.ReplyAN ->
-                [ ("AFFIRM", return ())
-                , ("NEGATIVE", return ())
-                ]
-              CPDLC.ReplyWU ->
-                [ ("WILCO", return ())
-                , ("UNABLE", return ())
-                ]
-              CPDLC.ReplyR ->
-                [ ("ROGER", return ())
-                , ("UNABLE", return ())
-                ]
-              CPDLC.ReplyY ->
-                [ ("FREE TEXT", return ())
-                ]
-              CPDLC.ReplyN ->
-                []
+    CPDLCPayload cpdlc ->
+      let mrn = CPDLC.cpdlcMIN cpdlc
+          sender = typedMessageCallsign . payload $ mtm
+      in
+        case CPDLC.cpdlcParts cpdlc of
+          [] -> []
+          (part:_) ->
+            let tyMay = Map.lookup (CPDLC.cpdlcType part) CPDLC.allMessageTypes
+            in case tyMay of
+              Nothing -> []
+              Just ty -> case CPDLC.msgReplyOpts ty of
+                CPDLC.ReplyAN ->
+                  [ ("AFFIRM", loadCpdlcComposeViewByID "RSPD-5" (Just sender) (Just mrn))
+                  , ("NEGATIVE", loadCpdlcComposeViewByID "RSPD-6" (Just sender) (Just mrn))
+                  , ("STANDBY", loadCpdlcComposeViewByID "RSPD-3" (Just sender) (Just mrn))
+                  ]
+                CPDLC.ReplyWU ->
+                  [ ("WILCO", loadCpdlcComposeViewByID "RSPD-1" (Just sender) (Just mrn))
+                  , ("UNABLE", loadCpdlcComposeViewByID "RSPD-2" (Just sender) (Just mrn))
+                  , ("STANDBY", loadCpdlcComposeViewByID "RSPD-3" (Just sender) (Just mrn))
+                  ]
+                CPDLC.ReplyR ->
+                  [ ("ROGER", loadCpdlcComposeViewByID "RSPD-4" (Just sender) (Just mrn))
+                  , ("UNABLE", loadCpdlcComposeViewByID "RSPD-2" (Just sender) (Just mrn))
+                  , ("STANDBY", loadCpdlcComposeViewByID "RSPD-3" (Just sender) (Just mrn))
+                  ]
+                CPDLC.ReplyY ->
+                  [ ("FREE TEXT", loadCpdlcComposeViewByID "TXTD-2" (Just sender) (Just mrn))
+                  , ("STANDBY", loadCpdlcComposeViewByID "RSPD-3" (Just sender) (Just mrn))
+                  ]
+                CPDLC.ReplyN ->
+                  []
     _ -> []
 messageBindings _ = []
 
@@ -465,7 +587,76 @@ atcMenuView = defView
   { mcduViewTitle = "ATC MENU"
   , mcduViewLSKBindings = Map.fromList
       [ (0, ("MSG LOG", loadView cpdlcMessageLogView))
+      , (1, ("LOGON", return ())) -- TODO
+      , (3, ("FREE TEXT", loadCpdlcComposeViewByID "TXTD-2" Nothing Nothing))
       , (4, ("MAIN MENU", loadView mainMenuView))
+      , (5, ("EMERGENCY", return ())) -- TODO
+      , (6, ("REQUEST", loadView cpdlcRequestMenuView))
+      , (7, ("REPORT", loadView cpdlcReportMenuView))
+      , (8, ("WHEN CAN WE", loadView cpdlcWhenCanWeMenuView))
+      ]
+  , mcduViewOnLoad = do
+      loadUplinkLSK 9
+  }
+
+cpdlcRequestMenuView :: MCDUView
+cpdlcRequestMenuView = defView
+  { mcduViewTitle = "ATC REQUEST"
+  , mcduViewNumPages = 2
+  , mcduViewOnLoad = do
+      page <- gets (mcduViewPage . mcduView)
+      modifyView $ \v -> v
+        { mcduViewLSKBindings = Map.fromList $
+            case page of
+              0 ->
+                [ (0, ("DIRECT", loadCpdlcComposeViewByID "RTED-1" Nothing Nothing))
+                , (1, ("LEVEL", loadCpdlcComposeViewByID "LVLD-1" Nothing Nothing))
+                , (2, ("CLIMB", loadCpdlcComposeViewByID "LVLD-2" Nothing Nothing))
+                , (3, ("DESCENT", loadCpdlcComposeViewByID "LVLD-3" Nothing Nothing))
+                , (5, ("LVL AT POS", loadCpdlcComposeViewByID "LVLD-4" Nothing Nothing))
+                , (6, ("LVL AT TIME", loadCpdlcComposeViewByID "LVLD-5" Nothing Nothing))
+                , (7, ("SPEED", loadCpdlcComposeViewByID "SPDD-1" Nothing Nothing))
+                , (8, ("VOICE CNT", loadCpdlcComposeViewByID "COMD-1" Nothing Nothing))
+
+                , (4, ("ATC MENU", loadView atcMenuView))
+                ]
+              1 ->
+                [ (0, ("ROUTE", loadCpdlcComposeViewByID "RTED-2" Nothing Nothing))
+                , (1, ("RTE CLX", loadCpdlcComposeViewByID "RTED-3" Nothing Nothing))
+                , (2, ("CLEARANCE", loadCpdlcComposeViewByID "RTED-4" Nothing Nothing))
+                , (3, ("HEADING", loadCpdlcComposeViewByID "RTED-6" Nothing Nothing))
+                , (4, ("GROUND TRK", loadCpdlcComposeViewByID "RTED-7" Nothing Nothing))
+                , (5, ("OFFSET", loadCpdlcComposeViewByID "LATD-1" Nothing Nothing))
+                , (6, ("WX DEVIATION", loadCpdlcComposeViewByID "LATD-2" Nothing Nothing))
+                , (7, ("FREE TEXT", loadCpdlcComposeViewByID "TXTD-1" Nothing Nothing))
+                ]
+              _ ->
+                []
+        }
+      loadUplinkLSK 9
+  }
+
+cpdlcReportMenuView :: MCDUView
+cpdlcReportMenuView = defView
+  { mcduViewTitle = "ATC REPORT"
+  , mcduViewLSKBindings = Map.fromList
+      [ (0, ("POSREP", loadCpdlcComposeViewByID "RTED-5" Nothing Nothing))
+      , (1, ("ASSIGNED RTE", loadCpdlcComposeViewByID "RTED-9" Nothing Nothing))
+      , (2, ("ETA", loadCpdlcComposeViewByID "RTED-10" Nothing Nothing))
+      , (3, ("CLEAR OF WX", loadCpdlcComposeViewByID "LATD-3" Nothing Nothing))
+      , (4, ("ATC MENU", loadView atcMenuView))
+      , (5, ("BACK ON RTE", loadCpdlcComposeViewByID "LATD-4" Nothing Nothing))
+      ]
+  , mcduViewOnLoad = do
+      loadUplinkLSK 9
+  }
+
+cpdlcWhenCanWeMenuView :: MCDUView
+cpdlcWhenCanWeMenuView = defView
+  { mcduViewTitle = "ATC WHEN CAN WE"
+  , mcduViewLSKBindings = Map.fromList
+      [ (0, ("BACK ON RTE", loadCpdlcComposeViewByID "RTED-8" Nothing Nothing))
+      , (4, ("ATC MENU", loadView atcMenuView))
       ]
   , mcduViewOnLoad = do
       loadUplinkLSK 9

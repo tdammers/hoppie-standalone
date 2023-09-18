@@ -149,6 +149,8 @@ redrawMCDU buf = do
   forM_ [0..screenH-1] $ \y -> do
     redrawMCDULine y buf
   moveTo 0 (screenH + 6)
+  resetFG
+  resetBG
   hFlush stdout
 
 drawKey :: Int -> Int -> String -> String -> IO ()
@@ -240,5 +242,8 @@ drawMCDU screenBuf = do
   drawKey 8 (screenH + 1) "Esc" "MENU"
   drawKey 15 (screenH + 1) "F11" "DLK"
   drawKey 22 (screenH + 1) "F12" "ATC"
+
+  resetFG
+  resetBG
 
   redrawMCDU screenBuf
