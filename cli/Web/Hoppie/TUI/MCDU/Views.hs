@@ -475,43 +475,84 @@ formatMessage message =
                     msgTyStr
                     statusStr
 
-messageBindings :: HoppieMessage -> [(ByteString, MCDU ())]
+messageBindings :: HoppieMessage -> MCDU [(ByteString, MCDU ())]
 messageBindings (UplinkMessage mtm) =
   case typedMessagePayload . payload $ mtm of
-    CPDLCPayload cpdlc ->
+    CPDLCPayload cpdlc -> do
       let mrn = CPDLC.cpdlcMIN cpdlc
           sender = typedMessageCallsign . payload $ mtm
-      in
-        case CPDLC.cpdlcParts cpdlc of
-          [] -> []
-          (part:_) ->
-            let tyMay = Map.lookup (CPDLC.cpdlcType part) CPDLC.allMessageTypes
-            in case tyMay of
-              Nothing -> []
-              Just ty -> case CPDLC.msgReplyOpts ty of
-                CPDLC.ReplyAN ->
-                  [ ("AFFIRM", loadCpdlcComposeViewByID "RSPD-5" (Just sender) (Just mrn))
-                  , ("NEGATIVE", loadCpdlcComposeViewByID "RSPD-6" (Just sender) (Just mrn))
-                  , ("STANDBY", loadCpdlcComposeViewByID "RSPD-3" (Just sender) (Just mrn))
-                  ]
-                CPDLC.ReplyWU ->
-                  [ ("WILCO", loadCpdlcComposeViewByID "RSPD-1" (Just sender) (Just mrn))
-                  , ("UNABLE", loadCpdlcComposeViewByID "RSPD-2" (Just sender) (Just mrn))
-                  , ("STANDBY", loadCpdlcComposeViewByID "RSPD-3" (Just sender) (Just mrn))
-                  ]
-                CPDLC.ReplyR ->
-                  [ ("ROGER", loadCpdlcComposeViewByID "RSPD-4" (Just sender) (Just mrn))
-                  , ("UNABLE", loadCpdlcComposeViewByID "RSPD-2" (Just sender) (Just mrn))
-                  , ("STANDBY", loadCpdlcComposeViewByID "RSPD-3" (Just sender) (Just mrn))
-                  ]
-                CPDLC.ReplyY ->
-                  [ ("FREE TEXT", loadCpdlcComposeViewByID "TXTD-2" (Just sender) (Just mrn))
-                  , ("STANDBY", loadCpdlcComposeViewByID "RSPD-3" (Just sender) (Just mrn))
-                  ]
-                CPDLC.ReplyN ->
-                  []
-    _ -> []
-messageBindings _ = []
+      case CPDLC.cpdlcParts cpdlc of
+        [] -> return []
+        (part:_) -> do
+          let tyMay = Map.lookup (CPDLC.cpdlcType part) CPDLC.allMessageTypes
+          let bindings3 =
+                case tyMay of
+                  Nothing ->
+                    []
+                  Just ty ->
+                    cpdlcReplyOptBindings sender mrn (CPDLC.msgReplyOpts ty)
+          parentMay <- lift $ getCpdlcParentDownlink mtm
+          childMay <- lift $ getCpdlcChildDownlink mtm
+          let bindings1 =
+                case childMay of
+                  Just child -> 
+                    [("REPLY", loadView $ messageView (metaUID child))]
+                  Nothing ->
+                    bindings3
+              bindings2 =
+                case parentMay of
+                  Just parent ->
+                    [("REQUEST", loadView $ messageView (metaUID parent))]
+                  Nothing ->
+                    []
+          return $ bindings1 ++ bindings2
+    _ -> return []
+messageBindings (DownlinkMessage mtm) =
+  case typedMessagePayload . payload $ mtm of
+    CPDLCPayload cpdlc -> do
+      case CPDLC.cpdlcParts cpdlc of
+        [] -> return []
+        _ -> do
+          parentMay <- lift $ getCpdlcParentUplink mtm
+          childMay <- lift $ getCpdlcChildUplink mtm
+          let bindings1 =
+                case childMay of
+                  Just child -> 
+                    [("REPLY", loadView $ messageView (metaUID child))]
+                  Nothing ->
+                    []
+              bindings2 =
+                case parentMay of
+                  Just parent ->
+                    [("REQUEST", loadView $ messageView (metaUID parent))]
+                  Nothing ->
+                    []
+          return $ bindings1 ++ bindings2
+    _ -> return []
+
+cpdlcReplyOptBindings :: ByteString -> Word -> CPDLC.ReplyOpts -> [ (ByteString, MCDU ()) ]
+cpdlcReplyOptBindings sender mrn = \case
+  CPDLC.ReplyAN ->
+      [ ("AFFIRM", loadCpdlcComposeViewByID "RSPD-5" (Just sender) (Just mrn))
+      , ("NEGATIVE", loadCpdlcComposeViewByID "RSPD-6" (Just sender) (Just mrn))
+      , ("STANDBY", loadCpdlcComposeViewByID "RSPD-3" (Just sender) (Just mrn))
+      ]
+  CPDLC.ReplyWU ->
+      [ ("WILCO", loadCpdlcComposeViewByID "RSPD-1" (Just sender) (Just mrn))
+      , ("UNABLE", loadCpdlcComposeViewByID "RSPD-2" (Just sender) (Just mrn))
+      , ("STANDBY", loadCpdlcComposeViewByID "RSPD-3" (Just sender) (Just mrn))
+      ]
+  CPDLC.ReplyR ->
+      [ ("ROGER", loadCpdlcComposeViewByID "RSPD-4" (Just sender) (Just mrn))
+      , ("UNABLE", loadCpdlcComposeViewByID "RSPD-2" (Just sender) (Just mrn))
+      , ("STANDBY", loadCpdlcComposeViewByID "RSPD-3" (Just sender) (Just mrn))
+      ]
+  CPDLC.ReplyY ->
+      [ ("FREE TEXT", loadCpdlcComposeViewByID "TXTD-2" (Just sender) (Just mrn))
+      , ("STANDBY", loadCpdlcComposeViewByID "RSPD-3" (Just sender) (Just mrn))
+      ]
+  CPDLC.ReplyN ->
+      []
 
 messageView :: Word -> MCDUView
 messageView uid =
@@ -548,8 +589,8 @@ messageView uid =
 
             page <- gets $ mcduViewPage . mcduView
 
-            let messageBindingsRaw = messageBindings message
-                firstUsableLSKLine = ((length msgLines + 1) `div` 2) * 2
+            messageBindingsRaw <- messageBindings message
+            let firstUsableLSKLine = ((length msgLines + 1) `div` 2) * 2
                 numLSKLines = (length messageBindingsRaw `div` 2) * 2
                 numPagesTotal = (firstUsableLSKLine + numLSKLines + 10) `div` 10
 

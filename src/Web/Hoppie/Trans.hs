@@ -47,8 +47,10 @@ data HoppieEnv =
     , hoppieCallsign :: !ByteString
     , hoppieUplinks :: !(MVar (Map Word (WithMeta UplinkStatus TypedMessage)))
     , hoppieDownlinks :: !(MVar (Map Word (WithMeta DownlinkStatus TypedMessage)))
-    , hoppieCPDLCUplinks :: !(MVar (Map Word Word))
+    , hoppieCPDLCUplinks :: !(MVar (Map (ByteString, Word) Word))
     , hoppieCPDLCDownlinks :: !(MVar (Map Word Word))
+    , hoppieCPDLCUplinksByMRN :: !(MVar (Map (ByteString, Word) Word))
+    , hoppieCPDLCDownlinksByMRN :: !(MVar (Map (ByteString, Word) Word))
     , hoppieCPDLCNextMIN :: !(MVar Word)
     , hoppieCPDLCDataAuthority :: !(MVar (Maybe ByteString))
     , hoppieNextUID :: !(MVar Word)
@@ -67,6 +69,8 @@ makeHoppieEnv callsign config =
     config
     callsign
     <$> newMVar mempty
+    <*> newMVar mempty
+    <*> newMVar mempty
     <*> newMVar mempty
     <*> newMVar mempty
     <*> newMVar mempty
@@ -161,21 +165,88 @@ saveUplink :: MonadIO m => WithMeta UplinkStatus TypedMessage -> HoppieT m ()
 saveUplink tsm = do
   uplinksVar <- asks hoppieUplinks
   liftIO $ modifyMVar_ uplinksVar $ return . Map.insert (metaUID tsm) tsm
-  case typedMessagePayload (payload tsm) of
-    CPDLCPayload cpdlc -> do
-      cpdlcUplinksVar <- asks hoppieCPDLCUplinks
-      liftIO $ modifyMVar_ cpdlcUplinksVar $ return . Map.insert (cpdlcMIN cpdlc) (metaUID tsm)
-    _ -> return ()
+  forM_ (messageCPDLCPayload tsm) $ \cpdlc -> do
+    cpdlcUplinksVar <- asks hoppieCPDLCUplinks
+    cpdlcDownlinksVar <- asks hoppieCPDLCDownlinks
+    let callsign = typedMessageCallsign (payload tsm)
+    liftIO $ modifyMVar_ cpdlcUplinksVar $ return . Map.insert (callsign, cpdlcMIN cpdlc) (metaUID tsm)
+    forM_ (cpdlcMRN cpdlc) $ \mrn -> do
+      cpdlcUplinksByMRNVar <- asks hoppieCPDLCUplinksByMRN
+      liftIO $ modifyMVar_ cpdlcUplinksByMRNVar $ return . Map.insert (callsign, mrn) (metaUID tsm)
+      parentDownlinkMay <- liftIO $ Map.lookup mrn <$> readMVar cpdlcDownlinksVar
+      forM_ parentDownlinkMay $ \parentUID -> do
+        setDownlinkStatus parentUID RepliedDownlink
 
 saveDownlink :: MonadIO m => WithMeta DownlinkStatus TypedMessage -> HoppieT m ()
 saveDownlink tsm = do
   downlinksVar <- asks hoppieDownlinks
   liftIO $ modifyMVar_ downlinksVar $ return . Map.insert (metaUID tsm) tsm
-  case typedMessagePayload (payload tsm) of
-    CPDLCPayload cpdlc -> do
-      cpdlcDownlinksVar <- asks hoppieCPDLCDownlinks
-      liftIO $ modifyMVar_ cpdlcDownlinksVar $ return . Map.insert (cpdlcMIN cpdlc) (metaUID tsm)
-    _ -> return ()
+  forM_ (messageCPDLCPayload tsm) $ \cpdlc -> do
+    cpdlcUplinksVar <- asks hoppieCPDLCUplinks
+    cpdlcDownlinksVar <- asks hoppieCPDLCDownlinks
+    liftIO $ modifyMVar_ cpdlcDownlinksVar $ return . Map.insert (cpdlcMIN cpdlc) (metaUID tsm)
+    forM_ (cpdlcMRN cpdlc) $ \mrn -> do
+      let callsign = typedMessageCallsign (payload tsm)
+      cpdlcDownlinksByMRNVar <- asks hoppieCPDLCDownlinksByMRN
+      liftIO $ modifyMVar_ cpdlcDownlinksByMRNVar $ return . Map.insert (callsign, mrn) (metaUID tsm)
+      parentUplinkMay <- liftIO $ Map.lookup (callsign, mrn) <$> readMVar cpdlcUplinksVar
+      forM_ parentUplinkMay $ \parentUID -> do
+        setUplinkStatus parentUID RepliedUplink
+
+messageCPDLCPayload :: WithMeta a TypedMessage -> Maybe CPDLCMessage
+messageCPDLCPayload tsm = case typedMessagePayload (payload tsm) of
+  CPDLCPayload cpdlc -> Just cpdlc
+  _ -> Nothing
+
+getCpdlcParentUplink :: MonadIO m
+                     => WithMeta DownlinkStatus TypedMessage
+                     -> HoppieT m (Maybe (WithMeta UplinkStatus TypedMessage))
+getCpdlcParentUplink tsm = do
+  cpdlcUplinks <- asks hoppieCPDLCUplinks >>= liftIO . readMVar
+  uplinks <- asks hoppieUplinks >>= liftIO . readMVar
+  let callsign = typedMessageCallsign (payload tsm)
+  return $ do
+    cpdlc <- messageCPDLCPayload tsm
+    mrn <- cpdlcMRN cpdlc
+    uid <- Map.lookup (callsign, mrn) cpdlcUplinks
+    Map.lookup uid uplinks
+
+getCpdlcParentDownlink :: MonadIO m
+                     => WithMeta UplinkStatus TypedMessage
+                     -> HoppieT m (Maybe (WithMeta DownlinkStatus TypedMessage))
+getCpdlcParentDownlink tsm = do
+  cpdlcDownlinks <- asks hoppieCPDLCDownlinks >>= liftIO . readMVar
+  downlinks <- asks hoppieDownlinks >>= liftIO . readMVar
+  return $ do
+    cpdlc <- messageCPDLCPayload tsm
+    mrn <- cpdlcMRN cpdlc
+    uid <- Map.lookup mrn cpdlcDownlinks
+    Map.lookup uid downlinks
+
+getCpdlcChildUplink :: MonadIO m
+                     => WithMeta DownlinkStatus TypedMessage
+                     -> HoppieT m (Maybe (WithMeta UplinkStatus TypedMessage))
+getCpdlcChildUplink tsm = do
+  cpdlcUplinks <- asks hoppieCPDLCUplinksByMRN >>= liftIO . readMVar
+  uplinks <- asks hoppieUplinks >>= liftIO . readMVar
+  let callsign = typedMessageCallsign (payload tsm)
+  return $ do
+    cpdlc <- messageCPDLCPayload tsm
+    uid <- Map.lookup (callsign, cpdlcMIN cpdlc) cpdlcUplinks
+    Map.lookup uid uplinks
+
+getCpdlcChildDownlink :: MonadIO m
+                     => WithMeta UplinkStatus TypedMessage
+                     -> HoppieT m (Maybe (WithMeta DownlinkStatus TypedMessage))
+getCpdlcChildDownlink tsm = do
+  cpdlcDownlinks <- asks hoppieCPDLCDownlinksByMRN >>= liftIO . readMVar
+  downlinks <- asks hoppieDownlinks >>= liftIO . readMVar
+  let callsign = typedMessageCallsign (payload tsm)
+  return $ do
+    cpdlc <- messageCPDLCPayload tsm
+    uid <- Map.lookup (callsign, cpdlcMIN cpdlc) cpdlcDownlinks
+    Map.lookup uid downlinks
+
 
 setUplinkStatus :: MonadIO m => Word -> UplinkStatus -> HoppieT m ()
 setUplinkStatus uid status = do
@@ -203,10 +274,10 @@ getMessage uid = do
   ul <- getUplink uid
   return $ (UplinkMessage <$> ul) <|> (DownlinkMessage <$> dl)
 
-getCPDLCUplink :: MonadIO m => Word -> HoppieT m (Maybe (WithMeta UplinkStatus TypedMessage))
-getCPDLCUplink cMIN = do
+getCPDLCUplink :: MonadIO m => ByteString -> Word -> HoppieT m (Maybe (WithMeta UplinkStatus TypedMessage))
+getCPDLCUplink callsign cMIN = do
   cpdlcUplinkVar <- asks hoppieCPDLCUplinks
-  uidMay <- Map.lookup cMIN <$> liftIO (readMVar cpdlcUplinkVar)
+  uidMay <- Map.lookup (callsign, cMIN) <$> liftIO (readMVar cpdlcUplinkVar)
   case uidMay of
     Nothing -> return Nothing
     Just uid -> getUplink uid
@@ -218,12 +289,6 @@ getCPDLCDownlink cMIN = do
   case uidMay of
     Nothing -> return Nothing
     Just uid -> getDownlink uid
-
-getCPDLCMessage :: MonadIO m => Word -> HoppieT m (Maybe HoppieMessage)
-getCPDLCMessage uid = do
-  dl <- getCPDLCDownlink uid
-  ul <- getCPDLCUplink uid
-  return $ (UplinkMessage <$> ul) <|> (DownlinkMessage <$> dl)
 
 makeUID :: MonadIO m => HoppieT m Word
 makeUID = do
