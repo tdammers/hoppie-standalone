@@ -23,9 +23,10 @@ runSystem :: ByteString
           -> Config
           -> (WithMeta UplinkStatus TypedMessage -> Hoppie ())
           -> (NetworkStatus -> Hoppie ())
+          -> (Maybe ByteString -> Hoppie ())
           -> ((TypedMessage -> Hoppie ()) -> Hoppie ())
           -> IO ()
-runSystem callsign config onUplink onNetworkStatus runUI = do
+runSystem callsign config onUplink onNetworkStatus onCpdlcLogon runUI = do
   env <- makeHoppieEnv callsign config
   race_
     (runHoppieTWith env (runUI send'))
@@ -33,9 +34,12 @@ runSystem callsign config onUplink onNetworkStatus runUI = do
   where
     withStatusCheck action = do
       ns <- asks hoppieNetworkStatus >>= lift . readMVar
+      da <- asks hoppieCpdlcDataAuthorities >>= lift . readMVar
       retval <- action
       ns' <- asks hoppieNetworkStatus >>= lift . readMVar
+      da' <- asks hoppieCpdlcDataAuthorities >>= lift . readMVar
       when (ns /= ns') (onNetworkStatus ns')
+      when (da /= da') (onCpdlcLogon $ currentDataAuthority da')
       return retval
 
     send' tm = do

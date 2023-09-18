@@ -12,6 +12,7 @@ import Control.Concurrent.STM
 import Control.Concurrent.Async (race_)
 import Control.Monad
 import Data.Maybe
+import Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as BS8
 import System.Environment
 import Control.Monad.IO.Class
@@ -36,6 +37,7 @@ main = do
       config
       (handleUplink eventChan)
       (handleNetworkStatus eventChan)
+      (handleCurrentDataAuthority eventChan)
       (hoppieMain eventChan)
 
 runInputPusher :: TChan Word8 -> TChan MCDUEvent -> IO ()
@@ -49,6 +51,10 @@ handleUplink eventChan = do
 handleNetworkStatus :: TChan MCDUEvent -> NetworkStatus -> Hoppie ()
 handleNetworkStatus eventChan = do
   liftIO . atomically . writeTChan eventChan . NetworkStatusEvent
+
+handleCurrentDataAuthority :: TChan MCDUEvent -> Maybe ByteString -> Hoppie ()
+handleCurrentDataAuthority eventChan = do
+  liftIO . atomically . writeTChan eventChan . CurrentDataAuthorityEvent
 
 hoppieMain :: TChan MCDUEvent -> (TypedMessage -> Hoppie ()) -> Hoppie ()
 hoppieMain eventChan sendMessage = do

@@ -41,6 +41,7 @@ data MCDUEvent
   = InputCommandEvent InputCommand
   | UplinkEvent (WithMeta UplinkStatus TypedMessage)
   | NetworkStatusEvent NetworkStatus
+  | CurrentDataAuthorityEvent (Maybe ByteString)
   deriving (Show)
 
 data ScratchVal
@@ -213,13 +214,13 @@ sendClearanceRequest = do
 sendCpdlc :: CPDLC.MessageTypeID -> Maybe ByteString -> Maybe Word -> Map Word ByteString -> MCDU Bool
 sendCpdlc tyID toMay mrnMay varDict = do
   sendMessage <- gets mcduSendMessage
-  dataAuthority <- asks hoppieCPDLCDataAuthority >>= liftIO . readMVar
+  dataAuthority <- asks hoppieCpdlcDataAuthorities >>= fmap currentDataAuthority . liftIO . readMVar
   cpdlcToMay <- runExceptT $ do
     ty <- ExceptT . return . maybe (Left "TYPE") Right $ Map.lookup tyID CPDLC.downlinkMessages
     to <- ExceptT . return . maybe (Left "TO") Right $ toMay <|> dataAuthority
     argValues <- zipWithM
           (\n _ -> ExceptT . return . maybe (Left "ARGS") Right $ Map.lookup n varDict)
-          [0,1..] (CPDLC.msgArgs ty)
+          [1,2..] (CPDLC.msgArgs ty)
     nextMin <- lift . lift $ makeMIN
     let cpdlc = CPDLC.CPDLCMessage
             { cpdlcMIN = nextMin

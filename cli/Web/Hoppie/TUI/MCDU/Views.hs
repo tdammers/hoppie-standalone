@@ -2,7 +2,6 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TupleSections #-}
 
 module Web.Hoppie.TUI.MCDU.Views
 where
@@ -628,7 +627,7 @@ atcMenuView = defView
   { mcduViewTitle = "ATC MENU"
   , mcduViewLSKBindings = Map.fromList
       [ (0, ("MSG LOG", loadView cpdlcMessageLogView))
-      , (1, ("LOGON", return ())) -- TODO
+      , (1, ("LOGON", loadView cpdlcLogonView))
       , (3, ("FREE TEXT", loadCpdlcComposeViewByID "TXTD-2" Nothing Nothing))
       , (4, ("MAIN MENU", loadView mainMenuView))
       , (5, ("EMERGENCY", return ())) -- TODO
@@ -638,6 +637,46 @@ atcMenuView = defView
       ]
   , mcduViewOnLoad = do
       loadUplinkLSK 9
+  }
+
+cpdlcLogonView :: MCDUView
+cpdlcLogonView = defView
+  { mcduViewTitle = "ATC LOGON"
+  , mcduViewOnLoad = do
+      modifyView $ \v -> v
+        { mcduViewLSKBindings = mempty }
+      da <- asks hoppieCpdlcDataAuthorities >>= liftIO . readMVar
+
+      let setLogonDA :: Maybe ByteString -> MCDU Bool
+          setLogonDA ldaMay = do
+            daVar <- asks hoppieCpdlcDataAuthorities
+            liftIO $ modifyMVar_ daVar (\d -> return d { logonDataAuthority = ldaMay })
+            return True
+
+          getLogonDA :: MCDU (Maybe ByteString)
+          getLogonDA = do
+            daVar <- asks hoppieCpdlcDataAuthorities
+            liftIO $ logonDataAuthority <$> readMVar daVar
+
+      case currentDataAuthority da of
+        Nothing -> do
+          forM_ (logonDataAuthority da) $ \logonDA -> do
+            addLskBinding 6 "SEND" (lift $ cpdlcLogon logonDA)
+          addLskBinding 5 "" (scratchInteract setLogonDA getLogonDA >> reloadView)
+        Just _currentDA -> do
+          return ()
+
+      modifyView $ \v -> v
+        { mcduViewDraw = do
+            mcduPrint 1 2 white "LOGON DA"
+            mcduPrintR (screenW - 1) 2 green (fromMaybe "----" $ logonDataAuthority da)
+            forM_ (currentDataAuthority da) $ \currentDA -> do
+              mcduPrint 1 4 white "CURRENT DA"
+              mcduPrintR (screenW - 1) 4 green currentDA
+            forM_ (nextDataAuthority da) $ \nextDA -> do
+              mcduPrint 1 4 white "NEXT DA"
+              mcduPrintR (screenW - 1) 4 green nextDA
+        }
   }
 
 cpdlcRequestMenuView :: MCDUView
