@@ -674,8 +674,8 @@ cpdlcLogonView = defView
               mcduPrint 1 4 white "CURRENT DA"
               mcduPrintR (screenW - 1) 4 green currentDA
             forM_ (nextDataAuthority da) $ \nextDA -> do
-              mcduPrint 1 4 white "NEXT DA"
-              mcduPrintR (screenW - 1) 4 green nextDA
+              mcduPrint 1 6 white "NEXT DA"
+              mcduPrintR (screenW - 1) 6 green nextDA
         }
   }
 
