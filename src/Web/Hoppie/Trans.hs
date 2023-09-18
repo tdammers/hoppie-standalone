@@ -17,6 +17,14 @@ import qualified Web.Hoppie.Network as Network
 import Web.Hoppie.CPDLC.Message (CPDLCMessage (..), CPDLCPart (..))
 import Web.Hoppie.CPDLC.MessageTypes (ReplyOpts (..))
 import Web.Hoppie.Response
+  ( TypedMessage (..)
+  , TypedPayload (..)
+  , MessageType (..)
+  , Response (..)
+  , toUntypedRequest
+  , toTypedMessage
+  , parseResponse
+  )
 
 import Control.Applicative
 import Control.Monad
@@ -81,11 +89,14 @@ data DownlinkStatus
   = SentDownlink
   | UnsentDownlink
   | ErrorDownlink
+  | RepliedDownlink
   deriving (Show, Read, Eq, Ord, Enum, Bounded)
 
 data UplinkStatus
   = NewUplink
   | OldUplink
+  | OpenUplink
+  | RepliedUplink
   deriving (Show, Read, Eq, Ord, Enum, Bounded)
 
 data WithMeta status a =
@@ -100,6 +111,14 @@ data WithMeta status a =
 data HoppieMessage
   = UplinkMessage (WithMeta UplinkStatus TypedMessage)
   | DownlinkMessage (WithMeta DownlinkStatus TypedMessage)
+
+isCPDLC :: TypedMessage -> Bool
+isCPDLC tm = case typedMessagePayload tm of
+  CPDLCPayload {} -> True
+  _ -> False
+
+messageIsCPDLC :: HoppieMessage -> Bool
+messageIsCPDLC = isCPDLC . messagePayload
 
 messageUID :: HoppieMessage -> Word
 messageUID (UplinkMessage m) = metaUID m
@@ -136,23 +155,23 @@ getAllMessages = do
 
 saveUplink :: MonadIO m => WithMeta UplinkStatus TypedMessage -> HoppieT m ()
 saveUplink tsm = do
+  uplinksVar <- asks hoppieUplinks
+  liftIO $ modifyMVar_ uplinksVar $ return . Map.insert (metaUID tsm) tsm
   case typedMessagePayload (payload tsm) of
     CPDLCPayload cpdlc -> do
       cpdlcUplinksVar <- asks hoppieCPDLCUplinks
       liftIO $ modifyMVar_ cpdlcUplinksVar $ return . Map.insert (cpdlcMIN cpdlc) (metaUID tsm)
-    _ -> do
-      uplinksVar <- asks hoppieUplinks
-      liftIO $ modifyMVar_ uplinksVar $ return . Map.insert (metaUID tsm) tsm
+    _ -> return ()
 
 saveDownlink :: MonadIO m => WithMeta DownlinkStatus TypedMessage -> HoppieT m ()
 saveDownlink tsm = do
+  downlinksVar <- asks hoppieDownlinks
+  liftIO $ modifyMVar_ downlinksVar $ return . Map.insert (metaUID tsm) tsm
   case typedMessagePayload (payload tsm) of
     CPDLCPayload cpdlc -> do
       cpdlcDownlinksVar <- asks hoppieCPDLCDownlinks
       liftIO $ modifyMVar_ cpdlcDownlinksVar $ return . Map.insert (cpdlcMIN cpdlc) (metaUID tsm)
-    _ -> do
-      downlinksVar <- asks hoppieDownlinks
-      liftIO $ modifyMVar_ downlinksVar $ return . Map.insert (metaUID tsm) tsm
+    _ -> return ()
 
 setUplinkStatus :: MonadIO m => Word -> UplinkStatus -> HoppieT m ()
 setUplinkStatus uid status = do

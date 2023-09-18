@@ -114,30 +114,6 @@ defGoToPage n = do
   modifyView $ \v -> v { mcduViewPage = n' }
   reloadView
 
-mainMenuView :: MCDUView
-mainMenuView = defView
-  { mcduViewTitle = "MCDU MENU"
-  , mcduViewLSKBindings = Map.fromList
-      [ (0, ("DLK", loadView dlkMenuView))
-      , (5, ("ATC", return ()))
-      , (3, ("TEST", loadView testView))
-      ]
-  , mcduViewOnLoad = do
-      loadUplinkLSK 9
-  }
-
-testView :: MCDUView
-testView = defView
-  { mcduViewTitle = "TEST"
-  , mcduViewDraw = do
-      let lns = lineWrap screenW $
-                  ColoredBS
-                    [ ColoredBSFragment white "THIS ATIS "
-                    , ColoredBSFragment red " IS NOT AVAILABLE"
-                    ]
-      zipWithM_ (\n cbs -> mcduPrintColored 0 (n + 1) cbs) [0,1..] lns
-  }
-
 mcduPrintColored :: Int -> Int -> ColoredBS -> MCDUDraw s ()
 mcduPrintColored _ _ (ColoredBS []) =
   return ()
@@ -147,140 +123,10 @@ mcduPrintColored x y (ColoredBS (f:fs)) = do
   where
     bs = cbfData f
   
-
-dlkMenuView :: MCDUView
-dlkMenuView = defView
-  { mcduViewTitle = "DLK MENU"
-  , mcduViewLSKBindings = Map.fromList
-      [ (0, ("MSG LOG", loadView dlkMessageLogView))
-      , (1, ("TELEX", clearTelexBody >> loadView (telexSendView False)))
-      , (4, ("MAIN MENU", loadView mainMenuView))
-      , (5, ("ATIS", loadView $ infoMenuView "ATIS" "VATATIS"))
-      , (6, ("METAR", loadView $ infoMenuView "METAR" "METAR"))
-      , (7, ("TAF", loadView $ infoMenuView "TAF" "TAF"))
-      , (8, ("DCL", loadView (clearanceSendView False)))
-      ]
-  , mcduViewOnLoad = do
-      loadUplinkLSK 9
-  }
-
 clearTelexBody :: MCDU ()
 clearTelexBody =
   modify $ \s -> s
     { mcduTelexBody = Nothing }
-
-telexSendView :: Bool -> MCDUView
-telexSendView sent = defView
-  { mcduViewTitle = "TELEX"
-  , mcduViewLSKBindings = Map.fromList
-      [ (4, ("DLK MENU", loadView dlkMenuView))
-      ]
-  , mcduViewOnLoad = do
-      callsign <- asks hoppieCallsign
-      unless sent $ do
-        addLskBinding 8 "SEND" $ do
-          sendSuccess <- sendTelex
-          when sendSuccess $ do
-            loadView (telexSendView True)
-
-      addLskBinding 5 "" $ do
-        scratchInteract 
-          (\val -> True <$ (modify $ \s -> s { mcduTelexRecipient = val }))
-          (gets mcduTelexRecipient)
-        reloadView
-
-      addLskBinding 1 "" $ do
-        scratchInteract 
-          (\val -> True <$ (modify $ \s -> s { mcduTelexBody = val }))
-          (gets mcduTelexBody)
-        reloadView
-
-      recipientStr <- fromMaybe "------" <$> gets mcduTelexRecipient
-      bodyStr <- fromMaybe (BS.replicate (screenW - 2) (ord8 '-')) <$> gets mcduTelexBody
-      let bodyLines = lineWrap (screenW - 2) bodyStr
-      modifyView $ \v -> v {
-        mcduViewDraw = do
-          mcduPrint 1 2 white callsign
-          mcduPrintR (screenW - 1) 2 green recipientStr
-          zipWithM_
-            (\n l -> mcduPrint 1 (n + 4) green l)
-            [0..4] bodyLines
-      }
-      loadUplinkLSK 9
-  }
-
-clearanceSendView :: Bool -> MCDUView
-clearanceSendView sent = defView
-  { mcduViewTitle = "DATALINK CLEARANCE"
-  , mcduViewLSKBindings = Map.fromList
-      [ (4, ("DLK MENU", loadView dlkMenuView))
-      ]
-  , mcduViewOnLoad = do
-      callsign <- asks hoppieCallsign
-      unless sent $ do
-        addLskBinding 8 "SEND" $ do
-          sendSuccess <- sendClearanceRequest
-          when sendSuccess $ do
-            loadView (clearanceSendView True)
-
-      addLskBinding 1 "" $ do
-        scratchInteract 
-          (\val -> True <$ (modify $ \s -> s { mcduClearanceType = val }))
-          (gets mcduClearanceType)
-        reloadView
-
-      addLskBinding 2 "" $ do
-        scratchInteract 
-          (\val -> True <$ (modify $ \s -> s { mcduClearanceStand = val }))
-          (gets mcduClearanceStand)
-        reloadView
-
-      addLskBinding 3 "" $ do
-        scratchInteract 
-          (\case
-              Nothing -> True <$ (modify $ \s -> s { mcduClearanceAtis = Nothing })
-              Just val -> case BS.unpack val of
-                [letter] -> True <$ (modify $ \s -> s { mcduClearanceAtis = Just letter })
-                _ -> return False
-          )
-          (fmap BS.singleton <$> gets mcduClearanceAtis)
-        reloadView
-
-      addLskBinding 5 "" $ do
-        scratchInteract 
-          (\val -> True <$ (modify $ \s -> s { mcduClearanceFacility = val }))
-          (gets mcduClearanceFacility)
-        reloadView
-
-      addLskBinding 6 "" $ do
-        scratchInteract 
-          (\val -> True <$ (modify $ \s -> s { mcduClearanceDestination = val }))
-          (gets mcduClearanceDestination)
-        reloadView
-
-      typeStr <- fromMaybe "------" <$> gets mcduClearanceType
-      facilityStr <- fromMaybe "----" <$> gets mcduClearanceFacility
-      destinationStr <- fromMaybe "----" <$> gets mcduClearanceDestination
-      atisStr <- maybe "-" BS.singleton <$> gets mcduClearanceAtis
-      standStr <- fromMaybe "-" <$> gets mcduClearanceStand
-
-      modifyView $ \v -> v {
-        mcduViewDraw = do
-          mcduPrint 1 1 white "CALLSIGN"
-          mcduPrint 1 2 green callsign
-          mcduPrint 1 3 white "TYPE"
-          mcduPrint 1 4 green typeStr
-          mcduPrint 1 5 white "GATE"
-          mcduPrint 1 6 green standStr
-          mcduPrint 1 7 white "ATIS"
-          mcduPrint 1 8 green atisStr
-          mcduPrintR (screenW - 1) 1 white "FACILITY"
-          mcduPrintR (screenW - 1) 2 green facilityStr
-          mcduPrintR (screenW - 1) 3 white "DESTINATION"
-          mcduPrintR (screenW - 1) 4 green destinationStr
-      }
-      loadUplinkLSK 9
-  }
 
 addLskBinding :: Int -> ByteString -> MCDU () -> MCDU ()
 addLskBinding lsk label action =
@@ -295,39 +141,6 @@ removeLskBinding lsk =
     mcduViewLSKBindings =
       Map.delete lsk (mcduViewLSKBindings v)
   }
-
-infoMenuView :: ByteString -> ByteString -> MCDUView
-infoMenuView title infotype = defView
-  { mcduViewTitle = title
-  , mcduViewLSKBindings = Map.fromList
-      [ (8, ("SEND", sendInfoRequest infotype >> reloadView ))
-      , (4, ("DLK MENU", loadView dlkMenuView))
-      ]
-  , mcduViewOnLoad = do
-      refAirport <- gets (fromMaybe "----" . mcduReferenceAirport)
-      addLskBinding 5 "" (setReferenceAirport >> reloadView)
-      modifyView $ \v -> v
-        { mcduViewDraw =
-            mcduPrintR (screenW - 1) (mcduLskY 5) green refAirport
-        }
-      loadUplinkLSK 9
-  }
-
-loadUplinkLSK :: Int -> MCDU ()
-loadUplinkLSK lsk = do
-  unreadDLK <- gets mcduUnreadDLK
-  unreadCPDLC <- gets mcduUnreadCPDLC
-  case unreadCPDLC of
-    Just _cpdlcUID ->
-      addLskBinding lsk "ATC UPLINK" $
-        return ()
-    Nothing ->
-      case unreadDLK of
-        Just dlkUID ->
-          addLskBinding lsk "DLK UPLINK" $
-            loadView (dlkMessageView dlkUID)
-        Nothing ->
-          removeLskBinding lsk
 
 sendInfoRequest :: ByteString -> MCDU ()
 sendInfoRequest infotype = do
@@ -410,152 +223,6 @@ scratchInteract setVal getVal = do
       setVal (Just scratchStr) >>= flip when scratchClear
     ScratchDel -> do
       setVal Nothing >>= flip when scratchClear
-
-dlkMessageLogView :: MCDUView
-dlkMessageLogView = defView
-  { mcduViewTitle = "DLK MESSAGES"
-  , mcduViewLSKBindings = Map.fromList
-      [ (4, ("DLK MENU", loadView dlkMenuView))
-      ]
-  , mcduViewOnLoad = do
-      myCallsign <- asks hoppieCallsign
-      messages <- reverse <$> lift getAllMessages
-      curPage <- gets (mcduViewPage . mcduView)
-      let curMessages = take 4 . drop (4 * curPage) $ messages
-          numPages = (length messages + 3) `div` 4
-      modifyView $ \s -> s
-        { mcduViewNumPages = numPages
-        , mcduViewLSKBindings =
-            Map.fromList
-              [ (4, ("DLK MENU", loadView dlkMenuView))
-              ]
-            <>
-            Map.fromList
-              ( zip
-                [0..3]
-                [ ("", loadView $ dlkMessageView (messageUID message) ) | message <- curMessages ]
-              )
-        , mcduViewDraw = do
-            zipWithM_ (\n message -> do
-                let daySecond = floor . utctDayTime $ messageTimestamp message
-                    (hours, minutes) = (daySecond `quot` 60 :: Int) `quotRem` 60
-                    from = messageFrom myCallsign message
-                    to = messageFrom myCallsign message
-
-                let (color', callsign, statusStr) = case message of
-                      UplinkMessage m ->
-                        case metaStatus m of
-                          NewUplink -> (green, from, "NEW" :: String)
-                          OldUplink -> (white, from, "OLD")
-                      DownlinkMessage m ->
-                        case metaStatus m of
-                          UnsentDownlink -> (blue, to, "QUED")
-                          SentDownlink -> (cyan, to, "SENT")
-                          ErrorDownlink -> (red, to, "ERR")
-
-                let (color, msgTyStr) = case typedMessagePayload $ messagePayload message of
-                      InfoPayload {} -> (color', "INFO" :: String)
-                      TelexPayload {} -> (color', "TELEX")
-                      CPDLCPayload {} -> (color', "CPDLC")
-                      UnsupportedPayload {} -> (yellow, "UNSUPPORTED")
-                      ErrorPayload {} -> (red, "ERROR")
-
-                mcduPrint 1 (n * 2 + 1) color $
-                  BS8.pack $
-                  printf "%02i%02iZ %-6s %-5s %-4s"
-                    hours minutes
-                    (map toUpper $ BS8.unpack callsign)
-                    msgTyStr
-                    statusStr
-                case typedMessagePayload $ messagePayload message of
-                  InfoPayload msg ->
-                    mcduPrint 1 (n * 2 + 2) white msg
-                  TelexPayload msg ->
-                    mcduPrint 1 (n * 2 + 2) white msg
-                  _ ->
-                    mcduPrint 1 (n * 2 + 2) red "-----"
-              ) [0,1..] curMessages
-        }
-  }
-
-dlkMessageView :: Word -> MCDUView
-dlkMessageView uid =
-  defView
-    { mcduViewTitle = "DLK MESSAGE"
-    , mcduViewLSKBindings = Map.fromList
-        [ (4, ("DLK LOG", loadView dlkMessageLogView))
-        ]
-    , mcduViewOnLoad = do
-        messageMay <- lift $ getMessage uid
-        case messageMay of
-          Nothing ->
-            modifyView $ \v -> v
-              { mcduViewDraw = do
-                  mcduPrintC (screenW `div` 2) (screenH `div` 2) red
-                    "MESSAGE NOT FOUND"
-              , mcduViewNumPages = 1
-              , mcduViewPage = 0
-              }
-          Just message -> do
-            myCallsign <- asks hoppieCallsign
-            unread <- gets mcduUnreadDLK
-            when (Just (messageUID message) == unread) $ do
-              modify $ \s -> s { mcduUnreadDLK = Nothing }
-            case message of
-              UplinkMessage {} ->
-                lift $ setUplinkStatus (messageUID message) OldUplink
-              DownlinkMessage {} ->
-                return ()
-            let daySecond = floor . utctDayTime $ messageTimestamp message
-                (hours, minutes) = (daySecond `quot` 60 :: Int) `quotRem` 60
-                from = messageFrom myCallsign message
-                to = messageFrom myCallsign message
-
-            let (color', callsign, statusStr) = case message of
-                  UplinkMessage m ->
-                    case metaStatus m of
-                      NewUplink -> (green, from, "NEW" :: String)
-                      OldUplink -> (white, from, "OLD")
-                  DownlinkMessage m ->
-                    case metaStatus m of
-                      UnsentDownlink -> (blue, to, "QUED")
-                      SentDownlink -> (cyan, to, "SENT")
-                      ErrorDownlink -> (red, to, "ERR")
-
-            let (color, msgTyStr, msgText) = case typedMessagePayload $ messagePayload message of
-                  InfoPayload msg -> (color', "INFO" :: String, msg)
-                  TelexPayload msg -> (color', "TELEX", msg)
-                  CPDLCPayload cpdlc -> (color', "CPDLC", renderCPDLCMessage cpdlc)
-                  UnsupportedPayload ty msg ->
-                    ( yellow
-                    , "UNSUPPORTED"
-                    , (BS8.pack . map toUpper . show) ty <> " " <> msg
-                    )
-                  ErrorPayload _ response err ->
-                    ( red
-                    , "ERROR"
-                    , BS8.pack err <> "\n" <> response
-                    )
-                msgLines' = lineWrap screenW msgText
-                statusLine = 
-                  BS8.pack $
-                  printf "%02i%02iZ %-6s %-5s %-4s"
-                    hours minutes
-                    (map toUpper $ BS8.unpack callsign)
-                    msgTyStr
-                    statusStr
-                msgLines = (color, statusLine) : map (white,) msgLines'
-                numPages = (length msgLines + 7) `div` 8
-
-            page <- gets $ mcduViewPage . mcduView
-            let curLines = take 8 . drop (page * 8) $ msgLines
-            modifyView $ \v -> v
-              { mcduViewDraw = do
-                  zipWithM_ (\n (c, line) -> mcduPrint 0 (n+1) c line)
-                    [0,1..] curLines
-              , mcduViewNumPages = numPages
-              }
-    }
 
 type MCDU = StateT MCDUState Hoppie
 
@@ -730,8 +397,8 @@ debugPrint str =
     moveTo 0 (screenH + 7)
     putStrLn $ centerTo (screenW + 12) str
 
-handleMCDUEvent :: MCDUEvent -> MCDU ()
-handleMCDUEvent ev = do
+handleMCDUEvent :: MCDUView -> MCDUView -> MCDUView -> MCDUEvent -> MCDU ()
+handleMCDUEvent mainMenuView dlkMenuView atcMenuView ev = do
   liftIO $ do
     resetFG
     resetBG
@@ -776,7 +443,7 @@ handleMCDUEvent ev = do
     InputCommandEvent InputF9 -> handleLSK 8
     InputCommandEvent InputF10 -> handleLSK 9
     InputCommandEvent InputF11 -> loadView dlkMenuView
-    -- InputCommandEvent InputF12 -> loadView atcMenuView
+    InputCommandEvent InputF12 -> loadView atcMenuView
     InputCommandEvent InputEscape -> loadView mainMenuView
       
     InputCommandEvent InputBackspace ->

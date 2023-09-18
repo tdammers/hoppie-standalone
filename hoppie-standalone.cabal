@@ -53,6 +53,7 @@ executable hoppie-mcdu
                  , Web.Hoppie.TUI.MCDU
                  , Web.Hoppie.TUI.MCDU.Draw
                  , Web.Hoppie.TUI.MCDU.Monad
+                 , Web.Hoppie.TUI.MCDU.Views
     -- other-extensions:
     build-depends: base ^>=4.17.0.0
                  , hoppie-standalone

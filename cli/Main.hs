@@ -6,6 +6,7 @@ import Web.Hoppie.Telex
 import Web.Hoppie.TUI.Output
 import Web.Hoppie.TUI.Input
 import Web.Hoppie.TUI.MCDU
+import Web.Hoppie.TUI.StringUtil
 
 import Control.Concurrent.STM
 import Control.Concurrent.Async (race_)
@@ -23,7 +24,7 @@ main = do
   logon <- fromMaybe (error "No logon configured") <$> lookupEnv "HOPPIE_LOGON"
   callsign <- fromMaybe "TEST" <$> lookupEnv "HOPPIE_CALLSIGN"
   url <- fromMaybe defURL <$> lookupEnv "HOPPIE_URL"
-  pollingInterval <- maybe 60 read <$> lookupEnv "HOPPIE_POLLINT_INTERVAL"
+  pollingInterval <- maybe 60 read <$> lookupEnv "HOPPIE_POLLING_INTERVAL"
   fastPollingInterval <- maybe 20 read <$> lookupEnv "HOPPIE_FAST_POLLING_INTERVAL"
   let config = Config (BS8.pack logon) url pollingInterval fastPollingInterval
   runInput inputChan
@@ -56,4 +57,22 @@ hoppieMain eventChan sendMessage = do
     flushAll
     forever $ do
       ev <- liftIO . atomically $ readTChan eventChan
-      handleMCDUEvent ev
+      handleMCDUEvent mainMenuView dlkMenuView atcMenuView ev
+
+runColoredBSTests :: IO ()
+runColoredBSTests = do
+  let testStr = ColoredBS
+        [ ColoredBSFragment 1 "HELLO WORLD "
+        , ColoredBSFragment 2 "\nHOW ARE"
+        , ColoredBSFragment 3 " YOU"
+        , ColoredBSFragment 4 " THIS IS A FAIRLY LONG STRING WITH "
+        , ColoredBSFragment 5 "PLENTY OF WORDS "
+        ]
+  print (coloredToBS testStr)
+  print (coloredToBS $ coloredTake 10 testStr)
+  print (coloredToBS $ coloredDrop 10 testStr)
+  print (coloredFindIndex isSpace8 testStr)
+  print (map coloredToBS $ coloredWordSplit testStr)
+  print (map coloredToBS $ coloredLineSplit testStr)
+  print (map coloredToBS $ lineWrap 20 testStr)
+  print (lineWrap 20 $ coloredToBS testStr)

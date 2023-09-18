@@ -5,3 +5,4 @@ where
 
 import Web.Hoppie.TUI.MCDU.Draw as M
 import Web.Hoppie.TUI.MCDU.Monad as M
+import Web.Hoppie.TUI.MCDU.Views as M
