@@ -5,7 +5,8 @@ module Web.Hoppie.CPDLC.Message
 ( CPDLCMessage (..)
 , CPDLCPart (..)
 , MessageTypeID
-, parseCPDLCMessage
+, parseCPDLCUplink
+, parseCPDLCDownlink
 , renderCPDLCMessage
 , raToBS
 )
@@ -17,6 +18,8 @@ import Web.Hoppie.Telex
 import Control.Monad
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as BS8
+import Data.Map (Map)
+import qualified Data.Map.Strict as Map
 import qualified Text.Megaparsec as P
 import qualified Text.Megaparsec.Byte as P
 import qualified Text.Megaparsec.Byte.Lexer as P (decimal)
@@ -40,9 +43,13 @@ data CPDLCPart =
     }
     deriving (Show, Read, Eq)
 
-parseCPDLCMessage :: ByteString -> Either String CPDLCMessage
-parseCPDLCMessage src =
-  first P.errorBundlePretty $ P.parse (cpdlcMessageP <* P.eof) "input" src
+parseCPDLCUplink :: ByteString -> Either String CPDLCMessage
+parseCPDLCUplink src =
+  first P.errorBundlePretty $ P.parse (cpdlcUplinkP <* P.eof) "input" src
+
+parseCPDLCDownlink :: ByteString -> Either String CPDLCMessage
+parseCPDLCDownlink src =
+  first P.errorBundlePretty $ P.parse (cpdlcDownlinkP <* P.eof) "input" src
 
 renderCPDLCMessage :: CPDLCMessage -> ByteString
 renderCPDLCMessage cpdlc =
@@ -59,8 +66,14 @@ renderCPDLCMessage cpdlc =
     | part <- cpdlcParts cpdlc
     ]
 
-cpdlcMessageP :: P.Parsec Void ByteString CPDLCMessage
-cpdlcMessageP = do
+cpdlcUplinkP :: P.Parsec Void ByteString CPDLCMessage
+cpdlcUplinkP = cpdlcMessageP uplinkMessages
+
+cpdlcDownlinkP :: P.Parsec Void ByteString CPDLCMessage
+cpdlcDownlinkP = cpdlcMessageP uplinkMessages
+
+cpdlcMessageP :: Map MessageTypeID MessageType -> P.Parsec Void ByteString CPDLCMessage
+cpdlcMessageP messageTypes = do
   slashP
   void $ P.string "data2"
   slashP
@@ -71,7 +84,7 @@ cpdlcMessageP = do
   ra <- raP
   slashP
   payloadRaw <- P.takeWhileP Nothing (const True)
-  case listToMaybe (parseMessage (Just ra) sendableMessageTypes payloadRaw) of
+  case listToMaybe (parseMessage (Just ra) messageTypes payloadRaw) of
     Just partsRaw ->
       return
         CPDLCMessage

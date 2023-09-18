@@ -625,16 +625,6 @@ messageView uid =
 atcMenuView :: MCDUView
 atcMenuView = defView
   { mcduViewTitle = "ATC MENU"
-  , mcduViewLSKBindings = Map.fromList
-      [ (0, ("MSG LOG", loadView cpdlcMessageLogView))
-      , (1, ("LOGON", loadView cpdlcLogonView))
-      , (3, ("FREE TEXT", loadCpdlcComposeViewByID "TXTD-2" Nothing Nothing))
-      , (4, ("MAIN MENU", loadView mainMenuView))
-      , (5, ("EMERGENCY", return ())) -- TODO
-      , (6, ("REQUEST", loadView cpdlcRequestMenuView))
-      , (7, ("REPORT", loadView cpdlcReportMenuView))
-      , (8, ("WHEN CAN WE", loadView cpdlcWhenCanWeMenuView))
-      ]
   , mcduViewOnLoad = do
       online <- haveCpdlcLogon
       if online then
@@ -655,6 +645,7 @@ atcMenuView = defView
           { mcduViewLSKBindings = Map.fromList
               [ (0, ("MSG LOG", loadView cpdlcMessageLogView))
               , (1, ("LOGON", loadView cpdlcLogonView))
+              , (4, ("MAIN MENU", loadView mainMenuView))
               ]
           }
       loadUplinkLSK 9
@@ -687,22 +678,31 @@ cpdlcLogonView = defView
 
       case currentDataAuthority da of
         Nothing -> do
-          forM_ (logonDataAuthority da) $ \logonDA -> do
-            addLskBinding 6 "SEND" (lift $ cpdlcLogon logonDA)
-          addLskBinding 5 "" (scratchInteract setLogonDA getLogonDA >> reloadView)
-        Just _currentDA -> do
-          return ()
+          case nextDataAuthority da of
+            Nothing -> do
+              forM_ (logonDataAuthority da) $ \logonDA -> do
+                addLskBinding 5 "SEND" (lift (cpdlcLogon logonDA) >> reloadView)
+              addLskBinding 0 "" (scratchInteract setLogonDA getLogonDA >> reloadView)
+            Just nextDA -> do
+              addLskBinding 6 "CANCEL LOGON" (lift (cpdlcCancelLogon nextDA) >> reloadView)
+        Just currentDA -> do
+          addLskBinding 5 "LOGOFF" (lift (cpdlcPilotLogoff currentDA) >> reloadView)
 
       modifyView $ \v -> v
         { mcduViewDraw = do
-            mcduPrint 1 2 white "LOGON DA"
-            mcduPrintR (screenW - 1) 2 green (fromMaybe "----" $ logonDataAuthority da)
+            when (isNothing (currentDataAuthority da)) $ do
+              mcduPrint 1 1 white "LOGON DATA AUTHORITY"
+              mcduPrint 1 2 green (fromMaybe "----" $ logonDataAuthority da)
+            when (isNothing (currentDataAuthority da) && isJust (nextDataAuthority da)) $ do
+              mcduPrintR (screenW - 1) 2 cyan "SENT"
+            when (isJust (currentDataAuthority da)) $ do
+              mcduPrintR (screenW - 1) 1 white "CONNECTED"
             forM_ (currentDataAuthority da) $ \currentDA -> do
-              mcduPrint 1 4 white "CURRENT DA"
-              mcduPrintR (screenW - 1) 4 green currentDA
+              mcduPrint 1 3 white "CURRENT DATA AUTHORITY"
+              mcduPrint 1 4 green currentDA
             forM_ (nextDataAuthority da) $ \nextDA -> do
-              mcduPrint 1 6 white "NEXT DA"
-              mcduPrintR (screenW - 1) 6 green nextDA
+              mcduPrint 1 5 white "NEXT DATA AUTHORITY"
+              mcduPrint 1 6 green nextDA
         }
   }
 

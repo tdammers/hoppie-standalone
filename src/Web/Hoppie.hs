@@ -71,7 +71,7 @@ runNetworkTest l = do
       BS8.putStrLn err
     Response messages -> do
       forM_ messages $ \msg -> do
-        let tm = toTypedMessage msg
+        let tm = toTypedUplink msg
         case typedMessagePayload tm of
           TelexPayload body -> do
             putStrLn "--------- TELEX ---------"

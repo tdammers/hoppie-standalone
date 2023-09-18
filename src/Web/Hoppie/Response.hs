@@ -7,7 +7,7 @@ module Web.Hoppie.Response
 , parseResponse
 , TypedMessage (..)
 , TypedPayload (..)
-, toTypedMessage
+, toTypedUplink
 , toTypedResponse
 , toUntypedRequest
 )
@@ -68,11 +68,11 @@ data TypedPayload
   deriving (Show)
 
 toTypedResponse :: Response -> [TypedMessage]
-toTypedResponse (Response msgs) = map toTypedMessage msgs
+toTypedResponse (Response msgs) = map toTypedUplink msgs
 toTypedResponse (ErrorResponse err) = [TypedMessage Nothing "server" (ErrorPayload Nothing err "Server reported an error")]
 
-toTypedMessage :: Message -> TypedMessage
-toTypedMessage msg =
+toTypedUplink :: Message -> TypedMessage
+toTypedUplink msg =
   TypedMessage
     (messageID msg)
     (messageCallsign msg)
@@ -84,7 +84,7 @@ toTypedMessage msg =
                 Cpdlc -> either
                             (ErrorPayload (Just $ messageType msg) (messagePayload msg))
                             CPDLCPayload
-                            (parseCPDLCMessage (messagePayload msg))
+                            (parseCPDLCUplink (messagePayload msg))
                 ty -> UnsupportedPayload ty (messagePayload msg)
 
 toUntypedRequest :: ByteString -> TypedMessage -> Network.Request

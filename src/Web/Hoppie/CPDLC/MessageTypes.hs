@@ -380,7 +380,7 @@ parseMessage raMay msgTypes = go . scrub
 
 renderMessage :: Map MessageTypeID MessageType -> MessageTypeID -> [ByteString] -> ByteString
 renderMessage msgTypes msgID args =
-  let msg = fromMaybe (error "Message type does not exist") $ Map.lookup msgID msgTypes
+  let msg = fromMaybe (error $ "Message type does not exist: " ++ show msgID) $ Map.lookup msgID msgTypes
       pattern = resolveMessagePatternWith
                   (\w ->
                     let i = fromIntegral w - 1
@@ -781,6 +781,7 @@ downlinkMessages = Map.fromList
     , ( "TXTD-1", defMessageType { msgPattern = "$1", msgArgs = [ argText ], msgReplyOpts = ReplyY } )
     , ( "TXTD-2", defMessageType { msgPattern = "$1", msgArgs = [ argText ] } )
     , ( "HPPD-1", defMessageType { msgPattern = "REQUEST LOGON", msgReplyOpts = ReplyY } )
+    , ( "HPPD-2", defMessageType { msgPattern = "LOGOFF" } )
     ]
 
 smokeTestMessages :: [ByteString]

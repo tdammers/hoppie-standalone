@@ -16,14 +16,16 @@ where
 
 import qualified Web.Hoppie.Network as Network
 import Web.Hoppie.CPDLC.Message (CPDLCMessage (..), CPDLCPart (..))
-import Web.Hoppie.CPDLC.MessageTypes (ReplyOpts (..))
+import Web.Hoppie.CPDLC.MessageTypes (ReplyOpts (..), allMessageTypes)
+import qualified Web.Hoppie.CPDLC.Message as CPDLC
+import qualified Web.Hoppie.CPDLC.MessageTypes as CPDLC
 import Web.Hoppie.Response
   ( TypedMessage (..)
   , TypedPayload (..)
   , MessageType (..)
   , Response (..)
   , toUntypedRequest
-  , toTypedMessage
+  , toTypedUplink
   , parseResponse
   )
 
@@ -200,29 +202,59 @@ saveUplink tsm = do
         -- HANDOVER
         "HPPU-2" -> cpdlcHandover callsign (cpdlcArgs part) (cpdlcMIN cpdlc)
         -- LOGOFF
-        "HPPU-3" -> cpdlcLogoff callsign (cpdlcMIN cpdlc)
+        "HPPU-3" -> cpdlcAtcLogoff callsign (cpdlcMIN cpdlc)
         -- Others are just processed normally
         _ -> return ()
 
-cpdlcLogon :: MonadIO m => ByteString -> HoppieT m ()
-cpdlcLogon callsign = do
+cpdlcSendLL :: MonadIO m => ByteString -> Maybe Word -> ByteString -> [ByteString] -> HoppieT m ()
+cpdlcSendLL recipient mrnMay tyID args = do
   config <- asks hoppieNetworkConfig
   myCallsign <- asks hoppieCallsign
   downlinkMIN <- makeMIN
   uid <- makeUID
-  let tm = TypedMessage (Just uid) callsign . CPDLCPayload $ CPDLCMessage
+  let tm = TypedMessage (Just uid) recipient . CPDLCPayload $ CPDLCMessage
               { cpdlcMIN = downlinkMIN
-              , cpdlcMRN = Nothing
-              , cpdlcReplyOpts = ReplyN
+              , cpdlcMRN = mrnMay
+              , cpdlcReplyOpts = maybe ReplyN CPDLC.msgReplyOpts $ Map.lookup tyID allMessageTypes
               , cpdlcParts =
                   [ CPDLCPart
-                      { cpdlcType = "HPPD-1"
-                      , cpdlcArgs = []
+                      { cpdlcType = tyID
+                      , cpdlcArgs = args
                       }
                   ]
               }
   rawResponse <- liftIO $ Network.sendRequestEither config (toUntypedRequest myCallsign tm)
   void $ handleRawResponse (Just uid) rawResponse
+
+cpdlcLogon :: MonadIO m => ByteString -> HoppieT m ()
+cpdlcLogon callsign = do
+  cpdlcSendLL callsign Nothing "HPPD-1" []
+  daVar <- asks hoppieCpdlcDataAuthorities
+  liftIO $ modifyMVar_ daVar $ \s -> return s
+    { currentDataAuthority = Nothing
+    , nextDataAuthority = Just callsign
+    , logonDataAuthority = Nothing
+    }
+
+cpdlcCancelLogon :: MonadIO m => ByteString -> HoppieT m ()
+cpdlcCancelLogon callsign = do
+  cpdlcSendLL callsign Nothing "HPPD-2" []
+  daVar <- asks hoppieCpdlcDataAuthorities
+  liftIO $ modifyMVar_ daVar $ \s -> return s
+    { currentDataAuthority = Nothing
+    , nextDataAuthority = Nothing
+    , logonDataAuthority = Just callsign
+    }
+
+cpdlcPilotLogoff :: MonadIO m => ByteString -> HoppieT m ()
+cpdlcPilotLogoff callsign = do
+  cpdlcSendLL callsign Nothing "HPPD-2" []
+  daVar <- asks hoppieCpdlcDataAuthorities
+  liftIO $ modifyMVar_ daVar $ \s -> return s
+    { currentDataAuthority = Nothing
+    , nextDataAuthority = Nothing
+    , logonDataAuthority = Just callsign
+    }
 
 cpdlcAcceptLogon :: MonadIO m => ByteString -> Word -> HoppieT m ()
 cpdlcAcceptLogon callsign uplinkMIN = do
@@ -236,27 +268,11 @@ cpdlcAcceptLogon callsign uplinkMIN = do
                 }
     liftIO $ putMVar daVar da'
   else do
-    config <- asks hoppieNetworkConfig
-    myCallsign <- asks hoppieCallsign
-    downlinkMIN <- makeMIN
-    uid <- makeUID
-    let tm = TypedMessage (Just uid) callsign . CPDLCPayload $ CPDLCMessage
-                { cpdlcMIN = downlinkMIN
-                , cpdlcMRN = Just uplinkMIN
-                , cpdlcReplyOpts = ReplyN
-                , cpdlcParts =
-                    [ CPDLCPart
-                        { cpdlcType = "SYSD-3"
-                        , cpdlcArgs = []
-                        }
-                    ]
-                }
-    rawResponse <- liftIO $ Network.sendRequestEither config (toUntypedRequest myCallsign tm)
-    void $ handleRawResponse (Just uid) rawResponse
     liftIO $ putMVar daVar da
+    cpdlcSendLL callsign (Just uplinkMIN) "SYSD-3" []
 
-cpdlcLogoff :: MonadIO m => ByteString -> Word -> HoppieT m ()
-cpdlcLogoff callsign uplinkMIN = do
+cpdlcAtcLogoff :: MonadIO m => ByteString -> Word -> HoppieT m ()
+cpdlcAtcLogoff callsign uplinkMIN = do
   daVar <- asks hoppieCpdlcDataAuthorities
   da <- liftIO $ takeMVar daVar
   if currentDataAuthority da == Just callsign then do
@@ -267,87 +283,23 @@ cpdlcLogoff callsign uplinkMIN = do
                 }
     liftIO $ putMVar daVar da'
   else do
-    config <- asks hoppieNetworkConfig
-    myCallsign <- asks hoppieCallsign
-    downlinkMIN <- makeMIN
-    uid <- makeUID
-    let tm = TypedMessage (Just uid) callsign . CPDLCPayload $ CPDLCMessage
-                { cpdlcMIN = downlinkMIN
-                , cpdlcMRN = Just uplinkMIN
-                , cpdlcReplyOpts = ReplyN
-                , cpdlcParts =
-                    [ CPDLCPart
-                        { cpdlcType = "SYSD-3"
-                        , cpdlcArgs = []
-                        }
-                    ]
-                }
-    rawResponse <- liftIO $ Network.sendRequestEither config (toUntypedRequest myCallsign tm)
-    void $ handleRawResponse (Just uid) rawResponse
     liftIO $ putMVar daVar da
+    cpdlcSendLL callsign (Just uplinkMIN) "SYSD-3" []
 
 cpdlcHandover :: MonadIO m => ByteString -> [ByteString] -> Word -> HoppieT m ()
 cpdlcHandover callsign args uplinkMIN = do
   daVar <- asks hoppieCpdlcDataAuthorities
   da <- liftIO $ takeMVar daVar
-  config <- asks hoppieNetworkConfig
-  myCallsign <- asks hoppieCallsign
   if currentDataAuthority da /= Just callsign then do
     liftIO $ putMVar daVar da
-    downlinkMIN <- makeMIN
-    uid <- makeUID
-    let tm = TypedMessage (Just uid) callsign . CPDLCPayload $ CPDLCMessage
-                { cpdlcMIN = downlinkMIN
-                , cpdlcMRN = Just uplinkMIN
-                , cpdlcReplyOpts = ReplyN
-                , cpdlcParts =
-                    [ CPDLCPart
-                        { cpdlcType = "SYSD-3"
-                        , cpdlcArgs = []
-                        }
-                    ]
-                }
-    rawResponse <- liftIO $ Network.sendRequestEither config (toUntypedRequest myCallsign tm)
-    void $ handleRawResponse (Just uid) rawResponse
+    cpdlcSendLL callsign (Just uplinkMIN) "SYSD-3" []
   else case args of
     [nextDA] -> do
-      let da' = da
-                  { nextDataAuthority = Just nextDA
-                  }
-      liftIO $ putMVar daVar da'
-      downlinkMIN <- makeMIN
-      uid <- makeUID
-      let tm = TypedMessage (Just uid) nextDA . CPDLCPayload $ CPDLCMessage
-                  { cpdlcMIN = downlinkMIN
-                  , cpdlcMRN = Just uplinkMIN
-                  , cpdlcReplyOpts = ReplyN
-                  , cpdlcParts =
-                      [ CPDLCPart
-                          { cpdlcType = "HPPD-1"
-                          , cpdlcArgs = []
-                          }
-                      ]
-                  }
-      rawResponse <- liftIO $ Network.sendRequestEither config (toUntypedRequest myCallsign tm)
-      void $ handleRawResponse (Just uid) rawResponse
+      liftIO $ putMVar daVar da { nextDataAuthority = Just nextDA }
+      cpdlcSendLL callsign (Just uplinkMIN) "HPPD-1" []
     _ -> do
       liftIO $ putMVar daVar da
-      downlinkMIN <- makeMIN
-      uid <- makeUID
-      let tm = TypedMessage (Just uid) callsign . CPDLCPayload $ CPDLCMessage
-                  { cpdlcMIN = downlinkMIN
-                  , cpdlcMRN = Just uplinkMIN
-                  , cpdlcReplyOpts = ReplyN
-                  , cpdlcParts =
-                      [ CPDLCPart
-                          { cpdlcType = "SYSD-1"
-                          , cpdlcArgs = ["MISSING ARGUMENT 1"]
-                          }
-                      ]
-                  }
-      rawResponse <- liftIO $ Network.sendRequestEither config (toUntypedRequest myCallsign tm)
-      void $ handleRawResponse (Just uid) rawResponse
-
+      cpdlcSendLL callsign (Just uplinkMIN) "SYSD-1" ["MISSING ARGUMENT"]
 
 saveDownlink :: MonadIO m => WithMeta DownlinkStatus TypedMessage -> HoppieT m ()
 saveDownlink tsm = do
@@ -521,7 +473,7 @@ processResponse uidMay rawResponse = do
           (return ())
           (\parentUID -> setDownlinkStatus parentUID SentDownlink)
           uidMay
-        saveUplink (WithMeta uid NewUplink ts $ toTypedMessage msg)
+        saveUplink (WithMeta uid NewUplink ts $ toTypedUplink msg)
         return uid
 
 poll :: MonadIO m => HoppieT m [Word]
