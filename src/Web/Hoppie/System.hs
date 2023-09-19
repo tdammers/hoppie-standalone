@@ -1,13 +1,8 @@
+{-# LANGUAGE NamedFieldPuns #-}
+
 module Web.Hoppie.System
 ( module Web.Hoppie.System
 , module Web.Hoppie.Trans
-, TypedMessage (..)
-, TypedPayload (..)
-, CPDLCMessage (..)
-, ReplyOpts (..)
-, CPDLCPart (..)
-, WithMeta (..)
-, Config (..)
 )
 where
 
@@ -22,12 +17,20 @@ import Control.Monad.Reader
 runSystem :: ByteString
           -> Config
           -> (WithMeta UplinkStatus TypedMessage -> Hoppie ())
+          -> (WithMeta DownlinkStatus TypedMessage -> Hoppie ())
           -> (NetworkStatus -> Hoppie ())
           -> (Maybe ByteString -> Hoppie ())
           -> ((TypedMessage -> Hoppie ()) -> Hoppie ())
           -> IO ()
-runSystem callsign config onUplink onNetworkStatus onCpdlcLogon runUI = do
-  env <- makeHoppieEnv callsign config
+runSystem callsign config onUplink onDownlink onNetworkStatus onCpdlcLogon runUI = do
+  let hooks =
+        HoppieHooks
+          { onUplink
+          , onDownlink
+          , onNetworkStatus
+          , onCpdlcLogon
+          }
+  env <- makeHoppieEnv hooks callsign config
   race_
     (runHoppieTWith env (runUI send'))
     (runHoppieTWith env runPolling)
@@ -43,18 +46,11 @@ runSystem callsign config onUplink onNetworkStatus onCpdlcLogon runUI = do
       return retval
 
     send' tm = do
-      messageIDs <- withStatusCheck $ send tm
-      forM_ messageIDs $ \messageID -> do
-        msgMay <- getUplink messageID
-        forM_ msgMay onUplink
+      void $ withStatusCheck $ send tm
 
     runPolling = forever $ do
-      messageIDs <- withStatusCheck poll
+      void $ withStatusCheck poll
       pollingIntervalVar <- asks hoppieFastPollingCounter
-
-      forM_ messageIDs $ \messageID -> do
-        msgMay <- getUplink messageID
-        forM_ msgMay onUplink
 
       fastPolling <- asks (configFastPollingInterval . hoppieNetworkConfig)
       slowPolling <- asks (configPollingInterval . hoppieNetworkConfig)

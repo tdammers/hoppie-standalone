@@ -210,6 +210,7 @@ main = do
       (BS8.pack callsign)
       config
       (handleUplink eventChan)
+      (handleDownlink eventChan)
       (handleNetworkStatus eventChan)
       (handleCurrentDataAuthority eventChan)
       (hoppieMain actype eventChan)
@@ -222,6 +223,10 @@ handleUplink :: TChan MCDUEvent -> WithMeta UplinkStatus TypedMessage -> Hoppie 
 handleUplink eventChan = do
   liftIO . atomically . writeTChan eventChan . UplinkEvent
 
+handleDownlink :: TChan MCDUEvent -> WithMeta DownlinkStatus TypedMessage -> Hoppie ()
+handleDownlink eventChan = do
+  liftIO . atomically . writeTChan eventChan . DownlinkEvent
+
 handleNetworkStatus :: TChan MCDUEvent -> NetworkStatus -> Hoppie ()
 handleNetworkStatus eventChan = do
   liftIO . atomically . writeTChan eventChan . NetworkStatusEvent
@@ -231,15 +236,11 @@ handleCurrentDataAuthority eventChan = do
   liftIO . atomically . writeTChan eventChan . CurrentDataAuthorityEvent
 
 hoppieMain :: Maybe ByteString -> TChan MCDUEvent -> (TypedMessage -> Hoppie ()) -> Hoppie ()
-hoppieMain actypeMay eventChan sendMessage = do
-  runMCDU sendMessage $ do
+hoppieMain actypeMay eventChan rawSend = do
+  runMCDU rawSend $ do
     modify $ \s -> s
       { mcduAircraftType = actypeMay }
-    loadView mainMenuView
-    flushAll
-    forever $ do
-      ev <- liftIO . atomically $ readTChan eventChan
-      handleMCDUEvent mainMenuView dlkMenuView atcMenuView ev
+    mcduMain eventChan
 
 runColoredBSTests :: IO ()
 runColoredBSTests = do

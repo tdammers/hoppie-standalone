@@ -38,6 +38,7 @@ import Text.Printf
 data MCDUEvent
   = InputCommandEvent InputCommand
   | UplinkEvent (WithMeta UplinkStatus TypedMessage)
+  | DownlinkEvent (WithMeta DownlinkStatus TypedMessage)
   | NetworkStatusEvent NetworkStatus
   | CurrentDataAuthorityEvent (Maybe ByteString)
   deriving (Show)
@@ -70,7 +71,7 @@ data MCDUState =
 
     , mcduSendMessage :: TypedMessage -> Hoppie ()
     , mcduNetworkStatus :: NetworkStatus
-    , mcduDebugLog :: [String]
+    , mcduDebugLog :: [ColoredBS]
     }
 
 defMCDUState :: MCDUState
@@ -136,7 +137,21 @@ mcduPrintColored x y (ColoredBS (f:fs)) = do
   mcduPrintColored (x + BS.length bs) y (ColoredBS fs)
   where
     bs = cbfData f
-  
+
+rawPrintColored :: ColoredBS -> IO ()
+rawPrintColored (ColoredBS []) = do
+  resetFG
+  resetBG
+rawPrintColored (ColoredBS (f:fs)) = do
+  case cbfColor f of
+    255 -> resetFG
+    c -> setFG c
+  resetBG
+  BS.putStr bs
+  rawPrintColored (ColoredBS fs)
+  where
+    bs = cbfData f
+
 clearTelexBody :: MCDU ()
 clearTelexBody =
   modify $ \s -> s
@@ -156,13 +171,17 @@ removeLskBinding lsk =
       Map.delete lsk (mcduViewLSKBindings v)
   }
 
+sendMessage :: TypedMessage -> MCDU ()
+sendMessage tm = do
+  sendFunc <- gets mcduSendMessage
+  lift $ sendFunc tm
+
 sendInfoRequest :: ByteString -> MCDU ()
 sendInfoRequest infotype = do
-  sendMessage <- gets mcduSendMessage
   gets mcduReferenceAirport >>= \case
     Nothing -> scratchWarn "INVALID"
     Just airport -> do
-      lift $ sendMessage $
+      sendMessage $
         TypedMessage
           Nothing
           "SERVER"
@@ -180,8 +199,7 @@ sendTelex = do
       scratchWarn "NO MESSAGE"
       return False
     (Just to, Just body) -> do
-      sendMessage <- gets mcduSendMessage
-      lift $ sendMessage $
+      sendMessage $
         TypedMessage Nothing to (TelexPayload body)
       return True
 
@@ -215,14 +233,12 @@ sendClearanceRequest = do
       scratchWarn "INVALID"
       return False
     Just (to, body) -> do
-      sendMessage <- gets mcduSendMessage
-      lift $ sendMessage $
+      sendMessage $
         TypedMessage Nothing to (TelexPayload body)
       return True
 
 sendCpdlc :: [CPDLC.MessageTypeID] -> Maybe ByteString -> Maybe Word -> Map (Int, Word) ByteString -> MCDU Bool
 sendCpdlc tyIDs toMay mrnMay varDict = do
-  sendMessage <- gets mcduSendMessage
   dataAuthority <- asks hoppieCpdlcDataAuthorities >>= fmap currentDataAuthority . liftIO . readMVar
   cpdlcToMay <- runExceptT $ do
     to <- maybe (throwError "TO") return $
@@ -274,7 +290,7 @@ sendCpdlc tyIDs toMay mrnMay varDict = do
     return (cpdlc, to)
   case cpdlcToMay of
     Right (cpdlc, to) -> do
-      lift $ sendMessage $
+      sendMessage $
         TypedMessage Nothing to (CPDLCPayload cpdlc)
       return True
     Left err-> do
@@ -302,7 +318,7 @@ scratchInteract setVal getVal = do
 type MCDU = StateT MCDUState Hoppie
 
 runMCDU :: (TypedMessage -> Hoppie ()) -> MCDU a -> Hoppie a
-runMCDU sendMessage = flip evalStateT defMCDUState { mcduSendMessage = sendMessage }
+runMCDU rawSend = flip evalStateT defMCDUState { mcduSendMessage = rawSend }
 
 draw :: (forall s. MCDUDraw s ()) -> MCDU ()
 draw action = do
@@ -362,8 +378,8 @@ redrawLog = do
     resetFG
     resetBG
     zipWithM_ (\y l -> liftIO $ do
-        moveTo (screenW + 13) y
-        putStr (take logW l)
+        moveTo (screenW + 14) y
+        rawPrintColored (takeSubstr logW l)
       ) [0..] logLines
     hFlush stdout
 
@@ -480,7 +496,7 @@ handleLSK n = do
     Nothing -> return ()
     Just (_, action) -> action
 
-debugPrint :: String -> MCDU ()
+debugPrint :: ColoredBS -> MCDU ()
 debugPrint str = do
   modify $ \s -> s
     { mcduDebugLog = str : mcduDebugLog s }
@@ -492,7 +508,10 @@ handleMCDUEvent mainMenuView dlkMenuView atcMenuView ev = do
     NetworkStatusEvent ns' -> do
       ns <- gets mcduNetworkStatus
       when (ns /= ns') $ do
-        debugPrint (show ns')
+        case ns' of
+          NetworkOK -> debugPrint $ colorize green "NETWORK UP"
+          NetworkError err -> debugPrint $ colorize red "NETWORK ERROR: "
+                                         <> colorize 255 (BS8.pack err)
         case ns' of
           NetworkError err -> do
             lift . void $ makeErrorResponse Nothing (BS8.pack err) "NETWORK ERROR"
@@ -503,8 +522,21 @@ handleMCDUEvent mainMenuView dlkMenuView atcMenuView ev = do
       reloadView
       
 
+    DownlinkEvent mtm -> do
+      debugPrint $ colorize cyan $ wordJoin
+        [ "DOWNLINK"
+        , BS8.pack . show $ metaUID mtm
+        , typedMessageCallsign $ payload mtm
+        , typedPayloadTypeBS . typedMessagePayload $ payload mtm
+        ]
+
     UplinkEvent mtm -> do
-      debugPrint (show mtm)
+      debugPrint $ colorize green $ wordJoin
+        [ "UPLINK"
+        , BS8.pack . show $ metaUID mtm
+        , typedMessageCallsign $ payload mtm
+        , typedPayloadTypeBS . typedMessagePayload $ payload mtm
+        ]
       case typedMessagePayload (payload mtm) of
         CPDLCPayload {} -> do
           modify $ \s -> s { mcduUnreadCPDLC = Just (metaUID mtm) }
@@ -515,7 +547,8 @@ handleMCDUEvent mainMenuView dlkMenuView atcMenuView ev = do
       reloadView
 
     CurrentDataAuthorityEvent cda -> do
-      debugPrint (show cda)
+      debugPrint $ colorize 255 "Current Data Authority: "
+                 <> maybe (colorize yellow "NONE") (colorize green) cda
       reloadView
 
     InputCommandEvent InputPgUp ->

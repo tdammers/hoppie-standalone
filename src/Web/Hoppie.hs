@@ -109,7 +109,3 @@ runNetworkTest l = do
             putStrLn "  ------------------------"
         
   -- runSmokeTests
-
-runTest :: String -> IO ()
-runTest l = runHoppieT "KLM123" (mkConfig l) $ do
-  return ()

@@ -5,6 +5,7 @@ module Web.Hoppie.Trans
 ( module Web.Hoppie.Trans
 , TypedMessage (..)
 , TypedPayload (..)
+, typedPayloadTypeBS
 , CPDLCMessage (..)
 , ReplyOpts (..)
 , CPDLCPart (..)
@@ -21,6 +22,7 @@ import qualified Web.Hoppie.CPDLC.MessageTypes as CPDLC
 import Web.Hoppie.Response
   ( TypedMessage (..)
   , TypedPayload (..)
+  , typedPayloadTypeBS
   , MessageType (..)
   , Response (..)
   , toUntypedRequest
@@ -39,13 +41,14 @@ import qualified Data.Map.Strict as Map
 import Control.Concurrent.MVar
 import Data.List
 
-type HoppieT = ReaderT HoppieEnv
+type HoppieT m = ReaderT (HoppieEnv m) m
 
 type Hoppie = HoppieT IO
 
-data HoppieEnv =
+data HoppieEnv m =
   HoppieEnv
     { hoppieNetworkConfig :: !Network.Config
+    , hoppieHooks :: !(HoppieHooks m)
     , hoppieCallsign :: !ByteString
     , hoppieUplinks :: !(MVar (Map Word (WithMeta UplinkStatus TypedMessage)))
     , hoppieDownlinks :: !(MVar (Map Word (WithMeta DownlinkStatus TypedMessage)))
@@ -58,6 +61,14 @@ data HoppieEnv =
     , hoppieNextUID :: !(MVar Word)
     , hoppieNetworkStatus :: !(MVar NetworkStatus)
     , hoppieFastPollingCounter :: !(MVar Int)
+    }
+
+data HoppieHooks m =
+  HoppieHooks
+    { onUplink :: WithMeta UplinkStatus TypedMessage -> HoppieT m ()
+    , onDownlink :: WithMeta DownlinkStatus TypedMessage -> HoppieT m ()
+    , onNetworkStatus :: NetworkStatus -> HoppieT m ()
+    , onCpdlcLogon :: Maybe ByteString -> HoppieT m ()
     }
 
 data DataAuthorities =
@@ -81,10 +92,11 @@ data NetworkStatus
   | NetworkError String
   deriving (Show, Eq)
 
-makeHoppieEnv :: MonadIO m => ByteString -> Network.Config -> m HoppieEnv
-makeHoppieEnv callsign config =
+makeHoppieEnv :: MonadIO m => HoppieHooks m -> ByteString -> Network.Config -> m (HoppieEnv m)
+makeHoppieEnv hooks callsign config =
   liftIO $ HoppieEnv
     config
+    hooks
     callsign
     <$> newMVar mempty
     <*> newMVar mempty
@@ -98,12 +110,12 @@ makeHoppieEnv callsign config =
     <*> newMVar NetworkOK
     <*> newMVar 0
 
-runHoppieTWith :: HoppieEnv -> HoppieT m a -> m a
+runHoppieTWith :: HoppieEnv m -> HoppieT m a -> m a
 runHoppieTWith = flip runReaderT
 
-runHoppieT :: MonadIO m => ByteString -> Network.Config -> HoppieT m a -> m a
-runHoppieT callsign config action = do
-  env <- makeHoppieEnv callsign config
+runHoppieT :: MonadIO m => HoppieHooks m -> ByteString -> Network.Config -> HoppieT m a -> m a
+runHoppieT hooks callsign config action = do
+  env <- makeHoppieEnv hooks callsign config
   runHoppieTWith env action
 
 data LinkDirection
@@ -433,6 +445,8 @@ send tm = do
   config <- asks hoppieNetworkConfig
   sender <- asks hoppieCallsign
   saveDownlink rq
+  sentHook <- asks (onDownlink . hoppieHooks)
+  sentHook rq
   rawResponse <- liftIO $ Network.sendRequestEither config (toUntypedRequest sender tm)
   handleRawResponse (Just uid) rawResponse
 
@@ -473,7 +487,10 @@ processResponse uidMay rawResponse = do
           (return ())
           (\parentUID -> setDownlinkStatus parentUID SentDownlink)
           uidMay
-        saveUplink (WithMeta uid NewUplink ts $ toTypedUplink msg)
+        let uplink = WithMeta uid NewUplink ts $ toTypedUplink msg
+        saveUplink uplink
+        recvdHook <- asks (onUplink . hoppieHooks)
+        recvdHook uplink
         return uid
 
 poll :: MonadIO m => HoppieT m [Word]

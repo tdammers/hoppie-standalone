@@ -7,6 +7,7 @@ module Web.Hoppie.Response
 , parseResponse
 , TypedMessage (..)
 , TypedPayload (..)
+, typedPayloadTypeBS
 , toTypedUplink
 , toTypedResponse
 , toUntypedRequest
@@ -58,6 +59,13 @@ data TypedMessage =
     , typedMessagePayload :: TypedPayload
     }
     deriving (Show)
+
+typedPayloadTypeBS :: TypedPayload -> ByteString
+typedPayloadTypeBS (TelexPayload {}) = "TELEX"
+typedPayloadTypeBS (InfoPayload {}) = "INFO"
+typedPayloadTypeBS (CPDLCPayload {}) = "CPDLC"
+typedPayloadTypeBS (UnsupportedPayload ty _) = BS8.pack . map toUpper . show $ ty
+typedPayloadTypeBS (ErrorPayload {}) = "ERROR"
 
 data TypedPayload
   = TelexPayload !ByteString
