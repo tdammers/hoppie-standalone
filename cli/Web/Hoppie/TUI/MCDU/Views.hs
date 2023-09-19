@@ -158,7 +158,8 @@ mkCpdlcComposeView tyID ty toMay mrnMay = do
                     $ Map.lookup supTy CPDLC.downlinkMessages
                | supTy <- supTyIDs
                ]
-      supTyIDs = CPDLC.msgSuggestedSupp ty
+      supTyIDs = CPDLC.msgSuggestedSupp ty ++ ["TXTD-2"]
+      tys = ty : supTys
   let getVar partIndex index = Map.lookup (partIndex, index) . cpdlcEditorVars <$> liftIO (readMVar editorStateVar)
       setVar partIndex index (Just val) = do
         liftIO $
@@ -170,11 +171,15 @@ mkCpdlcComposeView tyID ty toMay mrnMay = do
           modifyMVar_ editorStateVar (\s -> return s
             { cpdlcEditorVars = Map.delete (partIndex, index) (cpdlcEditorVars s) })
         return True
-      entrySpec = map getEntryItems $ ty : supTys
+      entrySpec = map getEntryItems tys
       hydrate = do
         vars <- cpdlcEditorVars <$> liftIO (readMVar editorStateVar)
         return $ concat
-          [ [ (label, partIndex, varMay, varMay >>= \i -> Map.lookup (partIndex, i) vars)
+          [ [ ( label
+              , partIndex
+              , varMay
+              , varMay >>= \(_, i) -> Map.lookup (partIndex, i) vars
+              )
             | (label, varMay) <- part
             ]
           | (partIndex, part) <- zip [0..] entrySpec
@@ -191,16 +196,26 @@ mkCpdlcComposeView tyID ty toMay mrnMay = do
                 modifyView $ \v -> v
                     { mcduViewLSKBindings = mempty
                     , mcduViewDraw = do
-                        zipWithM_ (\y (label, _, varMay, valMay) -> do
-                            mcduPrint 1 (y * 2 + 1) white label
-                            forM_ varMay $ \_var -> do
-                              let valFmt = fromMaybe "----" valMay
+                        zipWithM_ (\y (label', _, varMay, valMay) -> do
+                            let label = case (label', varMay) of
+                                  ("", Just (a, _)) ->
+                                    colorize cyan $
+                                      "(" <> (BS8.pack . map toUpper . drop 3 . show $ CPDLC.argTy a) <> ")"
+                                  _ ->
+                                    colorize white label'
+                            mcduPrintColored 1 (y * 2 + 1) label
+                            forM_ varMay $ \(a, _) -> do
+                              let defValFmt = case CPDLC.argTy a of
+                                    CPDLC.ArgText -> BS.replicate (screenW-2) (ord8 '-')
+                                    CPDLC.ArgReason -> BS.replicate (screenW-2) (ord8 '-')
+                                    _ -> "----"
+                              let valFmt = fromMaybe defValFmt valMay
                               mcduPrintR (screenW - 1) (y * 2 + 2) green valFmt
                           )
                           [0..4] curEntryItems
                     }
                 let mkBinding n (_, partIndex, varMay, _) = do
-                      forM_ varMay $ \index -> do
+                      forM_ varMay $ \(_, index) -> do
                         addLskBinding (n + 5) "" $ do
                           scratchInteract
                             (setVar partIndex index)
@@ -217,11 +232,11 @@ mkCpdlcComposeView tyID ty toMay mrnMay = do
                   loadUplinkLSK 9
             }
 
-getEntryItems :: CPDLC.MessageType -> [(ByteString, Maybe Word)]
+getEntryItems :: CPDLC.MessageType -> [(ByteString, Maybe (CPDLC.ArgSpec, Word))]
 getEntryItems ty =
   go (CPDLC.messagePatternItems $ CPDLC.msgPattern ty)
   where
-    go :: [CPDLC.MessagePatternItem Word] -> [(ByteString, Maybe Word)]
+    go :: [CPDLC.MessagePatternItem Word] -> [(ByteString, Maybe (CPDLC.ArgSpec, Word))]
     go [] = []
     go xs =
       let literalLines :: [ByteString]
@@ -236,11 +251,15 @@ getEntryItems ty =
           (_, []) ->
             [(lit, Nothing) | lit <- literalLines]
           ([], (CPDLC.MessageArg i:xs')) ->
-            ("", Just i) : go xs'
+            let argSpec = fromMaybe CPDLC.argText $ listToMaybe $ drop (fromIntegral i - 1) $ CPDLC.msgArgs ty
+            in
+              ("", Just (argSpec, i)) : go xs'
           (_, (CPDLC.MessageArg i:xs')) ->
-            [(lit, Nothing) | lit <- init literalLines] ++
-            [(lit, Just i) | lit <- drop (length literalLines - 1) literalLines] ++
-            go xs'
+            let argSpec = fromMaybe CPDLC.argText $ listToMaybe $ drop (fromIntegral i - 1) $ CPDLC.msgArgs ty
+            in
+              [(lit, Nothing) | lit <- init literalLines] ++
+              [(lit, Just (argSpec, i)) | lit <- drop (length literalLines - 1) literalLines] ++
+              go xs'
           (_, _:xs') ->
             [(lit, Nothing) | lit <- literalLines] ++
             go xs'
