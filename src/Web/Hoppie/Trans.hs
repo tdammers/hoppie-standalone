@@ -49,7 +49,7 @@ data HoppieEnv m =
   HoppieEnv
     { hoppieNetworkConfig :: !Network.Config
     , hoppieHooks :: !(HoppieHooks m)
-    , hoppieCallsign :: !ByteString
+    , hoppieCallsign :: !(MVar ByteString)
     , hoppieUplinks :: !(MVar (Map Word (WithMeta UplinkStatus TypedMessage)))
     , hoppieDownlinks :: !(MVar (Map Word (WithMeta DownlinkStatus TypedMessage)))
     , hoppieCpdlcUplinks :: !(MVar (Map (ByteString, Word) Word))
@@ -97,8 +97,8 @@ makeHoppieEnv hooks callsign config =
   liftIO $ HoppieEnv
     config
     hooks
-    callsign
-    <$> newMVar mempty
+    <$> newMVar callsign
+    <*> newMVar mempty
     <*> newMVar mempty
     <*> newMVar mempty
     <*> newMVar mempty
@@ -217,10 +217,17 @@ saveUplink tsm = do
         -- Others are just processed normally
         _ -> return ()
 
+getCallsign :: MonadIO m => HoppieT m ByteString
+getCallsign = asks hoppieCallsign >>= liftIO . readMVar
+
+setCallsign :: MonadIO m => ByteString -> HoppieT m ()
+setCallsign callsign =
+  asks hoppieCallsign >>= liftIO . flip modifyMVar_ (const . return $ callsign)
+
 cpdlcSendLL :: MonadIO m => ByteString -> Maybe Word -> ByteString -> [ByteString] -> HoppieT m ()
 cpdlcSendLL recipient mrnMay tyID args = do
   config <- asks hoppieNetworkConfig
-  myCallsign <- asks hoppieCallsign
+  myCallsign <- getCallsign
   downlinkMIN <- makeMIN
   uid <- makeUID
   let tm = TypedMessage (Just uid) recipient . CPDLCPayload $ CPDLCMessage
@@ -443,7 +450,7 @@ send tm = do
   uid <- makeUID
   let rq = WithMeta uid UnsentDownlink ts tm
   config <- asks hoppieNetworkConfig
-  sender <- asks hoppieCallsign
+  sender <- getCallsign
   saveDownlink rq
   sentHook <- asks (onDownlink . hoppieHooks)
   sentHook rq
@@ -496,7 +503,7 @@ processResponse uidMay rawResponse = do
 poll :: MonadIO m => HoppieT m [Word]
 poll = do
   config <- asks hoppieNetworkConfig
-  receiver <- asks hoppieCallsign
+  receiver <- getCallsign
   rawResponse <- liftIO $ Network.sendRequestEither config
                     Network.Request
                       { Network.requestFrom = receiver

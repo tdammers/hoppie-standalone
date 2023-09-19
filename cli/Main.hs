@@ -40,6 +40,7 @@ data ProgramOptions =
     , poFastPollingInterval :: Maybe Int
     , poSlowPollingInterval :: Maybe Int
     , poHoppieUrl :: Maybe String
+    , poShowLog :: Maybe Bool
     }
     deriving (Show)
 
@@ -52,6 +53,7 @@ emptyProgramOptions =
     , poFastPollingInterval = Nothing
     , poSlowPollingInterval = Nothing
     , poHoppieUrl = Nothing
+    , poShowLog = Nothing
     }
 
 defaultProgramOptions :: ProgramOptions
@@ -63,11 +65,12 @@ defaultProgramOptions =
     , poFastPollingInterval = Just 20
     , poSlowPollingInterval = Just 60
     , poHoppieUrl = Just "http://www.hoppie.nl/acars/system/connect.html"
+    , poShowLog = Just False
     }
 
 instance Semigroup ProgramOptions where
-  ProgramOptions l1 c1 ty1 fp1 sp1 url1 <>
-    ProgramOptions l2 c2 ty2 fp2 sp2 url2 =
+  ProgramOptions l1 c1 ty1 fp1 sp1 url1 sl1 <>
+    ProgramOptions l2 c2 ty2 fp2 sp2 url2 sl2 =
       ProgramOptions
         (l1 <|> l2)
         (c1 <|> c2)
@@ -75,6 +78,7 @@ instance Semigroup ProgramOptions where
         (fp1 <|> fp2)
         (sp1 <|> sp2)
         (url1 <|> url2)
+        (sl1 <|> sl2)
 
 $(deriveJSON
     JSON.defaultOptions
@@ -128,6 +132,13 @@ optionsP = ProgramOptions
         <> metavar "URL"
         <> help "Hoppie ACARS connect URL"
         <> value Nothing
+        )
+  <*> flag
+        Nothing
+        (Just True)
+        (  long "show-log"
+        <> long "show-debug-log"
+        <> help "Show debug log on screen"
         )
 
 optionsFromArgs :: IO ProgramOptions
@@ -202,6 +213,7 @@ main = do
   config <- either error return $ optionsToConfig po
   callsign <- maybe (error "No callsign configured") return $ poCallsign po
   let actype = fmap BS8.pack $ poAircraftType po
+  let showLog = fromMaybe False $ poShowLog po
   runInput inputChan
     `race_`
     runInputPusher inputChan eventChan
@@ -213,7 +225,7 @@ main = do
       (handleDownlink eventChan)
       (handleNetworkStatus eventChan)
       (handleCurrentDataAuthority eventChan)
-      (hoppieMain actype eventChan)
+      (hoppieMain showLog actype eventChan)
 
 runInputPusher :: TChan Word8 -> TChan MCDUEvent -> IO ()
 runInputPusher inputChan eventChan = forever $ do
@@ -235,11 +247,13 @@ handleCurrentDataAuthority :: TChan MCDUEvent -> Maybe ByteString -> Hoppie ()
 handleCurrentDataAuthority eventChan = do
   liftIO . atomically . writeTChan eventChan . CurrentDataAuthorityEvent
 
-hoppieMain :: Maybe ByteString -> TChan MCDUEvent -> (TypedMessage -> Hoppie ()) -> Hoppie ()
-hoppieMain actypeMay eventChan rawSend = do
+hoppieMain :: Bool -> Maybe ByteString -> TChan MCDUEvent -> (TypedMessage -> Hoppie ()) -> Hoppie ()
+hoppieMain showLog actypeMay eventChan rawSend = do
   runMCDU rawSend $ do
     modify $ \s -> s
-      { mcduAircraftType = actypeMay }
+      { mcduAircraftType = actypeMay
+      , mcduShowLog = showLog
+      }
     mcduMain eventChan
 
 runColoredBSTests :: IO ()

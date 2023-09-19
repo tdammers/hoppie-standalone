@@ -51,13 +51,23 @@ loadUplinkLSK lsk = do
 mainMenuView :: MCDUView
 mainMenuView = defView
   { mcduViewTitle = "MCDU MENU"
-  , mcduViewLSKBindings = Map.fromList
-      [ (0, ("DLK", loadView dlkMenuView))
-      , (5, ("ATC", loadView atcMenuView))
-      , (3, ("TEST", loadView testView))
-      , (4, ("INFO", loadView infoView))
-      ]
+  , mcduViewNumPages = 2
   , mcduViewOnLoad = do
+      curPage <- gets (mcduViewPage . mcduView)
+      modifyView $ \v -> v
+        { mcduViewLSKBindings = Map.fromList $ case curPage of
+            0 ->
+              [ (0, ("DLK", loadView dlkMenuView))
+              , (5, ("ATC", loadView atcMenuView))
+              ]
+            1 ->
+              [ (0, ("CONFIG", loadView configView))
+              , (1, ("STATUS", loadView statusView))
+              , (4, ("TEST", loadView testView))
+              ]
+            _ ->
+              []
+        }
       loadUplinkLSK 9
   }
 
@@ -73,12 +83,53 @@ testView = defView
       zipWithM_ (\n cbs -> mcduPrintColored 0 (n + 1) cbs) [0,1..] lns
   }
 
-infoView :: MCDUView
-infoView = defView
-  { mcduViewTitle = "INFO"
+configView :: MCDUView
+configView = defView
+  { mcduViewTitle = "CONFIG"
+  , mcduViewOnLoad = do
+      actype <- gets mcduAircraftType
+      showLog <- gets mcduShowLog
+      callsign <- lift getCallsign
+
+      let setACType :: Maybe ByteString -> MCDU Bool
+          setACType actypeMay =
+            True <$ modify (\s -> s { mcduAircraftType = actypeMay })
+          getACType :: MCDU (Maybe ByteString)
+          getACType =
+            gets mcduAircraftType
+
+          setMyCallsign (Just c) = do
+            lift $ setCallsign c
+            return True
+          setMyCallsign Nothing =
+            return False
+          getMyCallsign =
+            lift $ Just <$> getCallsign
+            
+
+      modifyView $ \v -> v
+        { mcduViewDraw = do
+            mcduPrint 0 2 white "A/C TYPE"
+            mcduPrintR (screenW - 1) 2 green (fromMaybe "----" actype)
+            mcduPrint 0 4 white "CALLSIGN"
+            mcduPrintR (screenW - 1) 4 green callsign
+            mcduPrint 0 6 white "SHOW LOG"
+            mcduPrintR (screenW - 1) 6 green (if showLog then "ON" else "OFF")
+        , mcduViewLSKBindings = Map.fromList
+            [ (4, ("MAIN MENU", loadView mainMenuView))
+            , (5, ("", scratchInteract setACType getACType >> reloadView))
+            , (6, ("", scratchInteract setMyCallsign getMyCallsign >> reloadView))
+            , (7, ("", modify (\s -> s { mcduShowLog = not (mcduShowLog s) }) >> redrawLog >> reloadView))
+            ]
+        }
+  }
+
+statusView :: MCDUView
+statusView = defView
+  { mcduViewTitle = "STATUS INFO"
   , mcduViewOnLoad = do
       config <- asks hoppieNetworkConfig
-      callsign <- asks hoppieCallsign
+      callsign <- lift getCallsign
       actype <- gets mcduAircraftType
       networkStatus <- gets mcduNetworkStatus
       let networkStatusCBS = case networkStatus of
@@ -281,7 +332,7 @@ telexSendView sent = defView
       [ (4, ("DLK MENU", loadView dlkMenuView))
       ]
   , mcduViewOnLoad = do
-      callsign <- asks hoppieCallsign
+      callsign <- lift getCallsign
       unless sent $ do
         addLskBinding 8 "SEND" $ do
           sendSuccess <- sendTelex
@@ -321,7 +372,7 @@ clearanceSendView sent = defView
       [ (4, ("DLK MENU", loadView dlkMenuView))
       ]
   , mcduViewOnLoad = do
-      callsign <- asks hoppieCallsign
+      callsign <- lift getCallsign
 
       ctype <- gets mcduClearanceType
       when (isNothing ctype) $ do

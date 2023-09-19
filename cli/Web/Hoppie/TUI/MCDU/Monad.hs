@@ -72,6 +72,7 @@ data MCDUState =
     , mcduSendMessage :: TypedMessage -> Hoppie ()
     , mcduNetworkStatus :: NetworkStatus
     , mcduDebugLog :: [ColoredBS]
+    , mcduShowLog :: Bool
     }
 
 defMCDUState :: MCDUState
@@ -98,6 +99,7 @@ defMCDUState =
     , mcduSendMessage = const (return ())
     , mcduNetworkStatus = NetworkOK
     , mcduDebugLog = []
+    , mcduShowLog = False
     }
 
 data MCDUView =
@@ -206,7 +208,7 @@ sendTelex = do
 sendClearanceRequest :: MCDU Bool
 sendClearanceRequest = do
   toBodyMay <- runMaybeT $ do
-    callsign <- asks hoppieCallsign
+    callsign <- (lift . lift) getCallsign
     clearanceType <- MaybeT $ gets mcduClearanceType
     clearanceFacility <- MaybeT $ gets mcduClearanceFacility
     clearanceDestination <- MaybeT $ gets mcduClearanceDestination
@@ -370,6 +372,7 @@ redrawScratch = do
 
 redrawLog :: MCDU ()
 redrawLog = do
+  logVisible <- gets mcduShowLog
   (terminalW, terminalH) <- liftIO $ getScreenSize
   let logW = terminalW - screenW - 14
   logLines <- gets $ reverse . take terminalH . concat . map (reverse . lineWrap logW) . mcduDebugLog
@@ -377,11 +380,12 @@ redrawLog = do
     clearRect (screenW + 13) 0 (terminalW - 1) (terminalH - 1)
     resetFG
     resetBG
-    zipWithM_ (\y l -> liftIO $ do
-        moveTo (screenW + 14) y
-        rawPrintColored (takeSubstr logW l)
-      ) [0..] logLines
-    hFlush stdout
+    when logVisible $ do
+      zipWithM_ (\y l -> liftIO $ do
+          moveTo (screenW + 14) y
+          rawPrintColored (takeSubstr logW l)
+        ) [0..] logLines
+      hFlush stdout
 
 modifyView :: (MCDUView -> MCDUView) -> MCDU ()
 modifyView f =  do
