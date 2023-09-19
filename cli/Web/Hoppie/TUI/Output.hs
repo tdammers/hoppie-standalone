@@ -12,7 +12,6 @@ import Data.Word
 import Control.Monad
 import System.Posix.Signals ( Signal, sigINT, installHandler, Handler (..) )
 import Control.Exception (bracket)
-import Data.Bits
 import Foreign.C
 
 foreign import capi "signal.h value SIGWINCH"

@@ -17,7 +17,6 @@ where
 import qualified Web.Hoppie.Network as Network
 import Web.Hoppie.CPDLC.Message (CPDLCMessage (..), CPDLCPart (..))
 import Web.Hoppie.CPDLC.MessageTypes (ReplyOpts (..), allMessageTypes)
-import qualified Web.Hoppie.CPDLC.Message as CPDLC
 import qualified Web.Hoppie.CPDLC.MessageTypes as CPDLC
 import Web.Hoppie.Response
   ( TypedMessage (..)
@@ -445,6 +444,7 @@ handleRawResponse uidMay = \case
     return []
   Right response -> do
     forM_ uidMay $ \uid -> setDownlinkStatus uid SentDownlink
+    setNetworkStatus NetworkOK
     processResponse uidMay response
 
 makeErrorResponse :: MonadIO m => Maybe MessageType -> ByteString -> String -> HoppieT m [Word]
@@ -492,4 +492,5 @@ poll = do
       setNetworkStatus $ NetworkError err
       return []
     Right response -> do
+      setNetworkStatus NetworkOK
       processResponse Nothing response

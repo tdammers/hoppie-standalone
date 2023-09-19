@@ -57,15 +57,20 @@ executable hoppie-mcdu
     -- other-extensions:
     build-depends: base ^>=4.17.0.0
                  , hoppie-standalone
+                 , aeson >=2.2.0.0 && <2.3
                  , async >=2.2.4 && <2.3
                  , bytestring >=0.11.0 && <0.13
+                 , casing >=0.1.4.1 && <0.2
                  , containers >=0.6.7 && <0.7
+                 , filepath >=1.4 && <1.5
                  , mtl >=2.3.1 && <2.4
+                 , optparse-applicative >=0.18.1.0 && <0.19
                  , stm >=2.5 && <2.6
                  , time >=1.12 && <1.14
                  , transformers >=0.6 && <0.7
                  , unix >=2.8 && <2.9
                  , vector >=0.13 && <0.14
+                 , yaml >=0.11.11.2 && <0.12
 
     hs-source-dirs:   cli
     default-language: Haskell2010

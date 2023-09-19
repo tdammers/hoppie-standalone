@@ -55,6 +55,7 @@ mainMenuView = defView
       [ (0, ("DLK", loadView dlkMenuView))
       , (5, ("ATC", loadView atcMenuView))
       , (3, ("TEST", loadView testView))
+      , (4, ("INFO", loadView infoView))
       ]
   , mcduViewOnLoad = do
       loadUplinkLSK 9
@@ -70,6 +71,48 @@ testView = defView
                     , ColoredBSFragment red " IS NOT AVAILABLE"
                     ]
       zipWithM_ (\n cbs -> mcduPrintColored 0 (n + 1) cbs) [0,1..] lns
+  }
+
+infoView :: MCDUView
+infoView = defView
+  { mcduViewTitle = "INFO"
+  , mcduViewOnLoad = do
+      config <- asks hoppieNetworkConfig
+      callsign <- asks hoppieCallsign
+      actype <- gets mcduAircraftType
+      networkStatus <- gets mcduNetworkStatus
+      let networkStatusCBS = case networkStatus of
+            NetworkOK -> colorize green "CONNECTED"
+            NetworkError str -> lineJoin
+              [ colorize red "ERROR:"
+              , colorize yellow $ BS8.pack str
+              ]
+      let infoLines = lineSplit . lineJoin $
+            [ colorize white "CALLSIGN: " <> colorize green callsign
+            , colorize white "AIRCRAFT: " <> maybe (colorize red "N/A") (colorize green) actype
+            , colorize white "LOGON: " <> colorize green (configLogon config)
+            , colorize white "URL: " <> colorize green (BS8.pack $ configURL config)
+            , colorize white "POLLING: " <>
+                colorize green (BS8.pack . show $ configPollingInterval config) <>
+                colorize green "s" <>
+                colorize white " / " <>
+                colorize green (BS8.pack . show $ configFastPollingInterval config) <>
+                colorize green "s"
+            , colorize white "NETWORK: " <>
+                networkStatusCBS
+            ]
+      let lns = lineWrap screenW . lineJoin $ infoLines
+          linesPerPage = 9
+          numPages = (length lns + linesPerPage) `div` linesPerPage
+      curPage <- gets (min (numPages - 1) . mcduViewPage . mcduView)
+      let curLns = take linesPerPage . drop (curPage * linesPerPage) $ lns
+      modifyView $ \v -> v
+        { mcduViewDraw = zipWithM_ (\n cbs -> mcduPrintColored 0 (n + 1) cbs) [0,1..] curLns
+        , mcduViewNumPages = numPages
+        , mcduViewLSKBindings = Map.fromList
+            [ (4, ("MAIN MENU", loadView mainMenuView))
+            ]
+        }
   }
 
 dlkMenuView :: MCDUView
@@ -90,7 +133,7 @@ dlkMenuView = defView
 
 data CPDLCEditorState =
   CPDLCEditorState
-    { cpdlcEditorVars :: Map Word ByteString
+    { cpdlcEditorVars :: Map (Int, Word) ByteString
     }
 
 defCPDLCEditorState :: CPDLCEditorState
@@ -111,23 +154,31 @@ loadCpdlcComposeViewByID tyID toMay mrnMay = do
 mkCpdlcComposeView :: CPDLC.MessageTypeID -> CPDLC.MessageType -> Maybe ByteString -> Maybe Word -> MCDU MCDUView
 mkCpdlcComposeView tyID ty toMay mrnMay = do
   editorStateVar <- liftIO $ newMVar defCPDLCEditorState
-  let getVar index = Map.lookup index . cpdlcEditorVars <$> liftIO (readMVar editorStateVar)
-      setVar index (Just val) = do
+  let supTys = [ fromMaybe (error $ "Invalid supplemental CPDLC message type: " ++ show supTy)
+                    $ Map.lookup supTy CPDLC.downlinkMessages
+               | supTy <- supTyIDs
+               ]
+      supTyIDs = CPDLC.msgSuggestedSupp ty
+  let getVar partIndex index = Map.lookup (partIndex, index) . cpdlcEditorVars <$> liftIO (readMVar editorStateVar)
+      setVar partIndex index (Just val) = do
         liftIO $
           modifyMVar_ editorStateVar (\s -> return s
-            { cpdlcEditorVars = Map.insert index val (cpdlcEditorVars s) })
+            { cpdlcEditorVars = Map.insert (partIndex, index) val (cpdlcEditorVars s) })
         return True
-      setVar index Nothing = do
+      setVar partIndex index Nothing = do
         liftIO $
           modifyMVar_ editorStateVar (\s -> return s
-            { cpdlcEditorVars = Map.delete index (cpdlcEditorVars s) })
+            { cpdlcEditorVars = Map.delete (partIndex, index) (cpdlcEditorVars s) })
         return True
-      entrySpec = getEntryItems ty
+      entrySpec = map getEntryItems $ ty : supTys
       hydrate = do
         vars <- cpdlcEditorVars <$> liftIO (readMVar editorStateVar)
-        return [ (label, varMay, varMay >>= \i -> Map.lookup i vars)
-               | (label, varMay) <- entrySpec
-               ]
+        return $ concat
+          [ [ (label, partIndex, varMay, varMay >>= \i -> Map.lookup (partIndex, i) vars)
+            | (label, varMay) <- part
+            ]
+          | (partIndex, part) <- zip [0..] entrySpec
+          ]
   let numPages = (length entrySpec + 5) `div` 5
   return defView
             { mcduViewTitle = "CPDLC COMPOSE"
@@ -140,7 +191,7 @@ mkCpdlcComposeView tyID ty toMay mrnMay = do
                 modifyView $ \v -> v
                     { mcduViewLSKBindings = mempty
                     , mcduViewDraw = do
-                        zipWithM_ (\y (label, varMay, valMay) -> do
+                        zipWithM_ (\y (label, _, varMay, valMay) -> do
                             mcduPrint 1 (y * 2 + 1) white label
                             forM_ varMay $ \_var -> do
                               let valFmt = fromMaybe "----" valMay
@@ -148,18 +199,18 @@ mkCpdlcComposeView tyID ty toMay mrnMay = do
                           )
                           [0..4] curEntryItems
                     }
-                let mkBinding n (_, varMay, _) = do
+                let mkBinding n (_, partIndex, varMay, _) = do
                       forM_ varMay $ \index -> do
                         addLskBinding (n + 5) "" $ do
                           scratchInteract
-                            (setVar index)
-                            (getVar index)
+                            (setVar partIndex index)
+                            (getVar partIndex index)
                           reloadView
                 zipWithM_ mkBinding [0..4] curEntryItems
                 when lastPage $ do
                   vars <- liftIO $ cpdlcEditorVars <$> readMVar editorStateVar
                   addLskBinding 8 "SEND"
-                    (sendCpdlc tyID toMay mrnMay vars >>= \case
+                    (sendCpdlc (tyID : supTyIDs) toMay mrnMay vars >>= \case
                       True -> loadView cpdlcMessageLogView
                       False -> reloadView
                     )
@@ -252,6 +303,13 @@ clearanceSendView sent = defView
       ]
   , mcduViewOnLoad = do
       callsign <- asks hoppieCallsign
+
+      ctype <- gets mcduClearanceType
+      when (isNothing ctype) $ do
+        atype <- gets mcduAircraftType
+        modify $ \s -> s
+          { mcduClearanceType = atype }
+        
       unless sent $ do
         addLskBinding 8 "SEND" $ do
           sendSuccess <- sendClearanceRequest
@@ -688,6 +746,8 @@ cpdlcLogonView = defView
         Just currentDA -> do
           addLskBinding 5 "LOGOFF" (lift (cpdlcPilotLogoff currentDA) >> reloadView)
 
+      addLskBinding 4 "ATC MENU" (loadView atcMenuView)
+
       modifyView $ \v -> v
         { mcduViewDraw = do
             when (isNothing (currentDataAuthority da)) $ do
@@ -772,6 +832,22 @@ cpdlcWhenCanWeMenuView = defView
   , mcduViewLSKBindings = Map.fromList
       [ (0, ("BACK ON RTE", loadCpdlcComposeViewByID "RTED-8" Nothing Nothing))
       , (4, ("ATC MENU", loadView atcMenuView))
+      ]
+  , mcduViewOnLoad = do
+      online <- haveCpdlcLogon
+      if online then do
+        loadUplinkLSK 9
+      else
+        loadView atcMenuView
+  }
+
+cpdlcEmergencyMenuView :: MCDUView
+cpdlcEmergencyMenuView = defView
+  { mcduViewTitle = "ATC EMERGENCY"
+  , mcduViewLSKBindings = Map.fromList
+      [ (0, ("MAYDAY", loadCpdlcComposeViewByID "EMGD-2" Nothing Nothing))
+      , (1, ("PAN", loadCpdlcComposeViewByID "EMGD-1" Nothing Nothing))
+      , (5, ("CANCEL", loadCpdlcComposeViewByID "EMGD-4" Nothing Nothing))
       ]
   , mcduViewOnLoad = do
       online <- haveCpdlcLogon

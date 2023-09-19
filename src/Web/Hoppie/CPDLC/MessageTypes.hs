@@ -321,6 +321,7 @@ data MessageType =
     , msgArgs :: [ArgSpec]
     , msgReplyOpts :: ReplyOpts
     , msgReplies :: [(MessageTypeID, [Maybe ArgRef])]
+    , msgSuggestedSupp :: [MessageTypeID]
     }
     deriving (Show, Read)
 
@@ -331,6 +332,7 @@ defMessageType =
     , msgArgs = []
     , msgReplyOpts = ReplyN
     , msgReplies = []
+    , msgSuggestedSupp = []
     }
 
 resolveMessagePatternWith :: (ArgRef -> a) -> MessagePattern ArgRef -> MessagePattern a
@@ -694,12 +696,12 @@ uplinkMessages = Map.fromList
   , ("SUPU-2", defMessageType { msgPattern = "DUE {!TO} $1", msgArgs = [ argReason ] } )
   , ("SUPU-3", defMessageType { msgPattern = "EXPEDITE", msgArgs = [] } )
   , ("SUPU-4", defMessageType { msgPattern = "REVISED $1", msgArgs = [ argReason ] } )
-  , ("RSPU-1", defMessageType { msgPattern = "UNABLE", msgArgs = [] } )
+  , ("RSPU-1", defMessageType { msgPattern = "UNABLE", msgArgs = [], msgSuggestedSupp = ["SUPU-2"] } )
   , ("RSPU-2", defMessageType { msgPattern = "STANDBY", msgArgs = [] } )
   , ("RSPU-3", defMessageType { msgPattern = "REQUEST DEFERRED", msgArgs = [] } )
   , ("RSPU-4", defMessageType { msgPattern = "ROGER", msgArgs = [] } )
   , ("RSPU-5", defMessageType { msgPattern = "AFFIRM", msgArgs = [] } )
-  , ("RSPU-6", defMessageType { msgPattern = "NEGATIVE", msgArgs = [] } )
+  , ("RSPU-6", defMessageType { msgPattern = "NEGATIVE", msgArgs = [], msgSuggestedSupp = ["SUPU-2"] } )
   , ("RSPU-7", defMessageType { msgPattern = "REQUEST FORWARDED", msgArgs = [] } )
   , ("RSPU-8", defMessageType { msgPattern = "CONFIRM REQUEST", msgArgs = [] } )
   , ("TXTU-1", defMessageType { msgPattern = "$1", msgArgs = [ argText ], msgReplyOpts = ReplyR } )
@@ -766,11 +768,11 @@ downlinkMessages = Map.fromList
     , ( "SPDD-5", defMessageType { msgPattern = "WE CAN ACCEPT $1 AT TIME $2", msgArgs = [ argSpeed , argTime ] } )
     , ( "SPDD-6", defMessageType { msgPattern = "WE CANNOT ACCEPT $1", msgArgs = [ argSpeed ] } )
     , ( "RSPD-1", defMessageType { msgPattern = "WILCO", msgArgs = [] } )
-    , ( "RSPD-2", defMessageType { msgPattern = "UNABLE", msgArgs = [] } )
+    , ( "RSPD-2", defMessageType { msgPattern = "UNABLE", msgArgs = [], msgSuggestedSupp = ["SUPD-1"] } )
     , ( "RSPD-3", defMessageType { msgPattern = "STANDBY", msgArgs = [] } )
     , ( "RSPD-4", defMessageType { msgPattern = "ROGER", msgArgs = [] } )
     , ( "RSPD-5", defMessageType { msgPattern = "AFFIRM", msgArgs = [] } )
-    , ( "RSPD-6", defMessageType { msgPattern = "NEGATIVE", msgArgs = [] } )
+    , ( "RSPD-6", defMessageType { msgPattern = "NEGATIVE", msgArgs = [], msgSuggestedSupp = ["SUPD-1"] } )
     , ( "COMD-1", defMessageType { msgPattern = "REQUEST VOICE CONTACT $1", msgArgs = [ argFreq ], msgReplyOpts = ReplyY } )
     , ( "COMD-2", defMessageType { msgPattern = "RELAY FROM $1", msgArgs = [ argText ], msgReplyOpts = ReplyN } )
     , ( "EMGD-1", defMessageType { msgPattern = "PAN PAN PAN", msgArgs = [], msgReplyOpts = ReplyY } )

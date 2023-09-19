@@ -2,7 +2,6 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TupleSections #-}
 
 module Web.Hoppie.TUI.MCDU.Monad
 where
@@ -19,18 +18,17 @@ import Web.Hoppie.Telex
 import Control.Applicative
 import Control.Concurrent.MVar
 import Control.Monad
+import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Trans.Maybe
-import Control.Monad.Except
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BS8
 import Data.Char
+import Data.Maybe
 import Data.Map (Map)
 import qualified Data.Map.Strict as Map
-import Data.Maybe
-import Data.Time
 import Data.Word
 import System.IO
 import Text.Printf
@@ -56,8 +54,11 @@ data MCDUState =
     , mcduScratchMessage :: Maybe ByteString
     , mcduScreenBuffer :: MCDUScreenBuffer
     , mcduView :: MCDUView
+
     , mcduUnreadDLK :: Maybe Word
     , mcduUnreadCPDLC :: Maybe Word
+
+    , mcduAircraftType :: Maybe ByteString
     , mcduReferenceAirport :: Maybe ByteString
     , mcduTelexRecipient :: Maybe ByteString
     , mcduTelexBody :: Maybe ByteString
@@ -66,6 +67,7 @@ data MCDUState =
     , mcduClearanceDestination :: Maybe ByteString
     , mcduClearanceStand :: Maybe ByteString
     , mcduClearanceAtis :: Maybe Word8
+
     , mcduSendMessage :: TypedMessage -> Hoppie ()
     , mcduNetworkStatus :: NetworkStatus
     , mcduDebugLog :: [String]
@@ -74,23 +76,28 @@ data MCDUState =
 defMCDUState :: MCDUState
 defMCDUState =
   MCDUState
-    ScratchEmpty
-    Nothing
-    emptyMCDUScreenBuffer
-    defView
-    Nothing
-    Nothing
-    Nothing
-    Nothing
-    Nothing
-    Nothing
-    Nothing
-    Nothing
-    Nothing
-    Nothing
-    (const $ return ())
-    NetworkOK
-    []
+    { mcduScratchpad = ScratchEmpty
+    , mcduScratchMessage = Nothing
+    , mcduScreenBuffer = emptyMCDUScreenBuffer
+    , mcduView = defView
+
+    , mcduUnreadDLK = Nothing
+    , mcduUnreadCPDLC = Nothing
+
+    , mcduAircraftType = Nothing
+    , mcduReferenceAirport = Nothing
+    , mcduTelexRecipient = Nothing
+    , mcduTelexBody = Nothing
+    , mcduClearanceType = Nothing
+    , mcduClearanceFacility = Nothing
+    , mcduClearanceDestination = Nothing
+    , mcduClearanceStand = Nothing
+    , mcduClearanceAtis = Nothing
+
+    , mcduSendMessage = const (return ())
+    , mcduNetworkStatus = NetworkOK
+    , mcduDebugLog = []
+    }
 
 data MCDUView =
   MCDUView
@@ -213,27 +220,56 @@ sendClearanceRequest = do
         TypedMessage Nothing to (TelexPayload body)
       return True
 
-sendCpdlc :: CPDLC.MessageTypeID -> Maybe ByteString -> Maybe Word -> Map Word ByteString -> MCDU Bool
-sendCpdlc tyID toMay mrnMay varDict = do
+sendCpdlc :: [CPDLC.MessageTypeID] -> Maybe ByteString -> Maybe Word -> Map (Int, Word) ByteString -> MCDU Bool
+sendCpdlc tyIDs toMay mrnMay varDict = do
   sendMessage <- gets mcduSendMessage
   dataAuthority <- asks hoppieCpdlcDataAuthorities >>= fmap currentDataAuthority . liftIO . readMVar
   cpdlcToMay <- runExceptT $ do
-    ty <- ExceptT . return . maybe (Left "TYPE") Right $ Map.lookup tyID CPDLC.downlinkMessages
-    to <- ExceptT . return . maybe (Left "TO") Right $ toMay <|> dataAuthority
-    argValues <- zipWithM
-          (\n _ -> ExceptT . return . maybe (Left "ARGS") Right $ Map.lookup n varDict)
-          [1,2..] (CPDLC.msgArgs ty)
+    to <- maybe (throwError "TO") return $
+            toMay <|> dataAuthority
+
+    parts <- catMaybes <$> zipWithM (\partIndex tyID -> do
+        ty <- maybe (throwError $ "TYPE " <> tyID) return $
+                Map.lookup tyID CPDLC.downlinkMessages
+        case partIndex of
+          0 -> do
+                -- First part is required, all variables must be set
+                argValues <- zipWithM
+                  (\n _ -> maybe (throwError "ARGS") return $ Map.lookup (partIndex, n) varDict)
+                  [1,2..] (CPDLC.msgArgs ty)
+                return . Just $ CPDLC.CPDLCPart
+                                  { cpdlcType = tyID
+                                  , cpdlcArgs = argValues
+                                  }
+          _ -> do
+                -- Other parts are supplements; we distinguish three cases:
+                -- - If no variables are set, don't include the part.
+                -- - If all variables are set, include it.
+                -- - If some, but not all, are set, throw an error.
+              let mayArgValues = zipWith (\n _ -> Map.lookup (partIndex, n) varDict) [1,2..] (CPDLC.msgArgs ty)
+              if all isNothing mayArgValues then
+                return Nothing
+              else if all isJust mayArgValues then
+                return . Just $ CPDLC.CPDLCPart
+                                  { cpdlcType = tyID
+                                  , cpdlcArgs = catMaybes mayArgValues
+                                  }
+              else
+                throwError "ARGS"
+                
+      ) [0,1..] tyIDs
     nextMin <- lift . lift $ makeMIN
+    replyOpts <- case tyIDs of
+                    [] -> throwError "EMPTY MSG"
+                    (tyID:_) -> do
+                        ty <- maybe (throwError $ "TYPE " <> tyID) return $
+                                Map.lookup tyID CPDLC.downlinkMessages
+                        return $ CPDLC.msgReplyOpts ty
     let cpdlc = CPDLC.CPDLCMessage
             { cpdlcMIN = nextMin
             , cpdlcMRN = mrnMay
-            , cpdlcReplyOpts = CPDLC.msgReplyOpts ty
-            , cpdlcParts =
-                [ CPDLC.CPDLCPart
-                    { cpdlcType = tyID
-                    , cpdlcArgs = argValues
-                    }
-                ]
+            , cpdlcReplyOpts = replyOpts
+            , cpdlcParts = parts
             }
     return (cpdlc, to)
   case cpdlcToMay of
@@ -464,6 +500,7 @@ handleMCDUEvent mainMenuView dlkMenuView atcMenuView ev = do
           _ ->
             return ()
       modify $ \s -> s { mcduNetworkStatus = ns' }
+      reloadView
       
 
     UplinkEvent mtm -> do
@@ -508,10 +545,10 @@ handleMCDUEvent mainMenuView dlkMenuView atcMenuView ev = do
     InputCommandEvent InputDel ->
       scratchClear
     InputCommandEvent (InputChar c) ->
-      if c >= 'a' && c <= 'z' then
+      if isAsciiLower c then
         scratchAppend (ord8 $ toUpper c)
-      else if (c >= 'A' && c <= 'Z') ||
-              (c >= '0' && c <= '9') ||
+      else if isAsciiUpper c ||
+              isDigit c ||
               (c `elem` ['-', '.', '/', ' ']) then
         scratchAppend (ord8 c)
       else

@@ -1,33 +1,207 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+
 module Main where
 
 import Web.Hoppie.System
-import Web.Hoppie.Telex
-import Web.Hoppie.TUI.Output
 import Web.Hoppie.TUI.Input
 import Web.Hoppie.TUI.MCDU
 import Web.Hoppie.TUI.StringUtil
+import Web.Hoppie.Telex
 
-import Control.Concurrent.STM
+import Control.Applicative
 import Control.Concurrent.Async (race_)
+import Control.Concurrent.STM
+import Control.Exception
 import Control.Monad
-import Data.Maybe
+import Control.Monad.Except
+import Control.Monad.IO.Class
+import Control.Monad.State
+import Control.Monad.Trans.Maybe
+import qualified Data.Aeson as JSON
+import Data.Aeson.TH (deriveJSON)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as BS8
-import System.Environment
-import Control.Monad.IO.Class
+import Data.Maybe
 import Data.Word
+import qualified Data.Yaml as YAML
+import Options.Applicative
+import System.Environment
+import System.FilePath
+import Text.Casing
+import Text.Read (readMaybe)
+
+data ProgramOptions =
+  ProgramOptions
+    { poLogon :: Maybe String
+    , poCallsign :: Maybe String
+    , poAircraftType :: Maybe String
+    , poFastPollingInterval :: Maybe Int
+    , poSlowPollingInterval :: Maybe Int
+    , poHoppieUrl :: Maybe String
+    }
+    deriving (Show)
+
+emptyProgramOptions :: ProgramOptions
+emptyProgramOptions =
+  ProgramOptions
+    { poLogon = Nothing
+    , poCallsign = Nothing
+    , poAircraftType = Nothing
+    , poFastPollingInterval = Nothing
+    , poSlowPollingInterval = Nothing
+    , poHoppieUrl = Nothing
+    }
+
+defaultProgramOptions :: ProgramOptions
+defaultProgramOptions =
+  ProgramOptions
+    { poLogon = Nothing
+    , poCallsign = Just "TEST"
+    , poAircraftType = Nothing
+    , poFastPollingInterval = Just 20
+    , poSlowPollingInterval = Just 60
+    , poHoppieUrl = Just "http://www.hoppie.nl/acars/system/connect.html"
+    }
+
+instance Semigroup ProgramOptions where
+  ProgramOptions l1 c1 ty1 fp1 sp1 url1 <>
+    ProgramOptions l2 c2 ty2 fp2 sp2 url2 =
+      ProgramOptions
+        (l1 <|> l2)
+        (c1 <|> c2)
+        (ty1 <|> ty2)
+        (fp1 <|> fp2)
+        (sp1 <|> sp2)
+        (url1 <|> url2)
+
+$(deriveJSON
+    JSON.defaultOptions
+      { JSON.fieldLabelModifier = toKebab . dropPrefix . fromHumps
+      , JSON.omitNothingFields = True
+      }
+    ''ProgramOptions
+ )
+
+optionsP :: Parser ProgramOptions
+optionsP = ProgramOptions
+  <$> option (Just <$> str)
+        (  long "logon"
+        <> short 'l'
+        <> metavar "LOGON"
+        <> help "Hoppie logon code"
+        <> value Nothing
+        )
+  <*> option (Just <$> str)
+        (  long "callsign"
+        <> short 'c'
+        <> metavar "CALLSIGN"
+        <> help "Your callsign"
+        <> value Nothing
+        )
+  <*> option (Just <$> str)
+        (  long "aircraft-type"
+        <> short 't'
+        <> metavar "ICAO"
+        <> help "ICAO aircraft type code for your aircraft (A32N, B738, ...)"
+        <> value Nothing
+        )
+  <*> option (Just <$> auto)
+        (  long "fast-polling"
+        <> short 'P'
+        <> metavar "INTERVAL"
+        <> help "Fast polling interval, in seconds"
+        <> value Nothing
+        )
+  <*> option (Just <$> auto)
+        (  long "slow-polling"
+        <> short 'p'
+        <> metavar "INTERVAL"
+        <> help "Slow polling interval, in seconds"
+        <> value Nothing
+        )
+  <*> option (Just <$> str)
+        (  long "hoppie-url"
+        <> long "url"
+        <> short 'u'
+        <> metavar "URL"
+        <> help "Hoppie ACARS connect URL"
+        <> value Nothing
+        )
+
+optionsFromArgs :: IO ProgramOptions
+optionsFromArgs =
+  execParser p
+  where
+    p = info
+          (optionsP <**> helper)
+          (  fullDesc
+          <> header "hoppie-mcdu - an MCDU for Hoppie ACARS/CPDLC in the terminal"
+          )
+
+optionsFromConfigFile :: IO ProgramOptions
+optionsFromConfigFile =
+  fmap (fromMaybe emptyProgramOptions) $
+    runMaybeT $ do
+      home <- MaybeT $ lookupEnv "HOME"
+      let configFilePath = home </> ".config" </> "hoppie-mcdu" </> "config.yaml"
+      MaybeT $ liftIO
+        (loadFile configFilePath
+          `catch` (\(e :: SomeException) -> print e >> return Nothing)
+        )
+  where
+    loadFile :: FilePath -> IO (Maybe ProgramOptions)
+    loadFile configFilePath = do
+      yamlResult <- YAML.decodeFileEither configFilePath
+      case yamlResult of
+        Left err -> do
+          putStrLn $ YAML.prettyPrintParseException err
+          return Nothing
+        Right config ->
+          return (Just config)
+
+optionsFromEnv :: IO ProgramOptions
+optionsFromEnv = do
+  logon <- lookupEnv "HOPPIE_LOGON"
+  callsign <- lookupEnv "HOPPIE_CALLSIGN"
+  url <- lookupEnv "HOPPIE_URL"
+  pollingInterval <- lookupEnv "HOPPIE_POLLING_INTERVAL"
+  slowPollingInterval <- lookupEnv "HOPPIE_SLOW_POLLING_INTERVAL"
+  fastPollingInterval <- lookupEnv "HOPPIE_FAST_POLLING_INTERVAL"
+  return emptyProgramOptions
+    { poLogon = logon
+    , poCallsign = callsign
+    , poHoppieUrl = url
+    , poSlowPollingInterval = (slowPollingInterval <|> pollingInterval) >>= readMaybe
+    , poFastPollingInterval = (fastPollingInterval <|> pollingInterval) >>= readMaybe
+    }
+
+optionsToConfig :: ProgramOptions -> Either String Config
+optionsToConfig po = runExcept $ do
+  logon <- maybe (throwError "No logon configured") return $ poLogon po
+  url <- maybe (throwError "No URL configured") return $ poHoppieUrl po
+  fastPollingInterval <- maybe (throwError "No fast polling configured") return $ poFastPollingInterval po
+  slowPollingInterval <- maybe (throwError "No slow polling configured") return $ poSlowPollingInterval po
+  return $
+    Config
+      (BS8.pack logon)
+      url
+      slowPollingInterval
+      fastPollingInterval
+
 
 main :: IO ()
 main = do
   inputChan <- newTChanIO
   eventChan <- newTChanIO
-  logon <- fromMaybe (error "No logon configured") <$> lookupEnv "HOPPIE_LOGON"
-  callsign <- fromMaybe "TEST" <$> lookupEnv "HOPPIE_CALLSIGN"
-  url <- fromMaybe defURL <$> lookupEnv "HOPPIE_URL"
-  pollingInterval <- maybe 60 read <$> lookupEnv "HOPPIE_POLLING_INTERVAL"
-  fastPollingInterval <- maybe 20 read <$> lookupEnv "HOPPIE_FAST_POLLING_INTERVAL"
-  let config = Config (BS8.pack logon) url pollingInterval fastPollingInterval
+  poFromEnv <- optionsFromEnv
+  poFromConfigFile <- optionsFromConfigFile
+  poFromArgs <- optionsFromArgs
+  let po = poFromArgs <> poFromEnv <> poFromConfigFile <> defaultProgramOptions
+  config <- either error return $ optionsToConfig po
+  callsign <- maybe (error "No callsign configured") return $ poCallsign po
+  let actype = fmap BS8.pack $ poAircraftType po
   runInput inputChan
     `race_`
     runInputPusher inputChan eventChan
@@ -38,7 +212,7 @@ main = do
       (handleUplink eventChan)
       (handleNetworkStatus eventChan)
       (handleCurrentDataAuthority eventChan)
-      (hoppieMain eventChan)
+      (hoppieMain actype eventChan)
 
 runInputPusher :: TChan Word8 -> TChan MCDUEvent -> IO ()
 runInputPusher inputChan eventChan = forever $ do
@@ -56,9 +230,11 @@ handleCurrentDataAuthority :: TChan MCDUEvent -> Maybe ByteString -> Hoppie ()
 handleCurrentDataAuthority eventChan = do
   liftIO . atomically . writeTChan eventChan . CurrentDataAuthorityEvent
 
-hoppieMain :: TChan MCDUEvent -> (TypedMessage -> Hoppie ()) -> Hoppie ()
-hoppieMain eventChan sendMessage = do
+hoppieMain :: Maybe ByteString -> TChan MCDUEvent -> (TypedMessage -> Hoppie ()) -> Hoppie ()
+hoppieMain actypeMay eventChan sendMessage = do
   runMCDU sendMessage $ do
+    modify $ \s -> s
+      { mcduAircraftType = actypeMay }
     loadView mainMenuView
     flushAll
     forever $ do

@@ -6,7 +6,6 @@ module Web.Hoppie.TUI.MCDU.Draw
 where
 
 import Web.Hoppie.TUI.Output
-import Web.Hoppie.TUI.Input
 
 import Control.Monad
 import Data.Maybe

@@ -19,7 +19,6 @@ import Control.Monad
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as BS8
 import Data.Map (Map)
-import qualified Data.Map.Strict as Map
 import qualified Text.Megaparsec as P
 import qualified Text.Megaparsec.Byte as P
 import qualified Text.Megaparsec.Byte.Lexer as P (decimal)
@@ -53,7 +52,7 @@ parseCPDLCDownlink src =
 
 renderCPDLCMessage :: CPDLCMessage -> ByteString
 renderCPDLCMessage cpdlc =
-  mconcat $
+  mconcat
     [ "/data2/"
     , (BS8.pack . show) (cpdlcMIN cpdlc)
     , "/"
@@ -61,7 +60,8 @@ renderCPDLCMessage cpdlc =
     , "/"
     , raToBS (cpdlcReplyOpts cpdlc)
     , "/"
-    ] ++
+    ] <>
+  BS8.unwords
     [ renderMessage allMessageTypes (cpdlcType part) (cpdlcArgs part)
     | part <- cpdlcParts cpdlc
     ]
@@ -99,7 +99,8 @@ cpdlcMessageP messageTypes = do
 raP :: P.Parsec Void ByteString ReplyOpts
 raP =
   P.choice . map P.try $
-    [ ReplyN <$ P.string "N"
+    [ ReplyN <$ P.string "NE"
+    , ReplyN <$ P.string "N"
     , ReplyY <$ P.string "Y"
     , ReplyR <$ P.string "R"
     , ReplyAN <$ P.string "AN"
