@@ -16,20 +16,10 @@ import Control.Monad.Reader
 
 runSystem :: ByteString
           -> Config
-          -> (WithMeta UplinkStatus TypedMessage -> Hoppie ())
-          -> (WithMeta DownlinkStatus TypedMessage -> Hoppie ())
-          -> (NetworkStatus -> Hoppie ())
-          -> (Maybe ByteString -> Hoppie ())
+          -> HoppieHooks IO
           -> ((TypedMessage -> Hoppie ()) -> Hoppie ())
           -> IO ()
-runSystem callsign config onUplink onDownlink onNetworkStatus onCpdlcLogon runUI = do
-  let hooks =
-        HoppieHooks
-          { onUplink
-          , onDownlink
-          , onNetworkStatus
-          , onCpdlcLogon
-          }
+runSystem callsign config hooks runUI = do
   env <- makeHoppieEnv hooks callsign config
   race_
     (runHoppieTWith env (runUI send'))
@@ -41,11 +31,14 @@ runSystem callsign config onUplink onDownlink onNetworkStatus onCpdlcLogon runUI
       retval <- action
       ns' <- asks hoppieNetworkStatus >>= lift . readMVar
       da' <- asks hoppieCpdlcDataAuthorities >>= lift . readMVar
-      when (ns /= ns') (onNetworkStatus ns')
-      when (da /= da') (onCpdlcLogon $ currentDataAuthority da')
+      when (ns /= ns') (onNetworkStatus hooks $ ns')
+      when (da /= da') (onCpdlcLogon hooks $ currentDataAuthority da')
       return retval
 
     send' tm = do
+      pollingIntervalVar <- asks hoppieFastPollingCounter
+      -- increase polling frequency for a while after sending a message
+      liftIO $ modifyMVar_ pollingIntervalVar $ const . return $ 10
       void $ withStatusCheck $ send tm
 
     runPolling = forever $ do

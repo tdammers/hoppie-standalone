@@ -213,7 +213,13 @@ main = do
   config <- either error return $ optionsToConfig po
   callsign <- maybe (error "No callsign configured") return $ poCallsign po
   let actype = fmap BS8.pack $ poAircraftType po
-  let showLog = fromMaybe False $ poShowLog po
+      showLog = fromMaybe False $ poShowLog po
+      hooks = HoppieHooks
+                { onUplink = handleUplink eventChan
+                , onDownlink = handleDownlink eventChan
+                , onNetworkStatus = handleNetworkStatus eventChan
+                , onCpdlcLogon = handleCurrentDataAuthority eventChan
+                }
   runInput inputChan
     `race_`
     runInputPusher inputChan eventChan
@@ -221,10 +227,7 @@ main = do
     runSystem
       (BS8.pack callsign)
       config
-      (handleUplink eventChan)
-      (handleDownlink eventChan)
-      (handleNetworkStatus eventChan)
-      (handleCurrentDataAuthority eventChan)
+      hooks
       (hoppieMain showLog actype eventChan)
 
 runInputPusher :: TChan Word8 -> TChan MCDUEvent -> IO ()
