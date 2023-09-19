@@ -76,10 +76,11 @@ testView = defView
   { mcduViewTitle = "TEST"
   , mcduViewDraw = do
       let lns = lineWrap screenW $
-                  ColoredBS
-                    [ ColoredBSFragment white "THIS ATIS "
-                    , ColoredBSFragment red " IS NOT AVAILABLE"
-                    ]
+                    colorize white "THIS IS A " <>
+                    colorize green "TEST " <>
+                    colorize white "USING A CHUNK OF" <>
+                    colorize red " LONG TEXT"
+                    
       zipWithM_ (\n cbs -> mcduPrintColored 0 (n + 1) cbs) [0,1..] lns
   }
 
