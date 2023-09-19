@@ -12,6 +12,10 @@ import qualified Data.ByteString as BS
 import Data.Char
 import Data.Word
 import System.IO
+import System.Console.Terminfo as Terminfo
+import Data.Map (Map)
+import qualified Data.Map.Strict as Map
+import Data.Maybe
 
 data InputCommand
   = InputChar Char
@@ -28,10 +32,6 @@ data InputCommand
   | InputDown
   | InputLeft
   | InputRight
-  | InputShiftUp
-  | InputShiftDown
-  | InputShiftLeft
-  | InputShiftRight
   | InputF1
   | InputF2
   | InputF3
@@ -44,18 +44,42 @@ data InputCommand
   | InputF10
   | InputF11
   | InputF12
-  | InputCtrlF1
-  | InputCtrlF2
-  | InputCtrlF3
-  | InputCtrlF4
-  | InputCtrlF5
-  | InputCtrlF6
-  | InputCtrlF7
-  | InputCtrlF8
-  | InputCtrlF9
-  | InputCtrlF10
-  | InputCtrlF11
-  | InputCtrlF12
+  | InputF13
+  | InputF14
+  | InputF15
+  | InputF16
+  | InputF17
+  | InputF18
+  | InputF19
+  | InputF20
+  | InputF21
+  | InputF22
+  | InputF23
+  | InputF24
+  | InputF25
+  | InputF26
+  | InputF27
+  | InputF28
+  | InputF29
+  | InputF30
+  | InputF31
+  | InputF32
+  | InputF33
+  | InputF34
+  | InputF35
+  | InputF36
+  | InputF37
+  | InputF38
+  | InputF39
+  | InputF40
+  | InputF41
+  | InputF42
+  | InputF43
+  | InputF44
+  | InputF45
+  | InputF46
+  | InputF47
+  | InputF48
   | InputEscape
   | InputOtherC0 Word8
   | InputCSI [Word8]
@@ -68,12 +92,84 @@ data InputCommand
   | InputTerminate
   deriving (Show, Read, Eq, Ord)
 
+loadKeyCodes :: IO (Map [Word8] InputCommand)
+loadKeyCodes = do
+  t <- Terminfo.setupTermFromEnv
+  let lookups =
+        [ (InputF1, Terminfo.functionKey 1)
+        , (InputF2, Terminfo.functionKey 2)
+        , (InputF3, Terminfo.functionKey 3)
+        , (InputF4, Terminfo.functionKey 4)
+        , (InputF5, Terminfo.functionKey 5)
+        , (InputF6, Terminfo.functionKey 6)
+        , (InputF7, Terminfo.functionKey 7)
+        , (InputF8, Terminfo.functionKey 8)
+        , (InputF9, Terminfo.functionKey 9)
+        , (InputF10, Terminfo.functionKey 10)
+        , (InputF11, Terminfo.functionKey 11)
+        , (InputF12, Terminfo.functionKey 12)
+        , (InputF13, Terminfo.functionKey 13)
+        , (InputF14, Terminfo.functionKey 14)
+        , (InputF15, Terminfo.functionKey 15)
+        , (InputF16, Terminfo.functionKey 16)
+        , (InputF17, Terminfo.functionKey 17)
+        , (InputF18, Terminfo.functionKey 18)
+        , (InputF19, Terminfo.functionKey 19)
+        , (InputF20, Terminfo.functionKey 20)
+        , (InputF21, Terminfo.functionKey 21)
+        , (InputF22, Terminfo.functionKey 22)
+        , (InputF23, Terminfo.functionKey 23)
+        , (InputF24, Terminfo.functionKey 24)
+        , (InputF25, Terminfo.functionKey 25)
+        , (InputF26, Terminfo.functionKey 26)
+        , (InputF27, Terminfo.functionKey 27)
+        , (InputF28, Terminfo.functionKey 28)
+        , (InputF29, Terminfo.functionKey 29)
+        , (InputF30, Terminfo.functionKey 30)
+        , (InputF31, Terminfo.functionKey 31)
+        , (InputF32, Terminfo.functionKey 32)
+        , (InputF33, Terminfo.functionKey 33)
+        , (InputF34, Terminfo.functionKey 34)
+        , (InputF35, Terminfo.functionKey 35)
+        , (InputF36, Terminfo.functionKey 36)
+        , (InputF37, Terminfo.functionKey 37)
+        , (InputF38, Terminfo.functionKey 38)
+        , (InputF39, Terminfo.functionKey 39)
+        , (InputF40, Terminfo.functionKey 40)
+        , (InputF41, Terminfo.functionKey 41)
+        , (InputF42, Terminfo.functionKey 42)
+        , (InputF43, Terminfo.functionKey 43)
+        , (InputF44, Terminfo.functionKey 44)
+        , (InputF45, Terminfo.functionKey 45)
+        , (InputF46, Terminfo.functionKey 46)
+        , (InputF47, Terminfo.functionKey 47)
+        , (InputF48, Terminfo.functionKey 48)
+        , (InputLeft, Terminfo.keyLeft)
+        , (InputRight, Terminfo.keyRight)
+        , (InputUp, Terminfo.keyUp)
+        , (InputDown, Terminfo.keyDown)
+        , (InputBackspace, Terminfo.keyBackspace)
+        , (InputDel, Terminfo.keyDeleteChar)
+        , (InputHome, Terminfo.keyHome)
+        , (InputEnd, Terminfo.keyEnd)
+        , (InputPgUp, Terminfo.keyPageUp)
+        , (InputPgDn, Terminfo.keyPageDown)
+        ]
+  return $ Map.fromList . mapMaybe (makeTerminfoEntry t) $ lookups
+  where
+    makeTerminfoEntry :: Terminfo.Terminal
+                      -> (InputCommand, Terminfo.Capability String)
+                      -> Maybe ([Word8], InputCommand)
+    makeTerminfoEntry t (cmd, cap) = do
+      capStr <- Terminfo.getCapability t cap
+      let chars = map (fromIntegral . ord) capStr
+      return (chars, cmd)
+
 runInput :: TChan Word8 -> IO ()
 runInput chan = do
   hSetBuffering stdin NoBuffering
   hSetEcho stdin False
-  withSigwinchHandler sendFF $
-    go
+  withSigwinchHandler sendFF go
   where
     go = getByte >>= maybe (return ()) sendAndGo
     send = atomically . writeTChan chan
@@ -87,8 +183,8 @@ getByte = do
     [] -> return Nothing
     c:_ -> return (Just c)
 
-readCommand :: MonadIO m => TChan Word8 -> m InputCommand
-readCommand chan = do
+readCommand :: MonadIO m => Map [Word8] InputCommand -> TChan Word8 -> m InputCommand
+readCommand kcl chan = do
   c <- liftIO . atomically $ readTChan chan
   case c of
     0x03 -> return InputTerminate
@@ -96,7 +192,7 @@ readCommand chan = do
     0x09 -> return InputTab
     0x0A -> return InputEnter
     0x0C -> return InputRedraw -- actually form feed (FF)...
-    0x1B -> readEscapeSequence chan
+    0x1B -> readEscapeSequence kcl chan
     0x7F -> return InputBackspace
     _ | c < 0x20 -> return $ InputOtherC0 c
     _ | c < 0x80 -> return $ InputChar (chr $ fromIntegral c)
@@ -132,8 +228,8 @@ readUtf8 c0 chan = do
   else
     error "UTF-8 error"
 
-readEscapeSequence :: MonadIO m => TChan Word8 -> m InputCommand
-readEscapeSequence chan = do
+readEscapeSequence :: MonadIO m => Map [Word8] InputCommand -> TChan Word8 -> m InputCommand
+readEscapeSequence kcl chan = do
   let nextByteEither = liftIO $
         race
           (threadDelay 1000)
@@ -146,54 +242,13 @@ readEscapeSequence chan = do
       0x4e -> do
         InputG2 <$> doWhile (>= 0x20) nextByte
       0x4f -> do
-        InputG3 <$> doWhile (>= 0x20) nextByte
+        byte <- nextByte
+        return $ fromMaybe (InputG3 [byte]) $ Map.lookup [27, 0x4f, byte] kcl
       0x50 -> do
         InputDCS <$> readUntilST nextByte
       0x5b -> do
         bytes <- doWhile (\x -> x < 0x40 || x > 0x7E) nextByte
-        case bytes of
-          [65] -> return InputUp
-          [66] -> return InputDown
-          [67] -> return InputRight
-          [68] -> return InputLeft
-          [97] -> return InputShiftUp
-          [98] -> return InputShiftDown
-          [99] -> return InputShiftRight
-          [100] -> return InputShiftLeft
-
-          [50,126] -> return InputIns
-          [51,126] -> return InputDel
-          [53,126] -> return InputPgUp
-          [54,126] -> return InputPgDn
-          [55,126] -> return InputHome
-          [56,126] -> return InputEnd
-
-          [49,49,126] -> return InputF1
-          [49,50,126] -> return InputF2
-          [49,51,126] -> return InputF3
-          [49,52,126] -> return InputF4
-          [49,53,126] -> return InputF5
-          [49,55,126] -> return InputF6
-          [49,56,126] -> return InputF7
-          [49,57,126] -> return InputF8
-          [50,48,126] -> return InputF9
-          [50,49,126] -> return InputF10
-          [50,51,126] -> return InputF11
-          [50,52,126] -> return InputF12
-
-          [49,49,94] -> return InputCtrlF1
-          [49,50,94] -> return InputCtrlF2
-          [49,51,94] -> return InputCtrlF3
-          [49,52,94] -> return InputCtrlF4
-          [49,53,94] -> return InputCtrlF5
-          [49,55,94] -> return InputCtrlF6
-          [49,56,94] -> return InputCtrlF7
-          [49,57,94] -> return InputCtrlF8
-          [50,48,94] -> return InputCtrlF9
-          [50,49,94] -> return InputCtrlF10
-          [50,51,94] -> return InputCtrlF11
-          [50,52,94] -> return InputCtrlF12
-          _ -> return $ InputCSI bytes
+        return $ fromMaybe (InputCSI bytes) $ Map.lookup ([27,79] ++ bytes) kcl
       0x5d -> do
         InputOSC <$> readUntilST nextByte
       _ -> do

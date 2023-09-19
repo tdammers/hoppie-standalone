@@ -31,6 +31,7 @@ import System.Environment
 import System.FilePath
 import Text.Casing
 import Text.Read (readMaybe)
+import qualified Data.Map.Strict as Map
 
 data ProgramOptions =
   ProgramOptions
@@ -231,8 +232,10 @@ main = do
       (hoppieMain showLog actype eventChan)
 
 runInputPusher :: TChan Word8 -> TChan MCDUEvent -> IO ()
-runInputPusher inputChan eventChan = forever $ do
-  readCommand inputChan >>= atomically . writeTChan eventChan . InputCommandEvent
+runInputPusher inputChan eventChan = do
+  kcl <- loadKeyCodes
+  forever $ do
+    readCommand kcl inputChan >>= atomically . writeTChan eventChan . InputCommandEvent
 
 handleUplink :: TChan MCDUEvent -> WithMeta UplinkStatus TypedMessage -> Hoppie ()
 handleUplink eventChan = do
@@ -276,3 +279,18 @@ runColoredBSTests = do
   print (map coloredToBS $ coloredLineSplit testStr)
   print (map coloredToBS $ lineWrap 20 testStr)
   print (lineWrap 20 $ coloredToBS testStr)
+
+runInputTest :: IO ()
+runInputTest = do
+  kcl <- loadKeyCodes
+
+  forM_ (Map.toAscList kcl) print
+
+  inputChan <- newTChanIO
+  race_
+    (runInput inputChan)
+    (runLogger kcl inputChan)
+  where
+    runLogger kcl inputChan = forever $ do
+      c <- readCommand kcl inputChan
+      print c

@@ -11,6 +11,8 @@ import Web.Hoppie.Response
 import Web.Hoppie.CPDLC.Message
 import Web.Hoppie.CPDLC.MessageTypes
 
+import Control.Concurrent.STM
+import Control.Concurrent.Async
 import Control.Monad
 import qualified Data.ByteString.Char8 as BS8
 import Data.ByteString (ByteString)
@@ -20,6 +22,8 @@ import Data.Char
 import qualified Data.Map.Strict as Map
 import Data.Maybe
 import Data.List
+import System.IO
+import Data.Word
 
 mkConfig :: String -> Config
 mkConfig l =
