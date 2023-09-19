@@ -248,7 +248,7 @@ readEscapeSequence kcl chan = do
         InputDCS <$> readUntilST nextByte
       0x5b -> do
         bytes <- doWhile (\x -> x < 0x40 || x > 0x7E) nextByte
-        return $ fromMaybe (InputCSI bytes) $ Map.lookup ([27,79] ++ bytes) kcl
+        return $ fromMaybe (InputCSI bytes) $ Map.lookup ([27, 0x5b] ++ bytes) kcl
       0x5d -> do
         InputOSC <$> readUntilST nextByte
       _ -> do
