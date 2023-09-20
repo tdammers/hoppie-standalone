@@ -98,6 +98,7 @@ configView = defView
           showLog <- gets mcduShowLog
           headless <- gets mcduHeadless
           callsign <- lift getCallsign
+          serverEnabled <- gets (isJust . mcduHttpServer)
           let setACType :: Maybe ByteString -> MCDU Bool
               setACType actypeMay =
                 True <$ modify (\s -> s { mcduAircraftType = actypeMay })
@@ -123,6 +124,8 @@ configView = defView
                 mcduPrintR (screenW - 1) 6 green (if showLog then "ON" else "OFF")
                 mcduPrint 0 8 white "HEADLESS MODE"
                 mcduPrintR (screenW - 1) 8 green (if headless then "ON" else "OFF")
+                unless serverEnabled $
+                  mcduPrint 0 9 red "HTTP OFF"
             , mcduViewLSKBindings = Map.fromList
                 [ (4, ("MAIN MENU", loadView mainMenuView))
                 , (5, ("", scratchInteract setACType getACType >> reloadView))
@@ -133,6 +136,7 @@ configView = defView
             }
         1 -> do
           serverEnabled <- gets (isJust . mcduHttpServer)
+          headless <- gets mcduHeadless
           let setPort :: Maybe ByteString -> MCDU Bool
               setPort portMay =
                 case portMay of
@@ -157,6 +161,8 @@ configView = defView
                 mcduPrintR (screenW - 1) 4 green (maybe "----" (BS8.pack . show) port)
                 mcduPrint 0 6 white "SERVER ENABLE"
                 mcduPrintR (screenW - 1) 6 green (if serverEnabled then "ON" else "OFF")
+                when headless $
+                  mcduPrint 0 7 red "HEADLESS"
             , mcduViewLSKBindings = Map.fromList
                 [ (4, ("MAIN MENU", loadView mainMenuView))
                 , (6, ("", scratchInteract setPort getPort >> reloadView))
