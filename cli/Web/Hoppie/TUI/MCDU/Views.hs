@@ -26,8 +26,9 @@ import Data.Map (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe
 import Data.Time
-import Text.Printf
 import Data.Word
+import Text.Printf
+import Text.Read (readMaybe)
 
 {-# ANN module ("HLint: ignore redundant <$>" :: String) #-}
 
@@ -87,42 +88,94 @@ testView = defView
 configView :: MCDUView
 configView = defView
   { mcduViewTitle = "CONFIG"
+  , mcduViewNumPages = 2
   , mcduViewOnLoad = do
-      actype <- gets mcduAircraftType
-      showLog <- gets mcduShowLog
-      callsign <- lift getCallsign
+      page <- gets (mcduViewPage . mcduView)
 
-      let setACType :: Maybe ByteString -> MCDU Bool
-          setACType actypeMay =
-            True <$ modify (\s -> s { mcduAircraftType = actypeMay })
-          getACType :: MCDU (Maybe ByteString)
-          getACType =
-            gets mcduAircraftType
+      case page of 
+        0 -> do
+          actype <- gets mcduAircraftType
+          showLog <- gets mcduShowLog
+          headless <- gets mcduHeadless
+          callsign <- lift getCallsign
+          let setACType :: Maybe ByteString -> MCDU Bool
+              setACType actypeMay =
+                True <$ modify (\s -> s { mcduAircraftType = actypeMay })
+              getACType :: MCDU (Maybe ByteString)
+              getACType =
+                gets mcduAircraftType
 
-          setMyCallsign (Just c) = do
-            lift $ setCallsign c
-            return True
-          setMyCallsign Nothing =
-            return False
-          getMyCallsign =
-            lift $ Just <$> getCallsign
-            
+              setMyCallsign (Just c) = do
+                lift $ setCallsign c
+                return True
+              setMyCallsign Nothing =
+                return False
+              getMyCallsign =
+                lift $ Just <$> getCallsign
 
-      modifyView $ \v -> v
-        { mcduViewDraw = do
-            mcduPrint 0 2 white "A/C TYPE"
-            mcduPrintR (screenW - 1) 2 green (fromMaybe "----" actype)
-            mcduPrint 0 4 white "CALLSIGN"
-            mcduPrintR (screenW - 1) 4 green callsign
-            mcduPrint 0 6 white "SHOW LOG"
-            mcduPrintR (screenW - 1) 6 green (if showLog then "ON" else "OFF")
-        , mcduViewLSKBindings = Map.fromList
-            [ (4, ("MAIN MENU", loadView mainMenuView))
-            , (5, ("", scratchInteract setACType getACType >> reloadView))
-            , (6, ("", scratchInteract setMyCallsign getMyCallsign >> reloadView))
-            , (7, ("", modify (\s -> s { mcduShowLog = not (mcduShowLog s) }) >> redrawLog >> reloadView))
-            ]
-        }
+          modifyView $ \v -> v
+            { mcduViewDraw = do
+                mcduPrint 0 2 white "A/C TYPE"
+                mcduPrintR (screenW - 1) 2 green (fromMaybe "----" actype)
+                mcduPrint 0 4 white "CALLSIGN"
+                mcduPrintR (screenW - 1) 4 green callsign
+                mcduPrint 0 6 white "SHOW LOG"
+                mcduPrintR (screenW - 1) 6 green (if showLog then "ON" else "OFF")
+                mcduPrint 0 8 white "HEADLESS MODE"
+                mcduPrintR (screenW - 1) 8 green (if headless then "ON" else "OFF")
+            , mcduViewLSKBindings = Map.fromList
+                [ (4, ("MAIN MENU", loadView mainMenuView))
+                , (5, ("", scratchInteract setACType getACType >> reloadView))
+                , (6, ("", scratchInteract setMyCallsign getMyCallsign >> reloadView))
+                , (7, ("", modify (\s -> s { mcduShowLog = not (mcduShowLog s) }) >> redrawLog >> reloadView))
+                , (8, ("", modify (\s -> s { mcduHeadless = not (mcduHeadless s) }) >> flushAll >> redrawLog >> reloadView))
+                ]
+            }
+        1 -> do
+          serverEnabled <- gets (isJust . mcduHttpServer)
+          let setPort :: Maybe ByteString -> MCDU Bool
+              setPort portMay =
+                case portMay of
+                  Nothing ->
+                    True <$ modify (\s -> s { mcduHttpPort = Nothing })
+                  Just portStr ->
+                    case readMaybe . BS8.unpack $ portStr of
+                      Nothing -> return False
+                      Just port -> do
+                        when serverEnabled mcduStopHttpServer
+                        modify (\s -> s { mcduHttpPort = Just port })
+                        when serverEnabled mcduStartHttpServer
+                        return True
+              getPort :: MCDU (Maybe ByteString)
+              getPort =
+                gets (fmap (BS8.pack . show) . mcduHttpPort)
+          port <- gets mcduHttpPort
+          modifyView $ \v -> v
+            { mcduViewDraw = do
+                mcduPrint 0 2 white "HTTP SERVER"
+                mcduPrint 0 4 white "PORT"
+                mcduPrintR (screenW - 1) 4 green (maybe "----" (BS8.pack . show) port)
+                mcduPrint 0 6 white "SERVER ENABLE"
+                mcduPrintR (screenW - 1) 6 green (if serverEnabled then "ON" else "OFF")
+            , mcduViewLSKBindings = Map.fromList
+                [ (4, ("MAIN MENU", loadView mainMenuView))
+                , (6, ("", scratchInteract setPort getPort >> reloadView))
+                , (7, ( ""
+                      , do
+                          if serverEnabled then
+                            mcduStopHttpServer
+                          else
+                            mcduStartHttpServer
+                          reloadView
+                      )
+                  )
+                ]
+            }
+        _ -> modifyView $ \v -> v
+              { mcduViewDraw = do
+                  mcduPrintC (screenW `div` 2) (screenH `div` 2) red "INVALID PAGE"
+              , mcduViewLSKBindings = mempty
+              }
   }
 
 statusView :: MCDUView

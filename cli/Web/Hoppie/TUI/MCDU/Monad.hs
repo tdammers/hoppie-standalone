@@ -76,6 +76,7 @@ data MCDUState =
     , mcduNetworkStatus :: NetworkStatus
     , mcduDebugLog :: [ColoredBS]
     , mcduShowLog :: Bool
+    , mcduHeadless :: Bool
 
     , mcduHttpPort :: Maybe Int
     , mcduHttpServer :: Maybe MCDUHttpServer
@@ -106,6 +107,7 @@ defMCDUState =
     , mcduNetworkStatus = NetworkOK
     , mcduDebugLog = []
     , mcduShowLog = False
+    , mcduHeadless = False
 
     , mcduHttpPort = Nothing
     , mcduHttpServer = Nothing
@@ -337,12 +339,6 @@ draw action = do
     mcduScreenBuffer = runMCDUDraw action (mcduScreenBuffer s)
   }
 
-flushAll :: MCDU ()
-flushAll = do
-  buf <- gets mcduScreenBuffer
-  liftIO $ drawMCDU buf
-  redrawLog
-
 sendScreenHttp :: MCDU ()
 sendScreenHttp = do
   buf <- gets mcduScreenBuffer
@@ -359,10 +355,24 @@ sendScreenHttp = do
           writeTChan (mcduHttpScreenBufChan server) $
             MCDUScreenBufferUpdate y l
 
+unlessHeadless :: MCDU () -> MCDU ()
+unlessHeadless action = do
+  headless <- gets mcduHeadless
+  unless headless action
+
+flushAll :: MCDU ()
+flushAll = do
+  unlessHeadless $ do
+    buf <- gets mcduScreenBuffer
+    liftIO $ drawMCDU buf
+  redrawLog
+  sendScreenHttp
+
 flushScreen :: MCDU ()
 flushScreen = do
-  buf <- gets mcduScreenBuffer
-  liftIO $ redrawMCDU buf
+  unlessHeadless $ do
+    buf <- gets mcduScreenBuffer
+    liftIO $ redrawMCDU buf
   sendScreenHttp
 
 getScratchColorAndString :: MCDU (Word8, ByteString)
@@ -379,14 +389,12 @@ getScratchColorAndString = do
 
 flushScratch :: MCDU ()
 flushScratch = do
-  buf <- gets mcduScreenBuffer
-  (_, str) <- getScratchColorAndString
-  let scratchX = min (screenW - 1) . BS.length $ str
-  let scratchY = screenH - 1
-  liftIO $ do
-    redrawMCDULine (screenH - 1) buf
-    moveTo (screenX scratchX) (screenY scratchY)
-    hFlush stdout
+  unlessHeadless $ do
+    buf <- gets mcduScreenBuffer
+    liftIO $ do
+      redrawMCDULine (screenH - 1) buf
+      moveTo 0 (screenH + 6)
+      hFlush stdout
   sendScreenHttp
 
 redrawScratch :: MCDU ()
@@ -400,19 +408,25 @@ redrawScratch = do
 redrawLog :: MCDU ()
 redrawLog = do
   logVisible <- gets mcduShowLog
-  (terminalW, terminalH) <- liftIO $ getScreenSize
-  let logW = terminalW - screenW - 14
-  logLines <- gets $ reverse . take terminalH . concat . map (reverse . lineWrap logW) . mcduDebugLog
+  headless <- gets mcduHeadless
+  (terminalW, terminalH) <- liftIO getScreenSize
+  let (left, logW) =
+        if headless then
+          (0, terminalW)
+        else
+          (screenW + 13, terminalW - screenW - 14)
+  logLines <- gets $ reverse . take terminalH . concatMap (reverse . lineWrap logW) . mcduDebugLog
   liftIO $ do
-    clearRect (screenW + 13) 0 (terminalW - 1) (terminalH - 1)
+    clearRect left 0 (terminalW - 1) (terminalH - 1)
     resetFG
     resetBG
     when logVisible $ do
       zipWithM_ (\y l -> liftIO $ do
-          moveTo (screenW + 14) y
+          moveTo left y
           rawPrintColored (takeSubstr logW l)
         ) [0..] logLines
       hFlush stdout
+    moveTo 0 (terminalH - 1)
 
 modifyView :: (MCDUView -> MCDUView) -> MCDU ()
 modifyView f =  do
