@@ -3,72 +3,7 @@
     <head>
         <meta charset="utf8">
         <title>Web MCDU</title>
-        <style>
-            #mcduScreen {
-                background-color: black;
-                color: lime;
-                line-height: 1.2;
-                font-family: monospace;
-                font-size: 20px;
-                margin: 0;
-            }
-
-
-            button {
-                height: 32px;
-                line-height: 1;
-                box-sizing: border-box;
-                padding: 0;
-                margin-top: 4px;
-                margin-bottom: 4px;
-                margin-left: 4px;
-                margin-right: 4px;
-                padding-left: 10px;
-                padding-right: 10px;
-                font-family: monospace;
-                font-size: 20px;
-                color: white;
-                background-color: black;
-                border: solid 1px silver;
-                border-radius: 6px;
-            }
-
-            button.lsk  {
-                height: 26px;
-                margin-top: 11px;
-                margin-bottom: 11px;
-                margin-left: 5px;
-                margin-right: 5px;
-            }
-
-            button.num {
-                border-radius: 16px;
-                height: 32px;
-                margin-top: 3px;
-                margin-bottom: 3px;
-            }
-
-            div.case {
-                background-color: silver;
-                display: inline-block;
-                padding: 10px;
-            }
-
-            table {
-                border-collapse: collapse;
-                background-color: silver;
-            }
-
-            tr.spacer {
-                height: 36px;
-            }
-
-            td {
-                margin: 0;
-                padding: 0;
-                vertical-align: top;
-            }
-        </style>
+        <link rel=stylesheet href="/mcdu.css">
     </head>
     <body>
         <div class="case">
@@ -109,7 +44,7 @@
                     <td><button class="lsk" onclick="sendKey('F5');">L5</button></td>
                     <td><button class="lsk" onclick="sendKey('F10');">R5</button></td>
                 </tr>
-                <tr>
+                <tr class="spacer">
                     <td>
                         &nbsp;
                     </td>
@@ -124,68 +59,65 @@
                     <td><button onclick="sendKey('ESC');">MENU</button></td>
                     <td><button onclick="sendKey('F11');">DLK</button></td>
                     <td><button onclick="sendKey('F12');">ATC</button></td>
-                    <td>&nbsp;</td>
-                    <td>&nbsp;</td>
-                </tr>
-                <tr>
-                    <td><button onclick="sendKey('PGDN');">NEXT</button></td>
                 </tr>
             </table>
             <table>
                 <tr>
+                    <td colspan=6><button onclick="sendKey('PGDN');">NEXT</button></td>
+                    <td class="hspacer"></td>
+                    <td colspan=2><button onclick="sendKey('A');">A</button></td>
+                    <td colspan=2><button onclick="sendKey('B');">B</button></td>
+                    <td colspan=2><button onclick="sendKey('C');">C</button></td>
+                    <td colspan=2><button onclick="sendKey('D');">D</button></td>
+                    <td colspan=2><button onclick="sendKey('E');">E</button></td>
+                    <td colspan=2><button onclick="sendKey('F');">F</button></td>
+                </tr>
+                <tr>
                     <td colspan=2><button class="num" onclick="sendKey('7');">7</button></td>
                     <td colspan=2><button class="num" onclick="sendKey('8');">8</button></td>
                     <td colspan=2><button class="num" onclick="sendKey('9');">9</button></td>
-                    <td width="10px"></td>
-                    <td><button onclick="sendKey('A');">A</button></td>
-                    <td><button onclick="sendKey('B');">B</button></td>
-                    <td><button onclick="sendKey('C');">C</button></td>
-                    <td><button onclick="sendKey('D');">D</button></td>
-                    <td><button onclick="sendKey('E');">E</button></td>
-                    <td><button onclick="sendKey('F');">F</button></td>
+                    <td class="hspacer"></td>
+                    <td colspan=2><button onclick="sendKey('G');">G</button></td>
+                    <td colspan=2><button onclick="sendKey('H');">H</button></td>
+                    <td colspan=2><button onclick="sendKey('I');">I</button></td>
+                    <td colspan=2><button onclick="sendKey('J');">J</button></td>
+                    <td colspan=2><button onclick="sendKey('K');">K</button></td>
+                    <td colspan=2><button onclick="sendKey('L');">L</button></td>
                 </tr>
                 <tr>
                     <td colspan=2><button class="num" onclick="sendKey('4');">4</button></td>
                     <td colspan=2><button class="num" onclick="sendKey('5');">5</button></td>
                     <td colspan=2><button class="num" onclick="sendKey('6');">6</button></td>
-                    <td width="10px"></td>
-                    <td><button onclick="sendKey('G');">G</button></td>
-                    <td><button onclick="sendKey('H');">H</button></td>
-                    <td><button onclick="sendKey('I');">I</button></td>
-                    <td><button onclick="sendKey('J');">J</button></td>
-                    <td><button onclick="sendKey('K');">K</button></td>
-                    <td><button onclick="sendKey('L');">L</button></td>
+                    <td class="hspacer"></td>
+                    <td colspan=2><button onclick="sendKey('M');">M</button></td>
+                    <td colspan=2><button onclick="sendKey('N');">N</button></td>
+                    <td colspan=2><button onclick="sendKey('O');">O</button></td>
+                    <td colspan=2><button onclick="sendKey('P');">P</button></td>
+                    <td colspan=2><button onclick="sendKey('Q');">Q</button></td>
+                    <td colspan=2><button onclick="sendKey('R');">R</button></td>
                 </tr>
                 <tr>
                     <td colspan=2><button class="num" onclick="sendKey('1');">1</button></td>
                     <td colspan=2><button class="num" onclick="sendKey('2');">2</button></td>
                     <td colspan=2><button class="num" onclick="sendKey('3');">3</button></td>
-                    <td width="10px"></td>
-                    <td><button onclick="sendKey('M');">M</button></td>
-                    <td><button onclick="sendKey('N');">N</button></td>
-                    <td><button onclick="sendKey('O');">O</button></td>
-                    <td><button onclick="sendKey('P');">P</button></td>
-                    <td><button onclick="sendKey('Q');">Q</button></td>
-                    <td><button onclick="sendKey('R');">R</button></td>
+                    <td class="hspacer"></td>
+                    <td colspan=2><button onclick="sendKey('S');">S</button></td>
+                    <td colspan=2><button onclick="sendKey('T');">T</button></td>
+                    <td colspan=2><button onclick="sendKey('U');">U</button></td>
+                    <td colspan=2><button onclick="sendKey('V');">V</button></td>
+                    <td colspan=2><button onclick="sendKey('W');">W</button></td>
+                    <td colspan=2><button onclick="sendKey('X');">X</button></td>
                 </tr>
                 <tr>
                     <td colspan=2><button class="num" onclick="sendKey('-');">-</button></td>
                     <td colspan=2><button class="num" onclick="sendKey('0');">0</button></td>
                     <td colspan=2><button class="num" onclick="sendKey('.');">.</button></td>
-                    <td width="10px"></td>
-                    <td><button onclick="sendKey('S');">S</button></td>
-                    <td><button onclick="sendKey('T');">T</button></td>
-                    <td><button onclick="sendKey('U');">U</button></td>
-                    <td><button onclick="sendKey('V');">V</button></td>
-                    <td><button onclick="sendKey('W');">W</button></td>
-                    <td><button onclick="sendKey('X');">X</button></td>
-                </tr>
-                <tr>
+                    <td class="hspacer"></td>
+                    <td colspan=2><button onclick="sendKey('Y');">Y</button></td>
+                    <td colspan=2><button onclick="sendKey('Z');">Z</button></td>
+                    <td colspan=2></td>
                     <td colspan=3><button onclick="sendKey('BACK');">CLR</button></td>
                     <td colspan=3><button onclick="sendKey('DEL');">DEL</button></td>
-                    <td width="10px"></td>
-                    <td><button onclick="sendKey('Y');">Y</button></td>
-                    <td><button onclick="sendKey('Z');">Z</button></td>
                 </tr>
             </table>
         </div>

@@ -1,0 +1,84 @@
+html {
+    font-size: 3.25vh;
+}
+
+body {
+    margin: 0;
+    padding: 0;
+}
+
+#mcduScreen {
+    background-color: black;
+    color: #DDD;
+    line-height: 1.2;
+    font-family: monospace;
+    margin: 0;
+    border: inset 0.2rem;
+    border-radius: 0.4rem;
+    padding: 0.2rem;
+    margin-left: 0.2rem;
+    margin-right: 0.2rem;
+}
+
+
+button {
+    font-family: monospace;
+    height: 1.6rem;
+    line-height: 1;
+    box-sizing: border-box;
+    padding: 0;
+    margin-top: 0.2rem;
+    margin-bottom: 0.2rem;
+    margin-left: 0.2rem;
+    margin-right: 0.2rem;
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+    font-size: inherit;
+    color: white;
+    background-color: #222;
+    border-radius: 0.3rem;
+    border-color: silver black black silver;
+    border-width: 0.1rem;
+    border-style: solid;
+    outline: solid 0.05rem grey;
+}
+
+button.lsk  {
+    height: 1.2rem;
+    margin-top: 0.5rem;
+    margin-bottom: 0.7rem;
+    margin-left: 0;
+    margin-right: 0;
+}
+
+button.num {
+    border-radius: 1rem;
+    height: 1.6rem;
+    margin-top: 0.15rem;
+    margin-bottom: 0.15rem;
+}
+
+div.case {
+    background-color: silver;
+    display: inline-block;
+    padding: 0.5rem;
+}
+
+table {
+    border-collapse: collapse;
+    background-color: silver;
+}
+
+tr.spacer {
+    height: 2.2rem;
+}
+
+td.hspacer {
+    width: 1rem;
+}
+
+td {
+    margin: 0;
+    padding: 0;
+    vertical-align: top;
+}

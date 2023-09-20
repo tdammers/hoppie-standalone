@@ -53,6 +53,7 @@ httpMain screenBufVar screenBufChan inputChan =
     (notFound notFoundPage)
     [ get "/" getIndex
     , get "/mcdu.js" $ getStaticFile "application/javascript" "mcdu.js"
+    , get "/mcdu.css" $ getStaticFile "text/css" "mcdu.css"
     , post "/key" $ postKey inputChan
     , get "/screen" $ getScreen screenBufVar
     , wsMain

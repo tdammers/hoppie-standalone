@@ -14,9 +14,10 @@ build-type:         Simple
 -- extra-source-files:
 data-files: cli/static/*.html
           , cli/static/*.js
+          , cli/static/*.css
 
 common warnings
-    ghc-options: -Wall
+    ghc-options: -Wall -threaded
 
 library
     import:           warnings

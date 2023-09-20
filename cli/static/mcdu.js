@@ -18,7 +18,7 @@ const colors = [
     'darkcyan',
     'silver',
     'lightgray',
-    'lightred',
+    'red',
     'lime',
     'yellow',
     'lightblue',
