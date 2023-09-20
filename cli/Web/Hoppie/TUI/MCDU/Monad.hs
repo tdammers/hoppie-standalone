@@ -13,6 +13,7 @@ import Web.Hoppie.TUI.Input
 import Web.Hoppie.TUI.MCDU.Draw
 import Web.Hoppie.TUI.Output
 import Web.Hoppie.TUI.StringUtil
+import Web.Hoppie.TUI.MCDU.HttpServer
 import Web.Hoppie.Telex
 
 import Control.Applicative
@@ -73,6 +74,9 @@ data MCDUState =
     , mcduNetworkStatus :: NetworkStatus
     , mcduDebugLog :: [ColoredBS]
     , mcduShowLog :: Bool
+
+    , mcduHttpPort :: Maybe Int
+    , mcduHttpServer :: Maybe MCDUHttpServer
     }
 
 defMCDUState :: MCDUState
@@ -100,6 +104,9 @@ defMCDUState =
     , mcduNetworkStatus = NetworkOK
     , mcduDebugLog = []
     , mcduShowLog = False
+
+    , mcduHttpPort = Nothing
+    , mcduHttpServer = Nothing
     }
 
 data MCDUView =
@@ -334,10 +341,20 @@ flushAll = do
   liftIO $ drawMCDU buf
   redrawLog
 
+sendScreenHttp :: MCDU ()
+sendScreenHttp = do
+  buf <- gets mcduScreenBuffer
+  serverMay <- gets mcduHttpServer
+  forM_ serverMay $ \server -> do
+    liftIO $ do
+      void $ tryTakeMVar (mcduHttpScreenBufVar server)
+      putMVar (mcduHttpScreenBufVar server) buf
+
 flushScreen :: MCDU ()
 flushScreen = do
   buf <- gets mcduScreenBuffer
   liftIO $ redrawMCDU buf
+  sendScreenHttp
 
 getScratchColorAndString :: MCDU (Word8, ByteString)
 getScratchColorAndString = do
@@ -361,6 +378,7 @@ flushScratch = do
     redrawMCDULine (screenH - 1) buf
     moveTo (screenX scratchX) (screenY scratchY)
     hFlush stdout
+  sendScreenHttp
 
 redrawScratch :: MCDU ()
 redrawScratch = do
@@ -500,11 +518,67 @@ handleLSK n = do
     Nothing -> return ()
     Just (_, action) -> action
 
+mcduStartHttpServer :: MCDU ()
+mcduStartHttpServer = do
+  portMay <- gets mcduHttpPort
+  forM_ portMay $ \port -> do
+    debugPrint $ colorize blue $ "Starting HTTP server on port " <> BS8.pack (show port)
+    httpServer <- liftIO $ startHttpServer port
+    modify $ \s -> s { mcduHttpServer = Just httpServer }
+
+mcduStopHttpServer :: MCDU ()
+mcduStopHttpServer = do
+  serverMay <- gets mcduHttpServer
+  forM_ serverMay $ \server -> do
+    debugPrint $ colorize blue $ "Stopping HTTP server"
+    liftIO $ stopHttpServer server
+    modify $ \s -> s { mcduHttpServer = Nothing }
+
 debugPrint :: ColoredBS -> MCDU ()
 debugPrint str = do
   modify $ \s -> s
     { mcduDebugLog = str : mcduDebugLog s }
   redrawLog
+
+handleInputCommand :: MCDUView -> MCDUView -> MCDUView -> InputCommand -> MCDU ()
+handleInputCommand mainMenuView dlkMenuView atcMenuView cmd =
+  case cmd of
+    InputPgUp ->
+      prevPage
+    InputPgDn ->
+      nextPage
+
+    InputF1 -> handleLSK 0
+    InputF2 -> handleLSK 1
+    InputF3 -> handleLSK 2
+    InputF4 -> handleLSK 3
+    InputF5 -> handleLSK 4
+    InputF6 -> handleLSK 5
+    InputF7 -> handleLSK 6
+    InputF8 -> handleLSK 7
+    InputF9 -> handleLSK 8
+    InputF10 -> handleLSK 9
+    InputF11 -> loadView dlkMenuView
+    InputF12 -> loadView atcMenuView
+    InputEscape -> loadView mainMenuView
+
+    InputRedraw -> do
+      flushAll
+      
+    InputBackspace ->
+      scratchDel
+    InputDel ->
+      scratchClear
+    InputChar c ->
+      if isAsciiLower c then
+        scratchAppend (ord8 $ toUpper c)
+      else if isAsciiUpper c ||
+              isDigit c ||
+              (c `elem` ['-', '.', '/', ' ']) then
+        scratchAppend (ord8 c)
+      else
+        return ()
+    _ -> return ()
 
 handleMCDUEvent :: MCDUView -> MCDUView -> MCDUView -> MCDUEvent -> MCDU ()
 handleMCDUEvent mainMenuView dlkMenuView atcMenuView ev = do
@@ -555,39 +629,5 @@ handleMCDUEvent mainMenuView dlkMenuView atcMenuView ev = do
                  <> maybe (colorize yellow "NONE") (colorize green) cda
       reloadView
 
-    InputCommandEvent InputPgUp ->
-      prevPage
-    InputCommandEvent InputPgDn ->
-      nextPage
-
-    InputCommandEvent InputF1 -> handleLSK 0
-    InputCommandEvent InputF2 -> handleLSK 1
-    InputCommandEvent InputF3 -> handleLSK 2
-    InputCommandEvent InputF4 -> handleLSK 3
-    InputCommandEvent InputF5 -> handleLSK 4
-    InputCommandEvent InputF6 -> handleLSK 5
-    InputCommandEvent InputF7 -> handleLSK 6
-    InputCommandEvent InputF8 -> handleLSK 7
-    InputCommandEvent InputF9 -> handleLSK 8
-    InputCommandEvent InputF10 -> handleLSK 9
-    InputCommandEvent InputF11 -> loadView dlkMenuView
-    InputCommandEvent InputF12 -> loadView atcMenuView
-    InputCommandEvent InputEscape -> loadView mainMenuView
-
-    InputCommandEvent InputRedraw -> do
-      flushAll
-      
-    InputCommandEvent InputBackspace ->
-      scratchDel
-    InputCommandEvent InputDel ->
-      scratchClear
-    InputCommandEvent (InputChar c) ->
-      if isAsciiLower c then
-        scratchAppend (ord8 $ toUpper c)
-      else if isAsciiUpper c ||
-              isDigit c ||
-              (c `elem` ['-', '.', '/', ' ']) then
-        scratchAppend (ord8 c)
-      else
-        return ()
-    _ -> return ()
+    InputCommandEvent cmd -> do
+      handleInputCommand mainMenuView dlkMenuView atcMenuView cmd

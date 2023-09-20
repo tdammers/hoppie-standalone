@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf8">
+        <title>Web MCDU</title>
+        <style>
+            #mcduScreen {
+                background-color: black;
+                color: lime;
+                line-height: 1;
+                font-family: monospace;
+                margin: 0;
+            }
+
+            button {
+                height: 1em;
+                line-height: 1;
+                box-sizing: border-box;
+                padding: 0;
+                margin: 0;
+            }
+
+            td {
+                border: solid 1px silver;
+                margin: 0;
+                padding: 0;
+            }
+        </style>
+    </head>
+    <body>
+        <table>
+            <tr>
+                <td>
+                    &nbsp;
+                </td>
+                <td rowspan=6 colspan=4>
+                    <pre id="mcduScreen"></pre>
+                </td>
+                <td>
+                    &nbsp;
+                </td>
+            </tr>
+            <tr>
+                <td>
+                    <button onclick="sendKey('F1');">L1</button>
+                </td>
+                <td>
+                    <button onclick="sendKey('F6');">R1</button>
+                </td>
+            </tr>
+            <tr>
+                <td><button onclick="sendKey('F2');">L2</button></td>
+                <td><button onclick="sendKey('F7');">R2</button></td>
+            </tr>
+            <tr>
+                <td><button onclick="sendKey('F3');">L3</button></td>
+                <td><button onclick="sendKey('F8');">R3</button></td>
+            </tr>
+            <tr>
+                <td><button onclick="sendKey('F4');">L4</button></td>
+                <td><button onclick="sendKey('F9');">R4</button></td>
+            </tr>
+            <tr>
+                <td><button onclick="sendKey('F5');">L5</button></td>
+                <td><button onclick="sendKey('F10');">R5</button></td>
+            </tr>
+        </table>
+    </body>
+    <script src="/mcdu.js"></script>
+</html>

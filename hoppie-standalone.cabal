@@ -12,6 +12,8 @@ category:           Web
 build-type:         Simple
 -- extra-doc-files:
 -- extra-source-files:
+data-files: cli/static/*.html
+          , cli/static/*.js
 
 common warnings
     ghc-options: -Wall
@@ -55,7 +57,9 @@ executable hoppie-mcdu
                  , Web.Hoppie.TUI.MCDU.Draw
                  , Web.Hoppie.TUI.MCDU.Monad
                  , Web.Hoppie.TUI.MCDU.Views
+                 , Web.Hoppie.TUI.MCDU.HttpServer
                  , Web.Hoppie.TUI.MCDU.Main
+                 , Paths_hoppie_standalone
     -- other-extensions:
     build-depends: base ^>=4.17.0.0
                  , hoppie-standalone
@@ -69,10 +73,15 @@ executable hoppie-mcdu
                  , optparse-applicative >=0.18.1.0 && <0.19
                  , stm >=2.5 && <2.6
                  , terminfo >=0.4 && <0.5
+                 , text >=2.0 && <2.2
                  , time >=1.12 && <1.14
+                 , twain >=2.1.2 && <2.2
                  , transformers >=0.6 && <0.7
                  , unix >=2.8 && <2.9
                  , vector >=0.13 && <0.14
+                 , wai >=3.2.3 && <3.3
+                 , wai-extra >=3.1.13 && <3.2
+                 , warp >=3.3.29 && <3.4
                  , yaml >=0.11.11.2 && <0.12
 
     hs-source-dirs:   cli

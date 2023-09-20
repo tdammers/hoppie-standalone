@@ -42,6 +42,7 @@ data ProgramOptions =
     , poSlowPollingInterval :: Maybe Int
     , poHoppieUrl :: Maybe String
     , poShowLog :: Maybe Bool
+    , poHttpServerPort :: Maybe Int
     }
     deriving (Show)
 
@@ -55,6 +56,7 @@ emptyProgramOptions =
     , poSlowPollingInterval = Nothing
     , poHoppieUrl = Nothing
     , poShowLog = Nothing
+    , poHttpServerPort = Nothing
     }
 
 defaultProgramOptions :: ProgramOptions
@@ -67,11 +69,12 @@ defaultProgramOptions =
     , poSlowPollingInterval = Just 60
     , poHoppieUrl = Just "http://www.hoppie.nl/acars/system/connect.html"
     , poShowLog = Just False
+    , poHttpServerPort = Nothing
     }
 
 instance Semigroup ProgramOptions where
-  ProgramOptions l1 c1 ty1 fp1 sp1 url1 sl1 <>
-    ProgramOptions l2 c2 ty2 fp2 sp2 url2 sl2 =
+  ProgramOptions l1 c1 ty1 fp1 sp1 url1 sl1 http1 <>
+    ProgramOptions l2 c2 ty2 fp2 sp2 url2 sl2 http2 =
       ProgramOptions
         (l1 <|> l2)
         (c1 <|> c2)
@@ -80,6 +83,7 @@ instance Semigroup ProgramOptions where
         (sp1 <|> sp2)
         (url1 <|> url2)
         (sl1 <|> sl2)
+        (http1 <|> http2)
 
 $(deriveJSON
     JSON.defaultOptions
@@ -141,6 +145,12 @@ optionsP = ProgramOptions
         <> long "show-debug-log"
         <> help "Show debug log on screen"
         )
+  <*> option (Just <$> auto)
+        (  long "http-server-port"
+        <> metavar "PORT"
+        <> help "Expose MCDU as an HTTP app on this port"
+        <> value Nothing
+        )
 
 optionsFromArgs :: IO ProgramOptions
 optionsFromArgs =
@@ -181,12 +191,14 @@ optionsFromEnv = do
   pollingInterval <- lookupEnv "HOPPIE_POLLING_INTERVAL"
   slowPollingInterval <- lookupEnv "HOPPIE_SLOW_POLLING_INTERVAL"
   fastPollingInterval <- lookupEnv "HOPPIE_FAST_POLLING_INTERVAL"
+  httpPort <- lookupEnv "HOPPIE_HTTP_PORT"
   return emptyProgramOptions
     { poLogon = logon
     , poCallsign = callsign
     , poHoppieUrl = url
     , poSlowPollingInterval = (slowPollingInterval <|> pollingInterval) >>= readMaybe
     , poFastPollingInterval = (fastPollingInterval <|> pollingInterval) >>= readMaybe
+    , poHttpServerPort = httpPort >>= readMaybe
     }
 
 optionsToConfig :: ProgramOptions -> Either String Config
@@ -215,6 +227,7 @@ main = do
   callsign <- maybe (error "No callsign configured") return $ poCallsign po
   let actype = fmap BS8.pack $ poAircraftType po
       showLog = fromMaybe False $ poShowLog po
+      httpPort = poHttpServerPort po
       hooks = HoppieHooks
                 { onUplink = handleUplink eventChan
                 , onDownlink = handleDownlink eventChan
@@ -229,7 +242,7 @@ main = do
       (BS8.pack callsign)
       config
       hooks
-      (hoppieMain showLog actype eventChan)
+      (hoppieMain showLog httpPort actype eventChan)
 
 runInputPusher :: TChan Word8 -> TChan MCDUEvent -> IO ()
 runInputPusher inputChan eventChan = do
@@ -253,12 +266,13 @@ handleCurrentDataAuthority :: TChan MCDUEvent -> Maybe ByteString -> Hoppie ()
 handleCurrentDataAuthority eventChan = do
   liftIO . atomically . writeTChan eventChan . CurrentDataAuthorityEvent
 
-hoppieMain :: Bool -> Maybe ByteString -> TChan MCDUEvent -> (TypedMessage -> Hoppie ()) -> Hoppie ()
-hoppieMain showLog actypeMay eventChan rawSend = do
+hoppieMain :: Bool -> Maybe Int -> Maybe ByteString -> TChan MCDUEvent -> (TypedMessage -> Hoppie ()) -> Hoppie ()
+hoppieMain showLog httpPortMay actypeMay eventChan rawSend = do
   runMCDU rawSend $ do
     modify $ \s -> s
       { mcduAircraftType = actypeMay
       , mcduShowLog = showLog
+      , mcduHttpPort = httpPortMay
       }
     mcduMain eventChan
 
