@@ -20,7 +20,8 @@ import qualified Data.Vector.Mutable as MVector
 import System.IO
 import Control.Monad.Reader
 import Control.Monad.ST
-
+import Data.Aeson (ToJSON (..), FromJSON (..), (.:), (.=))
+import qualified Data.Aeson as JSON
 
 screenW :: Int
 screenW = 24
@@ -58,11 +59,48 @@ data MCDUCell =
 defCell :: MCDUCell
 defCell = MCDUCell 15 32
 
+instance ToJSON MCDUCell where
+  toJSON (MCDUCell fg c) =
+    toJSON (fg, c)
+
+instance FromJSON MCDUCell where
+  parseJSON j = do
+    (fg, c) <- parseJSON j
+    return $ MCDUCell fg c
+
 data MCDUScreenBuffer =
   MCDUScreenBuffer
-    { mcduScreenLines :: Vector MCDUCell
+    { mcduScreenLines :: !(Vector MCDUCell)
     }
 
+instance ToJSON MCDUScreenBuffer where
+  toJSON buf =
+    JSON.object
+      [ "data" .= toJSON (mcduScreenLines buf)
+      ]
+
+instance FromJSON MCDUScreenBuffer where
+  parseJSON = JSON.withObject "ScreenBuffer" $ \obj ->
+    MCDUScreenBuffer
+      <$> obj .: "data"
+        
+
+data MCDUScreenBufferUpdate =
+  MCDUScreenBufferUpdate !Int !(Vector MCDUCell)
+
+instance ToJSON MCDUScreenBufferUpdate where
+  toJSON (MCDUScreenBufferUpdate lineNo lineData) =
+    JSON.object
+      [ "line" .= lineNo
+      , "data" .= lineData
+      ]
+
+instance FromJSON MCDUScreenBufferUpdate where
+  parseJSON = JSON.withObject "ScreenBufferUpdate" $ \obj ->
+    MCDUScreenBufferUpdate
+      <$> obj .: "line"
+      <*> obj .: "data"
+        
 emptyMCDUScreenBuffer :: MCDUScreenBuffer
 emptyMCDUScreenBuffer =
   MCDUScreenBuffer $
@@ -71,8 +109,11 @@ emptyMCDUScreenBuffer =
 type MCDUDraw s = ReaderT (MVector s MCDUCell) (ST s)
 
 runMCDUDraw :: (forall s. MCDUDraw s ()) -> MCDUScreenBuffer -> MCDUScreenBuffer
-runMCDUDraw action =
-  MCDUScreenBuffer . Vector.modify (runReaderT action) . mcduScreenLines
+runMCDUDraw action buf =
+  buf
+    { mcduScreenLines =
+        Vector.modify (runReaderT action) (mcduScreenLines buf)
+    }
 
 mcduClearScreen :: MCDUDraw s ()
 mcduClearScreen = do

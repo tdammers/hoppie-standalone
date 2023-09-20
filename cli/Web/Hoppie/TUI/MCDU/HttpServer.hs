@@ -8,25 +8,27 @@ import Paths_hoppie_standalone
 import Web.Hoppie.TUI.MCDU.Draw
 import Web.Hoppie.TUI.Input
 
+import Control.Monad
 import Control.Concurrent.Async
 import Control.Concurrent.MVar
 import Control.Concurrent.STM
 import Web.Twain
 import qualified Network.Wai.Handler.Warp as Warp
-import Control.Monad.IO.Class
-import Data.Text (Text)
-import qualified Data.Text as Text
+import qualified Network.Wai.Handler.WebSockets as WS
+import qualified Network.WebSockets.Connection as WS
+import qualified Network.WebSockets as WS
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
-import qualified Data.Vector as Vector
-import Text.Printf
 import Data.Char
 import System.FilePath
+import qualified Data.Aeson as JSON
+import Control.Monad.IO.Class
 
 data MCDUHttpServer =
   MCDUHttpServer
     { mcduHttpThread :: Async ()
     , mcduHttpScreenBufVar :: MVar MCDUScreenBuffer
+    , mcduHttpScreenBufChan :: TChan MCDUScreenBufferUpdate
     , mcduHttpInputChan :: TChan InputCommand
     }
 
@@ -34,19 +36,42 @@ startHttpServer :: Int -> IO MCDUHttpServer
 startHttpServer port = do
   inputChan <- newTChanIO
   screenBufVar <- newMVar emptyMCDUScreenBuffer
-  thread <- async $ Warp.run port $
-              foldr ($)
-                (notFound notFoundPage)
-                [ get "/" getIndex
-                , get "/mcdu.js" $ getStaticFile "application/javascript" "mcdu.js"
-                , post "/key" $ postKey screenBufVar inputChan
-                , get "/screen" $ getScreen screenBufVar
-                ]
-  return $ MCDUHttpServer thread screenBufVar inputChan
+  screenBufChan <- newBroadcastTChanIO
+  thread <- async $ Warp.run port $ httpMain screenBufVar screenBufChan inputChan
+  return $ MCDUHttpServer thread screenBufVar screenBufChan inputChan
 
 stopHttpServer :: MCDUHttpServer -> IO ()
 stopHttpServer s =
   cancel $ mcduHttpThread s
+
+httpMain :: MVar MCDUScreenBuffer
+         -> TChan MCDUScreenBufferUpdate
+         -> TChan InputCommand
+         -> Application
+httpMain screenBufVar screenBufChan inputChan = 
+  foldr ($)
+    (notFound notFoundPage)
+    [ get "/" getIndex
+    , get "/mcdu.js" $ getStaticFile "application/javascript" "mcdu.js"
+    , post "/key" $ postKey inputChan
+    , get "/screen" $ getScreen screenBufVar
+    , wsMain
+    ]
+  where
+    wsMain :: Middleware
+    wsMain parent rq =
+      if pathInfo rq == ["screen", "updates"] then
+        WS.websocketsOr WS.defaultConnectionOptions wsApp parent rq
+      else
+        parent rq
+        
+    wsApp :: WS.ServerApp
+    wsApp pendingConn = do
+      conn <- WS.acceptRequest pendingConn
+      chan <- atomically $ dupTChan screenBufChan
+      forever $ do
+        update <- atomically $ readTChan chan
+        WS.sendTextData conn (JSON.encode update)
 
 notFoundPage :: ResponderM a
 notFoundPage =
@@ -63,29 +88,21 @@ getStaticFile :: BS.ByteString -> FilePath -> ResponderM a
 getStaticFile contentType filename = do
   path <- liftIO $ getDataFileName ("cli/static" </> filename)
   body <- liftIO $ LBS.fromStrict <$> BS.readFile path
-  send $ withHeader ("Content-type", contentType) $ html $ body
+  send $ raw status200 [("Content-type", contentType)] body
 
 getScreen :: MVar MCDUScreenBuffer -> ResponderM a
 getScreen screenBufVar = do
-  buf <- liftIO $ takeMVar screenBufVar
-  send $ text $ serializeScreenBuf buf
+  buf <- liftIO $ readMVar screenBufVar
+  send $ json buf
 
-serializeScreenBuf :: MCDUScreenBuffer -> Text
-serializeScreenBuf (MCDUScreenBuffer cells) =
-  Vector.foldl (<>) "" . Vector.map serializeCell $ cells
-  where
-    serializeCell :: MCDUCell -> Text
-    serializeCell (MCDUCell color char) =
-      Text.pack $ printf "%02x%c" color (chr $ fromIntegral char)
-  
-postKey :: MVar MCDUScreenBuffer -> (TChan InputCommand) -> ResponderM a
-postKey screenBufVar inputChan = do
+postKey :: TChan InputCommand -> ResponderM a
+postKey inputChan = do
   k <- param "key"
   success <- liftIO $ handleKey k
   if success then
-    getScreen screenBufVar
+    send $ text "OK"
   else
-    send $ text $ "INVALID"
+    send $ status status400 $ text "INVALID"
   where
     handleInput = liftIO . atomically . writeTChan inputChan
 
@@ -109,4 +126,5 @@ postKey screenBufVar inputChan = do
     handleKey "PGDN" = handleInput InputPgDn >> return True
     handleKey "BACK" = handleInput InputBackspace >> return True
     handleKey "DEL" = handleInput InputDel >> return True
+    handleKey "ESC" = handleInput InputEscape >> return True
     handleKey _ = return False

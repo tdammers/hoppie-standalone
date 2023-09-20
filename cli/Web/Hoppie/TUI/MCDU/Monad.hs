@@ -18,6 +18,7 @@ import Web.Hoppie.Telex
 
 import Control.Applicative
 import Control.Concurrent.MVar
+import Control.Concurrent.STM
 import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Reader
@@ -30,6 +31,7 @@ import Data.Char
 import Data.Maybe
 import Data.Map (Map)
 import qualified Data.Map.Strict as Map
+import qualified Data.Vector as Vector
 import Data.Word
 import System.IO
 import Text.Printf
@@ -349,6 +351,13 @@ sendScreenHttp = do
     liftIO $ do
       void $ tryTakeMVar (mcduHttpScreenBufVar server)
       putMVar (mcduHttpScreenBufVar server) buf
+      atomically $
+        forM_ [0 .. screenH-1] $ \y -> do
+          let l = Vector.take screenW $
+                  Vector.drop (y * screenW) $
+                  mcduScreenLines buf
+          writeTChan (mcduHttpScreenBufChan server) $
+            MCDUScreenBufferUpdate y l
 
 flushScreen :: MCDU ()
 flushScreen = do
