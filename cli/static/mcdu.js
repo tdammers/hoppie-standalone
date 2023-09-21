@@ -34,14 +34,22 @@ const colors = [
     'white'
 ];
 
+function unpackCell(data, i) {
+    colorIndex = Number(data[i * 2]) + 8;
+    glyph = data[i * 2 + 1];
+    return [colorIndex, glyph];
+}
+
 function renderScreen(screenData) {
     var i = 0;
     var mcduScreen = document.getElementById('mcduScreen');
+    var data = screenData.data;
     mcduScreen.innerHTML = '';
     for (var y = 0; y < screenH; y++) {
         for (var x = 0; x < screenW; x++) {
-            colorIndex = screenData.data[i][0];
-            glyph = String.fromCodePoint(screenData.data[i][1]);
+            var cellData = unpackCell(data, i);
+            colorIndex = cellData[0];
+            glyph = cellData[1];
             var cell = document.createElement('span');
             cell.id = 'cell_' + y + '_' + x;
             cell.innerText = glyph;
@@ -57,9 +65,10 @@ function updateScreen(update) {
     var y = update.line;
     var data = update.data;
     for (var x = 0; x < screenW; x++) {
+        var cellData = unpackCell(data, x);
+        colorIndex = cellData[0];
+        glyph = cellData[1];
         var cell = document.getElementById('cell_' + y + '_' + x);
-        colorIndex = data[x][0];
-        glyph = String.fromCodePoint(data[x][1]);
         cell.innerText = glyph;
         cell.setAttribute('style', 'color:' + colors[colorIndex & 0x0f] + ';');
     }
@@ -74,10 +83,24 @@ function receiveScreen() {
     xhr.send();
 }
 
+var wsReconnectDelay = 500;
+
 function runWebsocket() {
-    ws = new WebSocket("ws://" + window.location.host + "/websocket");
+    let url = "ws://" + window.location.host + "/websocket";
+    console.log("Connecting to " + url + "...");
+    ws = new WebSocket(url);
+    ws.onopen = (ev) => {
+        console.log("Connected to " + url + ".");
+        wsReconnectDelay = 500;
+    }
     ws.onmessage = (ev) => {
         updateScreen(JSON.parse(ev.data));
+    }
+    ws.onclose = (ev) => {
+        ws = null;
+        console.log("Websocket closed due to " + ev.reason);
+        setTimeout(runWebsocket, wsReconnectDelay);
+        wsReconnectDelay = Math.min(60000, wsReconnectDelay * 2);
     }
 }
 

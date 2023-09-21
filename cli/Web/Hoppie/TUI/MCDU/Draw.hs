@@ -6,22 +6,26 @@ module Web.Hoppie.TUI.MCDU.Draw
 where
 
 import Web.Hoppie.TUI.Output
+import Web.Hoppie.Telex
 
 import Control.Monad
-import Data.Maybe
-import Data.ByteString (ByteString)
-import qualified Data.ByteString.Char8 as BS8
-import qualified Data.ByteString as BS
-import Data.Word
-import Data.Vector (Vector, (!?))
-import qualified Data.Vector as Vector
-import Data.Vector.Mutable (MVector)
-import qualified Data.Vector.Mutable as MVector
-import System.IO
 import Control.Monad.Reader
 import Control.Monad.ST
 import Data.Aeson (ToJSON (..), FromJSON (..), (.:), (.=))
 import qualified Data.Aeson as JSON
+import Data.Bits
+import Data.ByteString (ByteString)
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Char8 as BS8
+import Data.Maybe
+import Data.Text (Text)
+import qualified Data.Text as Text
+import Data.Vector (Vector, (!?))
+import qualified Data.Vector as Vector
+import Data.Vector.Mutable (MVector)
+import qualified Data.Vector.Mutable as MVector
+import Data.Word
+import System.IO
 
 screenW :: Int
 screenW = 24
@@ -59,15 +63,6 @@ data MCDUCell =
 defCell :: MCDUCell
 defCell = MCDUCell 15 32
 
-instance ToJSON MCDUCell where
-  toJSON (MCDUCell fg c) =
-    toJSON (fg, c)
-
-instance FromJSON MCDUCell where
-  parseJSON j = do
-    (fg, c) <- parseJSON j
-    return $ MCDUCell fg c
-
 data MCDUScreenBuffer =
   MCDUScreenBuffer
     { mcduScreenLines :: !(Vector MCDUCell)
@@ -76,14 +71,13 @@ data MCDUScreenBuffer =
 instance ToJSON MCDUScreenBuffer where
   toJSON buf =
     JSON.object
-      [ "data" .= toJSON (mcduScreenLines buf)
+      [ "data" .= toJSON (packLineData $ mcduScreenLines buf)
       ]
 
 instance FromJSON MCDUScreenBuffer where
-  parseJSON = JSON.withObject "ScreenBuffer" $ \obj ->
-    MCDUScreenBuffer
-      <$> obj .: "data"
-        
+  parseJSON = JSON.withObject "ScreenBuffer" $ \obj -> do
+    rawData <- obj .: "data"
+    return $ MCDUScreenBuffer $ unpackLineData rawData
 
 data MCDUScreenBufferUpdate =
   MCDUScreenBufferUpdate !Int !(Vector MCDUCell)
@@ -92,14 +86,33 @@ instance ToJSON MCDUScreenBufferUpdate where
   toJSON (MCDUScreenBufferUpdate lineNo lineData) =
     JSON.object
       [ "line" .= lineNo
-      , "data" .= lineData
+      , "data" .= packLineData lineData
       ]
+
+packLineData :: Vector MCDUCell -> Text
+packLineData = Vector.foldl (<>) "" . Vector.map packCellData
+
+unpackLineData :: Text -> Vector MCDUCell
+unpackLineData txt =
+  Vector.fromList $ go (Text.unpack txt)
+  where
+    go (cChr : gChr : xs) =
+      let c = ((ord8 cChr - ord8 '0') .&. 7) + 8
+          g = ord8 gChr
+      in
+        MCDUCell c g : go xs
+    go _ = []
+
+packCellData :: MCDUCell -> Text
+packCellData (MCDUCell color glyph) =
+  (Text.pack . show) (color .&. 7) <> (Text.singleton . chr8) glyph
+
 
 instance FromJSON MCDUScreenBufferUpdate where
   parseJSON = JSON.withObject "ScreenBufferUpdate" $ \obj ->
     MCDUScreenBufferUpdate
       <$> obj .: "line"
-      <*> obj .: "data"
+      <*> (unpackLineData <$> (obj .: "data"))
         
 emptyMCDUScreenBuffer :: MCDUScreenBuffer
 emptyMCDUScreenBuffer =
