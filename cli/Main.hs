@@ -42,7 +42,9 @@ data ProgramOptions =
     , poSlowPollingInterval :: Maybe Int
     , poHoppieUrl :: Maybe String
     , poShowLog :: Maybe Bool
+    , poHttpServerHostname :: Maybe String
     , poHttpServerPort :: Maybe Int
+    , poHeadless :: Maybe Bool
     }
     deriving (Show)
 
@@ -56,7 +58,9 @@ emptyProgramOptions =
     , poSlowPollingInterval = Nothing
     , poHoppieUrl = Nothing
     , poShowLog = Nothing
+    , poHttpServerHostname = Nothing
     , poHttpServerPort = Nothing
+    , poHeadless = Nothing
     }
 
 defaultProgramOptions :: ProgramOptions
@@ -69,12 +73,14 @@ defaultProgramOptions =
     , poSlowPollingInterval = Just 60
     , poHoppieUrl = Just "http://www.hoppie.nl/acars/system/connect.html"
     , poShowLog = Just False
+    , poHttpServerHostname = Nothing
     , poHttpServerPort = Nothing
+    , poHeadless = Just False
     }
 
 instance Semigroup ProgramOptions where
-  ProgramOptions l1 c1 ty1 fp1 sp1 url1 sl1 http1 <>
-    ProgramOptions l2 c2 ty2 fp2 sp2 url2 sl2 http2 =
+  ProgramOptions l1 c1 ty1 fp1 sp1 url1 sl1 httph1 http1 hl1 <>
+    ProgramOptions l2 c2 ty2 fp2 sp2 url2 sl2 httph2 http2 hl2 =
       ProgramOptions
         (l1 <|> l2)
         (c1 <|> c2)
@@ -83,7 +89,9 @@ instance Semigroup ProgramOptions where
         (sp1 <|> sp2)
         (url1 <|> url2)
         (sl1 <|> sl2)
+        (httph1 <|> httph2)
         (http1 <|> http2)
+        (hl1 <|> hl2)
 
 $(deriveJSON
     JSON.defaultOptions
@@ -145,11 +153,24 @@ optionsP = ProgramOptions
         <> long "show-debug-log"
         <> help "Show debug log on screen"
         )
+  <*> option (Just <$> str)
+        (  long "http-server-hostname"
+        <> metavar "HOSTNAME"
+        <> help "Expose MCDU as an HTTP app on this hostname"
+        <> value Nothing
+        )
   <*> option (Just <$> auto)
         (  long "http-server-port"
         <> metavar "PORT"
         <> help "Expose MCDU as an HTTP app on this port"
         <> value Nothing
+        )
+  <*> flag
+        Nothing
+        (Just True)
+        (  long "headless"
+        <> short 'h'
+        <> help "Headless mode (no terminal UI, only HTTP)"
         )
 
 optionsFromArgs :: IO ProgramOptions
@@ -192,6 +213,7 @@ optionsFromEnv = do
   slowPollingInterval <- lookupEnv "HOPPIE_SLOW_POLLING_INTERVAL"
   fastPollingInterval <- lookupEnv "HOPPIE_FAST_POLLING_INTERVAL"
   httpPort <- lookupEnv "HOPPIE_HTTP_PORT"
+  httpHostname <- lookupEnv "HOPPIE_HTTP_HOST"
   return emptyProgramOptions
     { poLogon = logon
     , poCallsign = callsign
@@ -199,6 +221,7 @@ optionsFromEnv = do
     , poSlowPollingInterval = (slowPollingInterval <|> pollingInterval) >>= readMaybe
     , poFastPollingInterval = (fastPollingInterval <|> pollingInterval) >>= readMaybe
     , poHttpServerPort = httpPort >>= readMaybe
+    , poHttpServerHostname = httpHostname
     }
 
 optionsToConfig :: ProgramOptions -> Either String Config
@@ -225,9 +248,11 @@ main = do
   let po = poFromArgs <> poFromEnv <> poFromConfigFile <> defaultProgramOptions
   config <- either error return $ optionsToConfig po
   callsign <- maybe (error "No callsign configured") return $ poCallsign po
+  let headless = fromMaybe False $ poHeadless po
   let actype = fmap BS8.pack $ poAircraftType po
       showLog = fromMaybe False $ poShowLog po
       httpPort = poHttpServerPort po
+      httpHostname = poHttpServerHostname po
       hooks = HoppieHooks
                 { onUplink = handleUplink eventChan
                 , onDownlink = handleDownlink eventChan
@@ -242,7 +267,7 @@ main = do
       (BS8.pack callsign)
       config
       hooks
-      (hoppieMain showLog httpPort actype eventChan)
+      (hoppieMain showLog headless httpHostname httpPort actype eventChan)
 
 runInputPusher :: TChan Word8 -> TChan MCDUEvent -> IO ()
 runInputPusher inputChan eventChan = do
@@ -266,33 +291,28 @@ handleCurrentDataAuthority :: TChan MCDUEvent -> Maybe ByteString -> Hoppie ()
 handleCurrentDataAuthority eventChan = do
   liftIO . atomically . writeTChan eventChan . CurrentDataAuthorityEvent
 
-hoppieMain :: Bool -> Maybe Int -> Maybe ByteString -> TChan MCDUEvent -> (TypedMessage -> Hoppie ()) -> Hoppie ()
-hoppieMain showLog httpPortMay actypeMay eventChan rawSend = do
+hoppieMain :: Bool
+           -> Bool
+           -> Maybe String
+           -> Maybe Int
+           -> Maybe ByteString
+           -> TChan MCDUEvent
+           -> (TypedMessage -> Hoppie ()) -> Hoppie ()
+hoppieMain showLog headless httpHostnameMay httpPortMay actypeMay eventChan rawSend = do
   runMCDU rawSend $ do
     modify $ \s -> s
       { mcduAircraftType = actypeMay
       , mcduShowLog = showLog
+      , mcduHttpHostname = httpHostnameMay
       , mcduHttpPort = httpPortMay
+      , mcduHeadless = headless
       }
     mcduMain eventChan
 
-runColoredBSTests :: IO ()
-runColoredBSTests = do
-  let testStr = ColoredBS
-        [ ColoredBSFragment 1 "HELLO WORLD "
-        , ColoredBSFragment 2 "\nHOW ARE"
-        , ColoredBSFragment 3 " YOU"
-        , ColoredBSFragment 4 " THIS IS A FAIRLY LONG STRING WITH "
-        , ColoredBSFragment 5 "PLENTY OF WORDS "
-        ]
-  print (coloredToBS testStr)
-  print (coloredToBS $ coloredTake 10 testStr)
-  print (coloredToBS $ coloredDrop 10 testStr)
-  print (coloredFindIndex isSpace8 testStr)
-  print (map coloredToBS $ coloredWordSplit testStr)
-  print (map coloredToBS $ coloredLineSplit testStr)
-  print (map coloredToBS $ lineWrap 20 testStr)
-  print (lineWrap 20 $ coloredToBS testStr)
+runColoredTests :: IO ()
+runColoredTests = do
+  print $ lineWrap 20
+    ("Hello, this is a long string that should be split into several lines." :: String)
 
 runInputTest :: IO ()
 runInputTest = do

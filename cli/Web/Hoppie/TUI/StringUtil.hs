@@ -1,28 +1,33 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeOperators #-}
 
 module Web.Hoppie.TUI.StringUtil
 ( StrLength (..)
-, WordSplit (..)
-, LineSplit (..)
 , Substring (..)
+, CharacterClass (..)
+, PutStr (..)
+
+, wordSplit
+, wordJoin
+, lineSplit
+, lineJoin
+
 , lineWrap
 
-, ColoredBS (..)
-, ColoredBSFragment (..)
+, Colored (..)
+, ColoredFragment (..)
 , coloredTake
 , coloredDrop
 , coloredSplitAt
 , coloredFindIndex
-, coloredWordSplit
-, coloredLineSplit
 , coloredLength
-, coloredToBS
+, coloredToStr
 , colorize
 )
 where
@@ -30,27 +35,30 @@ where
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BS8
+import Data.Text (Text)
+import qualified Data.Text as Text
+import qualified Data.Text.IO as Text
 import Data.Word
 import Data.String
-import Data.List
+import qualified Data.List as List
 import Data.Char
+import Data.Maybe
+import Control.Applicative
 
-isSpace8 :: Word8 -> Bool
-isSpace8 = (<= 32)
+isWordSep8 :: Word8 -> Bool
+isWordSep8 = (<= 32)
 
 isNewline8 :: Word8 -> Bool
 isNewline8 = (== fromIntegral (ord '\n'))
 
+-- * Typeclasses
+
+class CharacterClass c where
+  isWordSep :: c -> Bool
+  isLineSep :: c -> Bool
+
 class StrLength a where
   strLength :: a -> Int
-
-class WordSplit a where
-  wordSplit :: a -> [a]
-  wordJoin :: [a] -> a
-
-class LineSplit a where
-  lineSplit :: a -> [a]
-  lineJoin :: [a] -> a
 
 class Substring a where
   takeSubstr :: Int -> a -> a
@@ -58,43 +66,133 @@ class Substring a where
   splitSubstr :: Int -> a -> (a, a)
   splitSubstr n str = (takeSubstr n str, dropSubstr n str)
 
+class PutStr a where
+  putString :: a -> IO ()
+  putStringLine :: a -> IO ()
+
+class FindIndex s where
+  type Token s
+  findIndex :: (Token s -> Bool) -> s -> Maybe Int
+
+-- * 'ByteString' instances
+
+instance CharacterClass Word8 where
+  isWordSep = isWordSep8
+  isLineSep = isNewline8
+
 instance StrLength ByteString where
   strLength = BS8.length
-
-instance WordSplit ByteString where
-  wordSplit = BS8.words
-  wordJoin = BS8.unwords
-
-instance LineSplit ByteString where
-  lineSplit = BS8.lines
-  lineJoin = BS8.unlines
 
 instance Substring ByteString where
   takeSubstr = BS.take
   dropSubstr = BS.drop
   splitSubstr = BS.splitAt
 
+instance PutStr ByteString where
+  putString = BS.putStr
+  putStringLine = BS8.putStrLn
+
+instance FindIndex ByteString where
+  type Token ByteString = Word8
+  findIndex = BS.findIndex
+
+-- * 'Text' instances
+
+instance CharacterClass Char where
+  isWordSep c = isSpace c && c /= '\160'
+  isLineSep = (== '\n')
+
+instance StrLength Text where
+  strLength = Text.length
+
+instance Substring Text where
+  takeSubstr = Text.take
+  dropSubstr = Text.drop
+  splitSubstr = Text.splitAt
+
+instance PutStr Text where
+  putString = Text.putStr
+  putStringLine = Text.putStrLn
+
+instance FindIndex Text where
+  type Token Text = Char
+  findIndex = Text.findIndex
+
+-- * 'String' / list instances
+
 instance StrLength [a] where
   strLength = length
-
-instance WordSplit [Char] where
-  wordSplit = words
-  wordJoin = unwords
-
-instance LineSplit [Char] where
-  lineSplit = lines
-  lineJoin = unlines
 
 instance Substring [a] where
   takeSubstr = take
   dropSubstr = drop
   splitSubstr = splitAt
 
-lineWrap :: forall a.
-            (StrLength a, WordSplit a, LineSplit a, Substring a)
+instance PutStr [Char] where
+  putString = putStr
+  putStringLine = putStrLn
+
+instance Eq a => FindIndex [a] where
+  type Token [a] = a
+  findIndex = List.findIndex
+
+takeWhileSubstr :: (Substring a, FindIndex a, Monoid a)
+                => (Token a -> Bool)
+                -> a
+                -> a
+takeWhileSubstr p str =
+  let indexMay = findIndex (not . p) str
+  in
+    case indexMay of
+      Nothing -> str
+      Just index -> takeSubstr index str
+
+dropWhileSubstr :: (Substring a, FindIndex a, Monoid a)
+                => (Token a-> Bool)
+                -> a
+                -> a
+dropWhileSubstr p str =
+  let indexMay = findIndex (not . p) str
+  in
+    case indexMay of
+      Nothing -> mempty
+      Just index -> dropSubstr index str
+
+wordSplit :: (StrLength a, Substring a, FindIndex a, CharacterClass c, c ~ Token a, Monoid a)
+          => a -> [a]
+wordSplit str
+  | strLength str == 0
+  = []
+  | otherwise
+  = let l = takeWhileSubstr (not . isWordSep) str
+        m = dropWhileSubstr (not . isWordSep) str
+        r = dropWhileSubstr isWordSep m
+    in
+      l : wordSplit r
+
+lineSplit :: (StrLength a, Substring a, FindIndex a, CharacterClass c, c ~ Token a, Monoid a)
+          => a -> [a]
+lineSplit str
+  | strLength str == 0
+  = []
+  | otherwise
+  = let l = takeWhileSubstr (not . isLineSep) str
+        m = dropWhileSubstr (not . isLineSep) str
+        r = dropWhileSubstr isLineSep m
+    in
+      l : lineSplit r
+
+wordJoin :: (IsString a, Monoid a) => [a] -> a
+wordJoin = mconcat . List.intersperse " "
+
+lineJoin :: (IsString a, Monoid a) => [a] -> a
+lineJoin = mconcat . List.intersperse "\n"
+
+lineWrap :: forall a c.
+            (StrLength a, Substring a, FindIndex a, CharacterClass c, c ~ Token a, Monoid a, IsString a)
          => Int -> a -> [a]
 lineWrap w src =
-  concat $ map (map wordJoin . go . wordSplit) $ lineSplit src
+  concatMap (map wordJoin . go . wordSplit) $ lineSplit src
   where
     go :: [a] -> [[a]]
     go [] = []
@@ -103,7 +201,7 @@ lineWrap w src =
       (x, xs') ->
         x : go xs'
 
-breakWrappedLine :: (StrLength a, WordSplit a, Substring a)
+breakWrappedLine :: (StrLength a, Substring a)
                  => Int -> [a] -> ([a], [a])
 breakWrappedLine _ [] = ([], [])
 breakWrappedLine w (x:xs)
@@ -115,7 +213,7 @@ breakWrappedLine w (x:xs)
   = let (x', xs') = breakWrappedLineCont (w - strLength x - 1) xs
     in (x : x', xs')
 
-breakWrappedLineCont :: (StrLength a, WordSplit a, Substring a)
+breakWrappedLineCont :: (StrLength a, Substring a)
                      => Int -> [a] -> ([a], [a])
 breakWrappedLineCont _ [] = ([], [])
 breakWrappedLineCont w (x:xs)
@@ -126,114 +224,87 @@ breakWrappedLineCont w (x:xs)
     in (x : x', xs')
 
 
-newtype ColoredBS =
-  ColoredBS { coloredBSFragments :: [ColoredBSFragment] }
+newtype Colored a =
+  Colored { coloredBSFragments :: [ColoredFragment a] }
   deriving newtype (Show, Eq, Ord, Monoid, Semigroup)
 
-data ColoredBSFragment =
-  ColoredBSFragment
+data ColoredFragment a =
+  ColoredFragment
     { cbfColor :: !Word8
-    , cbfData :: !ByteString
+    , cbfData :: !a
     }
     deriving (Show, Eq, Ord)
 
-instance IsString ColoredBS where
-  fromString str = ColoredBS [ColoredBSFragment 15 $ BS8.pack str]
+instance IsString a => IsString (Colored a) where
+  fromString str = Colored [ColoredFragment 15 $ fromString str]
 
-coloredTake :: Int -> ColoredBS -> ColoredBS
-coloredTake _ (ColoredBS [])
-  = ColoredBS []
-coloredTake 0 (ColoredBS {})
-  = ColoredBS []
-coloredTake n (ColoredBS (x:xs))
-  | BS.length (cbfData x) > n
-  = ColoredBS [ColoredBSFragment (cbfColor x) (BS.take n (cbfData x))]
+coloredTake :: (StrLength a, Substring a) => Int -> Colored a -> Colored a
+coloredTake _ (Colored [])
+  = Colored []
+coloredTake 0 (Colored {})
+  = Colored []
+coloredTake n (Colored (x:xs))
+  | strLength (cbfData x) > n
+  = Colored [ColoredFragment (cbfColor x) (takeSubstr n (cbfData x))]
   | otherwise
-  = let ColoredBS xs' = coloredTake (n - BS.length (cbfData x)) (ColoredBS xs)
-    in ColoredBS (x : xs')
+  = let Colored xs' = coloredTake (n - strLength (cbfData x)) (Colored xs)
+    in Colored (x : xs')
 
-coloredDrop :: Int -> ColoredBS -> ColoredBS
-coloredDrop _ (ColoredBS [])
-  = ColoredBS []
+coloredDrop :: (StrLength a, Substring a) => Int -> Colored a -> Colored a
+coloredDrop _ (Colored [])
+  = Colored []
 coloredDrop 0 x
   = x
-coloredDrop n (ColoredBS (x:xs))
-  | BS.length (cbfData x) > n
-  = ColoredBS (ColoredBSFragment (cbfColor x) (BS.drop n (cbfData x)) : xs)
+coloredDrop n (Colored (x:xs))
+  | strLength (cbfData x) > n
+  = Colored (ColoredFragment (cbfColor x) (dropSubstr n (cbfData x)) : xs)
   | otherwise
-  = coloredDrop (n - BS.length (cbfData x)) (ColoredBS xs)
+  = coloredDrop (n - strLength (cbfData x)) (Colored xs)
 
-coloredSplitAt :: Int -> ColoredBS -> (ColoredBS, ColoredBS)
-coloredSplitAt _ (ColoredBS [])
-  = (ColoredBS [], ColoredBS [])
+coloredSplitAt :: (StrLength a, Substring a) => Int -> Colored a -> (Colored a, Colored a)
+coloredSplitAt _ (Colored [])
+  = (Colored [], Colored [])
 coloredSplitAt 0 x
-  = (ColoredBS [], x)
-coloredSplitAt n (ColoredBS (x:xs))
-  | BS.length (cbfData x) > n
-  = let (lhs, rhs) = BS.splitAt n (cbfData x)
-    in ( ColoredBS [ColoredBSFragment (cbfColor x) lhs]
-       , ColoredBS (ColoredBSFragment (cbfColor x) rhs : xs)
+  = (Colored [], x)
+coloredSplitAt n (Colored (x:xs))
+  | strLength (cbfData x) > n
+  = let (lhs, rhs) = splitSubstr n (cbfData x)
+    in ( Colored [ColoredFragment (cbfColor x) lhs]
+       , Colored (ColoredFragment (cbfColor x) rhs : xs)
        )
   | otherwise
-  = let (ColoredBS lhs, ColoredBS rhs) = coloredSplitAt (n - BS.length (cbfData x)) (ColoredBS xs)
-    in ( ColoredBS (x : lhs)
-       , ColoredBS rhs
+  = let (Colored lhs, Colored rhs) = coloredSplitAt (n - strLength (cbfData x)) (Colored xs)
+    in ( Colored (x : lhs)
+       , Colored rhs
        )
 
-coloredFindIndex :: (Word8 -> Bool) -> ColoredBS -> Maybe Int
-coloredFindIndex _ (ColoredBS []) = Nothing
-coloredFindIndex p (ColoredBS (x:xs)) =
-  case BS.findIndex p (cbfData x) of
+instance (StrLength a, FindIndex a) => FindIndex (Colored a) where
+  type Token (Colored a) = Token a
+  findIndex = coloredFindIndex
+
+coloredFindIndex :: (StrLength a, FindIndex a) => (Token (Colored a) -> Bool) -> Colored a -> Maybe Int
+coloredFindIndex _ (Colored []) = Nothing
+coloredFindIndex p (Colored (x:xs)) =
+  case findIndex p (cbfData x) of
     Just n ->
       return n
     Nothing ->
-      (BS.length (cbfData x) +) <$> coloredFindIndex p (ColoredBS xs)
+      (strLength (cbfData x) +) <$> coloredFindIndex p (Colored xs)
 
-coloredWordSplit :: ColoredBS -> [ColoredBS]
-coloredWordSplit (ColoredBS []) = []
-coloredWordSplit xs
-  = let i = coloredFindIndex (not . isSpace8) xs
-        rest = maybe "" (flip coloredDrop xs) i
-        j = coloredFindIndex (isSpace8) rest
-        (lhs, rhs) = maybe (rest, mempty) (flip coloredSplitAt rest) j
-    in
-      if coloredLength lhs == 0 then
-        coloredWordSplit rhs
-      else
-        lhs : coloredWordSplit rhs
+coloredLength :: StrLength a => Colored a -> Int
+coloredLength (Colored fragments) =
+  sum $ map (strLength . cbfData) fragments
 
-coloredLineSplit :: ColoredBS -> [ColoredBS]
-coloredLineSplit (ColoredBS []) = []
-coloredLineSplit xs
-  = let i = coloredFindIndex (not . isNewline8) xs
-        rest = maybe "" (flip coloredDrop xs) i
-        j = coloredFindIndex (isNewline8) rest
-        (lhs, rhs) = maybe (rest, mempty) (flip coloredSplitAt rest) j
-    in
-      lhs : coloredLineSplit rhs
-
-coloredLength :: ColoredBS -> Int
-coloredLength (ColoredBS fragments) =
-  sum $ map (BS.length . cbfData) fragments
-
-instance StrLength ColoredBS where
+instance StrLength a => StrLength (Colored a) where
   strLength = coloredLength
 
-instance WordSplit ColoredBS where
-  wordSplit = coloredWordSplit
-  wordJoin = mconcat . intersperse (ColoredBS [ColoredBSFragment 15 " "])
-
-instance LineSplit ColoredBS where
-  lineSplit = coloredLineSplit
-  lineJoin = mconcat . intersperse (ColoredBS [ColoredBSFragment 15 "\n"])
-
-instance Substring ColoredBS where
+instance (StrLength a, Substring a) => Substring (Colored a) where
   takeSubstr = coloredTake
   dropSubstr = coloredDrop
   splitSubstr = coloredSplitAt
 
-coloredToBS :: ColoredBS -> ByteString
-coloredToBS (ColoredBS fragments) = mconcat . map cbfData $ fragments
+coloredToStr :: Monoid a => Colored a -> a
+coloredToStr (Colored fragments) = mconcat . map cbfData $ fragments
 
-colorize :: Word8 -> ByteString -> ColoredBS
-colorize color bs = ColoredBS [ ColoredBSFragment color bs ]
+colorize :: Word8 -> a -> Colored a
+colorize color str = Colored [ ColoredFragment color str ]

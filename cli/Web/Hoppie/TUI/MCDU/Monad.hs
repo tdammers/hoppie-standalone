@@ -11,9 +11,10 @@ import qualified Web.Hoppie.CPDLC.MessageTypes as CPDLC
 import Web.Hoppie.System
 import Web.Hoppie.TUI.Input
 import Web.Hoppie.TUI.MCDU.Draw
-import Web.Hoppie.TUI.Output
-import Web.Hoppie.TUI.StringUtil
 import Web.Hoppie.TUI.MCDU.HttpServer
+import Web.Hoppie.TUI.Output
+import Web.Hoppie.TUI.QR
+import Web.Hoppie.TUI.StringUtil
 import Web.Hoppie.Telex
 
 import Control.Applicative
@@ -28,9 +29,12 @@ import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BS8
 import Data.Char
-import Data.Maybe
 import Data.Map (Map)
 import qualified Data.Map.Strict as Map
+import Data.Maybe
+import Data.Text (Text)
+import qualified Data.Text as Text
+import Data.Text.Encoding (encodeUtf8, decodeUtf8)
 import qualified Data.Vector as Vector
 import Data.Word
 import System.IO
@@ -74,10 +78,11 @@ data MCDUState =
 
     , mcduSendMessage :: TypedMessage -> Hoppie ()
     , mcduNetworkStatus :: NetworkStatus
-    , mcduDebugLog :: [ColoredBS]
+    , mcduDebugLog :: [Colored Text]
     , mcduShowLog :: Bool
     , mcduHeadless :: Bool
 
+    , mcduHttpHostname :: Maybe String
     , mcduHttpPort :: Maybe Int
     , mcduHttpServer :: Maybe MCDUHttpServer
     }
@@ -109,6 +114,7 @@ defMCDUState =
     , mcduShowLog = False
     , mcduHeadless = False
 
+    , mcduHttpHostname = Nothing
     , mcduHttpPort = Nothing
     , mcduHttpServer = Nothing
     }
@@ -142,26 +148,32 @@ defGoToPage n = do
   modifyView $ \v -> v { mcduViewPage = n' }
   reloadView
 
-mcduPrintColored :: Int -> Int -> ColoredBS -> MCDUDraw s ()
-mcduPrintColored _ _ (ColoredBS []) =
+mcduPrintColored :: Int -> Int -> Colored ByteString -> MCDUDraw s ()
+mcduPrintColored _ _ (Colored []) =
   return ()
-mcduPrintColored x y (ColoredBS (f:fs)) = do
+mcduPrintColored x y (Colored (f:fs)) = do
   mcduPrint x y (cbfColor f) bs
-  mcduPrintColored (x + BS.length bs) y (ColoredBS fs)
+  mcduPrintColored (x + BS.length bs) y (Colored fs)
   where
     bs = cbfData f
 
-rawPrintColored :: ColoredBS -> IO ()
-rawPrintColored (ColoredBS []) = do
+rawPrintColored :: PutStr a => Colored a -> IO ()
+rawPrintColored (Colored []) = do
   resetFG
   resetBG
-rawPrintColored (ColoredBS (f:fs)) = do
+rawPrintColored (Colored (f:fs)) = do
   case cbfColor f of
-    255 -> resetFG
-    c -> setFG c
-  resetBG
-  BS.putStr bs
-  rawPrintColored (ColoredBS fs)
+    255 -> do
+      resetFG
+      resetBG
+    254 -> do
+      setFG 15
+      setBG 0
+    c -> do
+      setFG c
+      resetBG
+  putString bs
+  rawPrintColored (Colored fs)
   where
     bs = cbfData f
 
@@ -417,16 +429,16 @@ redrawLog = do
           (screenW + 13, terminalW - screenW - 14)
   logLines <- gets $ reverse . take terminalH . concatMap (reverse . lineWrap logW) . mcduDebugLog
   liftIO $ do
-    clearRect left 0 (terminalW - 1) (terminalH - 1)
-    resetFG
-    resetBG
     when logVisible $ do
+      clearRect left 0 (terminalW - 1) (terminalH - 1)
+      resetFG
+      resetBG
       zipWithM_ (\y l -> liftIO $ do
           moveTo left y
           rawPrintColored (takeSubstr logW l)
+          moveTo left (y + 1)
         ) [0..] logLines
       hFlush stdout
-    moveTo 0 (terminalH - 1)
 
 modifyView :: (MCDUView -> MCDUView) -> MCDU ()
 modifyView f =  do
@@ -545,7 +557,12 @@ mcduStartHttpServer :: MCDU ()
 mcduStartHttpServer = do
   portMay <- gets mcduHttpPort
   forM_ portMay $ \port -> do
-    debugPrint $ colorize blue $ "Starting HTTP server on port " <> BS8.pack (show port)
+    hostname <- gets (fromMaybe "localhost" . mcduHttpHostname)
+    let url = Text.pack ("http://" <> hostname <> ":" <> show port)
+    debugPrint $ colorize blue $
+      "Starting HTTP server on " <> url
+    forM_ (formatQR $ encodeUtf8 url) $
+      debugPrint . colorize 254
     httpServer <- liftIO $ startHttpServer port
     modify $ \s -> s { mcduHttpServer = Just httpServer }
 
@@ -557,7 +574,7 @@ mcduStopHttpServer = do
     liftIO $ stopHttpServer server
     modify $ \s -> s { mcduHttpServer = Nothing }
 
-debugPrint :: ColoredBS -> MCDU ()
+debugPrint :: Colored Text -> MCDU ()
 debugPrint str = do
   modify $ \s -> s
     { mcduDebugLog = str : mcduDebugLog s }
@@ -612,7 +629,7 @@ handleMCDUEvent mainMenuView dlkMenuView atcMenuView ev = do
         case ns' of
           NetworkOK -> debugPrint $ colorize green "NETWORK UP"
           NetworkError err -> debugPrint $ colorize red "NETWORK ERROR: "
-                                         <> colorize 255 (BS8.pack err)
+                                         <> colorize 255 (Text.pack err)
         case ns' of
           NetworkError err -> do
             lift . void $ makeErrorResponse Nothing (BS8.pack err) "NETWORK ERROR"
@@ -626,17 +643,17 @@ handleMCDUEvent mainMenuView dlkMenuView atcMenuView ev = do
     DownlinkEvent mtm -> do
       debugPrint $ colorize cyan $ wordJoin
         [ "DOWNLINK"
-        , BS8.pack . show $ metaUID mtm
-        , typedMessageCallsign $ payload mtm
-        , typedPayloadTypeBS . typedMessagePayload $ payload mtm
+        , Text.pack . show $ metaUID mtm
+        , decodeUtf8 . typedMessageCallsign $ payload mtm
+        , decodeUtf8 . typedPayloadTypeBS . typedMessagePayload $ payload mtm
         ]
 
     UplinkEvent mtm -> do
       debugPrint $ colorize green $ wordJoin
         [ "UPLINK"
-        , BS8.pack . show $ metaUID mtm
-        , typedMessageCallsign $ payload mtm
-        , typedPayloadTypeBS . typedMessagePayload $ payload mtm
+        , Text.pack . show $ metaUID mtm
+        , decodeUtf8 . typedMessageCallsign $ payload mtm
+        , decodeUtf8 . typedPayloadTypeBS . typedMessagePayload $ payload mtm
         ]
       case typedMessagePayload (payload mtm) of
         CPDLCPayload {} -> do
@@ -649,7 +666,7 @@ handleMCDUEvent mainMenuView dlkMenuView atcMenuView ev = do
 
     CurrentDataAuthorityEvent cda -> do
       debugPrint $ colorize 255 "Current Data Authority: "
-                 <> maybe (colorize yellow "NONE") (colorize green) cda
+                 <> maybe (colorize yellow "NONE") (colorize green . decodeUtf8) cda
       reloadView
 
     InputCommandEvent cmd -> do

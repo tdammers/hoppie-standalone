@@ -566,14 +566,14 @@ messageLogView cpdlcView = defView
         }
   }
 
-formatCPDLC :: CPDLCMessage -> ColoredBS
+formatCPDLC :: CPDLCMessage -> Colored ByteString
 formatCPDLC =
   lineJoin . map formatCPDLCPart . cpdlcParts
 
-formatCPDLCPart :: CPDLCPart -> ColoredBS
+formatCPDLCPart :: CPDLCPart -> Colored ByteString
 formatCPDLCPart part =
   maybe
-    (ColoredBS [ColoredBSFragment red "INVALID CPDLC"])
+    (Colored [ColoredFragment red "INVALID CPDLC"])
     goTy
     tyMay
   where
@@ -582,10 +582,10 @@ formatCPDLCPart part =
     argsColored =
       map (colorize green) (CPDLC.cpdlcArgs part)
       ++
-      (repeat $ ColoredBS [ColoredBSFragment red "N/A"])
+      (repeat $ Colored [ColoredFragment red "N/A"])
 
 
-    goTy :: CPDLC.MessageType -> ColoredBS
+    goTy :: CPDLC.MessageType -> Colored ByteString
     goTy _ | ("TXT" `BS.isPrefixOf` CPDLC.cpdlcType part) =
       colorize white $ wordJoin (CPDLC.cpdlcArgs part)
     goTy ty =
@@ -618,7 +618,7 @@ messageColorCallsignStatus = \case
       ErrorDownlink -> (red, cs, "ERR")
       RepliedDownlink -> (blue, cs, "REPL")
 
-messageColorTyStrBody :: Word8 -> HoppieMessage -> (Word8, String, ColoredBS)
+messageColorTyStrBody :: Word8 -> HoppieMessage -> (Word8, String, Colored ByteString)
 messageColorTyStrBody color' message =
   case typedMessagePayload $ messagePayload message of
     InfoPayload msg ->
@@ -647,7 +647,7 @@ messageColorTyStrBody color' message =
       , colorize red $ BS8.pack err <> "\n" <> response
       )
 
-formatMessage :: HoppieMessage -> (ColoredBS, ColoredBS)
+formatMessage :: HoppieMessage -> (Colored ByteString, Colored ByteString)
 formatMessage message =
   (colorize color statusRaw, body)
   where

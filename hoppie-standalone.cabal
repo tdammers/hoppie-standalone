@@ -54,6 +54,7 @@ executable hoppie-mcdu
                  , Web.Hoppie.TUI.Output
                  , Web.Hoppie.TUI.TerminalSize
                  , Web.Hoppie.TUI.StringUtil
+                 , Web.Hoppie.TUI.QR
                  , Web.Hoppie.TUI.MCDU
                  , Web.Hoppie.TUI.MCDU.Draw
                  , Web.Hoppie.TUI.MCDU.Monad
@@ -72,6 +73,7 @@ executable hoppie-mcdu
                  , filepath >=1.4 && <1.5
                  , mtl >=2.3.1 && <2.4
                  , optparse-applicative >=0.18.1.0 && <0.19
+                 , qrcode-core >=0.9.8 && <0.10
                  , stm >=2.5 && <2.6
                  , terminfo >=0.4 && <0.5
                  , text >=2.0 && <2.2

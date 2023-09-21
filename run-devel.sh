@@ -1,5 +1,5 @@
 #!/bin/sh
-INNER='ghcid -c cabal repl exe:hoppie-mcdu'
+INNER='ghcid --test runColoredTests -c cabal repl exe:hoppie-mcdu'
 
 while (true); do
     ghcid \
