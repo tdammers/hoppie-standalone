@@ -236,8 +236,8 @@ clearUplinksLog = do
 
 clearDownlinksLog :: MonadIO m => HoppieT m ()
 clearDownlinksLog = do
-  uplinksVar <- asks hoppieUplinks
-  liftIO $ modifyMVar_ uplinksVar $ return . Map.filter (isCPDLC . payload)
+  downlinksVar <- asks hoppieDownlinks
+  liftIO $ modifyMVar_ downlinksVar $ return . Map.filter (isCPDLC . payload)
 
 clearCpdlcUplinksLog :: MonadIO m => HoppieT m ()
 clearCpdlcUplinksLog = do

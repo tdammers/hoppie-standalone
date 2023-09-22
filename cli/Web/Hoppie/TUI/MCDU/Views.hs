@@ -230,9 +230,9 @@ dlkMenuView :: MCDUView
 dlkMenuView = defView
   { mcduViewTitle = "DLK MENU"
   , mcduViewLSKBindings = Map.fromList
-      [ (0, ("SENT MSGS", loadView dlkDownlinkLogView))
-      , (1, ("RECVD MSGS", loadView dlkUplinkLogView))
-      , (2, ("TELEX", clearTelexBody >> loadView (telexSendView False)))
+      [ (0, ("RECVD MSGS", loadView dlkUplinkLogView))
+      , (1, ("SENT MSGS", loadView dlkDownlinkLogView))
+      , (3, ("TELEX", clearTelexBody >> loadView (telexSendView False)))
       , (4, ("MAIN MENU", loadView mainMenuView))
       , (5, ("ATIS", loadView $ infoMenuView "ATIS" "VATATIS"))
       , (6, ("METAR", loadView $ infoMenuView "METAR" "METAR"))
@@ -533,7 +533,7 @@ dlkUplinkLogView :: MCDUView
 dlkUplinkLogView = messageLogView Uplinks
 
 dlkDownlinkLogView :: MCDUView
-dlkDownlinkLogView = messageLogView Uplinks
+dlkDownlinkLogView = messageLogView Downlinks
 
 cpdlcMessageLogView :: MCDUView
 cpdlcMessageLogView = messageLogView AllCPDLC
@@ -568,13 +568,25 @@ messageLogView mlf = defView
                       AllCPDLC -> ("ATC MENU", loadView atcMenuView)
                       _ -> ("DLK MENU", loadView dlkMenuView)
                 )
+              , (9, ( "CLEAR LOG"
+                    , do
+                        case mlf of
+                          AllCPDLC ->
+                            lift clearCpdlcUplinksLog >>
+                            lift clearCpdlcDownlinksLog
+                          Uplinks ->
+                            lift clearUplinksLog
+                          Downlinks ->
+                            lift clearDownlinksLog
+                        reloadView
+                    )
+                )
               ]
             <>
             Map.fromList
               ( zip
                 [0..3]
                 [ ("", loadView $
-                    -- (if cpdlcView then cpdlcMessageView else messageView)
                     messageView
                     (messageUID message) ) | message <- curMessages
                 ]
