@@ -13,7 +13,8 @@ body {
     line-height: 1.2;
     font-family: monospace;
     margin: 0;
-    border: inset 0.2rem;
+    border-style: inset;
+    border-width: 0.2rem 0.5rem;
     border-radius: 0.4rem;
     padding: 0.2rem;
     margin-left: 0.2rem;
@@ -26,13 +27,14 @@ button {
     height: 1.6rem;
     line-height: 1;
     box-sizing: border-box;
-    padding: 0;
     margin-top: 0.2rem;
     margin-bottom: 0.2rem;
     margin-left: 0.2rem;
     margin-right: 0.2rem;
     padding-left: 0.5rem;
     padding-right: 0.5rem;
+    padding-top: 0.0rem;
+    padding-bottom: 0.0rem;
     font-size: inherit;
     color: white;
     background-color: #222;
@@ -40,7 +42,21 @@ button {
     border-color: silver black black silver;
     border-width: 0.1rem;
     border-style: solid;
-    outline: solid 0.05rem grey;
+    outline: solid 0.05rem black;
+    box-shadow: 0.1rem 0.1rem 0.2rem black
+              , 0.05rem 0.05rem 0.1rem white;
+              , -0.05rem -0.05rem 0.1rem black;
+}
+
+button:active {
+    padding-left: 0.55rem;
+    padding-right: 0.45rem;
+    padding-top: 0.1rem;
+    padding-bottom: -0.1rem;
+    border-color: black black black black;
+    box-shadow: inset 2px 2px 4px black
+              , 0.05rem 0.05rem 0.1rem white;
+              , -0.05rem -0.05rem 0.1rem black;
 }
 
 button.lsk  {
@@ -59,14 +75,31 @@ button.num {
 }
 
 div.case {
-    background-color: silver;
+    background: linear-gradient(silver, gray);
     display: inline-block;
     padding: 0.5rem;
 }
 
+div.case hr {
+    border: none;
+    border-top: solid 0.1rem white;
+    border-bottom: solid 0.1rem rgba(0,0,0,0.5);
+    height: 0;
+    width: 1rem;
+    display: inline-block;
+    vertical-align: middle;
+    margin-right: 0.1rem;
+    margin-left: -0.6rem;
+}
+
+div.case button + hr {
+    margin-left: 0.1rem;
+    margin-right: -0.6rem;
+}
+
 table {
     border-collapse: collapse;
-    background-color: silver;
+    background: transparent;
 }
 
 tr.spacer {
