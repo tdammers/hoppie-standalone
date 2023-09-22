@@ -674,4 +674,4 @@ handleMCDUEvent mainMenuView dlkMenuView atcMenuView ev = do
       handleInputCommand mainMenuView dlkMenuView atcMenuView cmd
 
     LogEvent cmd -> do
-      debugPrint (colorize 255 cmd)
+      debugPrint (colorize blue cmd)
