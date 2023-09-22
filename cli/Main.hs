@@ -32,6 +32,8 @@ import System.FilePath
 import Text.Casing
 import Text.Read (readMaybe)
 import qualified Data.Map.Strict as Map
+import Text.Printf
+import Data.List
 
 data ProgramOptions =
   ProgramOptions
@@ -318,7 +320,15 @@ runInputTest :: IO ()
 runInputTest = do
   kcl <- loadKeyCodes
 
-  forM_ (Map.toAscList kcl) print
+  let showTerminalChar c
+        | c >= 32 && c < 127
+        = printf "(%02x %u %c)" c c (chr8 c)
+        | otherwise
+        = printf "(%02x %u)" c c
+  forM_ (sortOn snd $ Map.toAscList kcl) $ \(chars, cmd) -> do
+    printf "%-10s = %s\n"
+      (show cmd)
+      (unwords $ map showTerminalChar chars)
 
   inputChan <- newTChanIO
   race_

@@ -42,8 +42,6 @@ import Data.Word
 import Data.String
 import qualified Data.List as List
 import Data.Char
-import Data.Maybe
-import Control.Applicative
 
 isWordSep8 :: Word8 -> Bool
 isWordSep8 = (<= 32)

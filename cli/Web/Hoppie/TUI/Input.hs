@@ -228,6 +228,35 @@ readUtf8 c0 chan = do
   else
     error "UTF-8 error"
 
+data AnsiCharacterClass
+  = C0ControlChar
+  | SpaceChar
+  | IntermediateChar
+  | ParameterChar
+  | UppercaseChar
+  | LowercaseChar
+  | DeleteChar
+  | C1ControlChar
+  | G1DisplayableChar
+  deriving (Show, Read, Eq, Ord, Enum, Bounded)
+
+cclass :: Word8 -> AnsiCharacterClass
+cclass c | c < 0x20 = C0ControlChar
+cclass c | c == 0x20 = SpaceChar
+cclass c | c < 0x30 = IntermediateChar
+cclass c | c < 0x40 = ParameterChar
+cclass c | c < 0x60 = UppercaseChar
+cclass c | c < 0x7F = UppercaseChar
+cclass c | c == 0x7F = DeleteChar
+cclass c | c < 0xA0 = C1ControlChar
+cclass c | c == 0xA0 = SpaceChar
+cclass c | c < 0xFF = G1DisplayableChar
+cclass c | c == 0xFF = DeleteChar
+cclass _ = DeleteChar
+
+isAlphaChar :: Word8 -> Bool
+isAlphaChar c = cclass c `elem` [UppercaseChar, LowercaseChar]
+
 readEscapeSequence :: MonadIO m => Map [Word8] InputCommand -> TChan Word8 -> m InputCommand
 readEscapeSequence kcl chan = do
   let nextByteEither = liftIO $
@@ -247,8 +276,12 @@ readEscapeSequence kcl chan = do
       0x50 -> do
         InputDCS <$> readUntilST nextByte
       0x5b -> do
-        bytes <- doWhile (\x -> x < 0x40 || x > 0x7E) nextByte
-        return $ fromMaybe (InputCSI bytes) $ Map.lookup ([27, 0x5b] ++ bytes) kcl
+        bytes <- doWhile (not . isAlphaChar) nextByte
+        if bytes == [0x5b] then do
+          moreBytes <- doWhile (not . isAlphaChar) nextByte
+          return $ fromMaybe (InputCSI bytes) $ Map.lookup ([27, 0x5b] ++ bytes ++ moreBytes) kcl
+        else
+          return $ fromMaybe (InputCSI bytes) $ Map.lookup ([27, 0x5b] ++ bytes) kcl
       0x5d -> do
         InputOSC <$> readUntilST nextByte
       _ -> do

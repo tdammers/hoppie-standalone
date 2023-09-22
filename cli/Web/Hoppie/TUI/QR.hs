@@ -6,12 +6,8 @@ import Codec.QRCode (QRImage (..))
 import qualified Codec.QRCode as QR
 import Data.ByteString (ByteString)
 import Data.Vector.Unboxed ( (!?) )
-import Control.Monad
-import Data.Text.Encoding (encodeUtf8)
 import Data.Maybe
 import Data.Text (Text)
-
-import Web.Hoppie.TUI.Output
 
 formatQR :: ByteString -> [Text]
 formatQR txt =
