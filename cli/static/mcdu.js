@@ -1,11 +1,18 @@
 const screenW = 24;
 const screenH = 12;
 
+var ws = null;
+
 function sendKey(keyname) {
-    var xhr = new XMLHttpRequest();
-    xhr.open("POST", "/key");
-    xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
-    xhr.send("key=" + keyname);
+    if (ws === null) {
+        var xhr = new XMLHttpRequest();
+        xhr.open("POST", "/key");
+        xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+        xhr.send("key=" + keyname);
+    }
+    else {
+        ws.send(keyname);
+    }
 }
 
 const colors = [
@@ -68,7 +75,7 @@ function receiveScreen() {
 }
 
 function runWebsocket() {
-    var ws = new WebSocket("ws://" + window.location.host + "/screen/updates");
+    ws = new WebSocket("ws://" + window.location.host + "/websocket");
     ws.onmessage = (ev) => {
         updateScreen(JSON.parse(ev.data));
     }

@@ -23,11 +23,15 @@ mcduMain eventChan = do
       webMay <- case serverMay of
         Nothing ->
           return Nothing
-        Just server ->
-          fmap InputCommandEvent <$> tryReadTChan (mcduHttpInputChan server)
+        Just server -> do
+          fmap mapHttpEvent <$> tryReadTChan (mcduHttpInputChan server)
       case (localMay, webMay) of
         (Just a, Just b) -> return [a, b]
         (Just a, Nothing) -> return [a]
         (Nothing, Just b) -> return [b]
         (Nothing, Nothing) -> retry
     mapM_ (handleMCDUEvent mainMenuView dlkMenuView atcMenuView) evs
+
+mapHttpEvent :: HttpServerEvent -> MCDUEvent
+mapHttpEvent (HttpInputCommand cmd) = InputCommandEvent cmd
+mapHttpEvent (HttpLogEvent msg) = LogEvent msg

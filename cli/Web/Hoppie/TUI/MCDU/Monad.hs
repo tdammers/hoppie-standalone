@@ -48,6 +48,7 @@ data MCDUEvent
   | DownlinkEvent (WithMeta DownlinkStatus TypedMessage)
   | NetworkStatusEvent NetworkStatus
   | CurrentDataAuthorityEvent (Maybe ByteString)
+  | LogEvent Text
   deriving (Show)
 
 data ScratchVal
@@ -671,3 +672,6 @@ handleMCDUEvent mainMenuView dlkMenuView atcMenuView ev = do
 
     InputCommandEvent cmd -> do
       handleInputCommand mainMenuView dlkMenuView atcMenuView cmd
+
+    LogEvent cmd -> do
+      debugPrint (colorize 255 cmd)
