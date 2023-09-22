@@ -230,8 +230,9 @@ dlkMenuView :: MCDUView
 dlkMenuView = defView
   { mcduViewTitle = "DLK MENU"
   , mcduViewLSKBindings = Map.fromList
-      [ (0, ("MSG LOG", loadView dlkMessageLogView))
-      , (1, ("TELEX", clearTelexBody >> loadView (telexSendView False)))
+      [ (0, ("SENT MSGS", loadView dlkDownlinkLogView))
+      , (1, ("RECVD MSGS", loadView dlkUplinkLogView))
+      , (2, ("TELEX", clearTelexBody >> loadView (telexSendView False)))
       , (4, ("MAIN MENU", loadView mainMenuView))
       , (5, ("ATIS", loadView $ infoMenuView "ATIS" "VATATIS"))
       , (6, ("METAR", loadView $ infoMenuView "METAR" "METAR"))
@@ -522,21 +523,40 @@ infoMenuView title infotype = defView
       loadUplinkLSK 9
   }
 
-dlkMessageLogView :: MCDUView
-dlkMessageLogView = messageLogView False
+data MessageLogFilter
+  = Uplinks
+  | Downlinks
+  | AllCPDLC
+  deriving (Show, Read, Eq, Ord, Enum, Bounded)
+
+dlkUplinkLogView :: MCDUView
+dlkUplinkLogView = messageLogView Uplinks
+
+dlkDownlinkLogView :: MCDUView
+dlkDownlinkLogView = messageLogView Uplinks
 
 cpdlcMessageLogView :: MCDUView
-cpdlcMessageLogView = messageLogView True
+cpdlcMessageLogView = messageLogView AllCPDLC
 
-messageLogView :: Bool -> MCDUView
-messageLogView cpdlcView = defView
-  { mcduViewTitle = if cpdlcView then "ATC MESSAGES" else "DLK MESSAGES"
+messageLogView :: MessageLogFilter -> MCDUView
+messageLogView mlf = defView
+  { mcduViewTitle = case mlf of
+      Uplinks -> "RECVD DLK LOG"
+      Downlinks -> "SENT DLK LOG"
+      AllCPDLC -> "ATC MESSAGE LOG"
   , mcduViewLSKBindings = Map.fromList
-      [ (4, if cpdlcView then ("ATC MENU", loadView atcMenuView) else ("DLK MENU", loadView dlkMenuView))
+      [ (4, case mlf of
+              AllCPDLC -> ("ATC MENU", loadView atcMenuView)
+              _ -> ("DLK MENU", loadView dlkMenuView)
+        )
       ]
   , mcduViewOnLoad = do
-      messages <- reverse . filter (if cpdlcView then messageIsCPDLC else not . messageIsCPDLC)
-                    <$> lift getAllMessages
+      messages <- reverse . filter (if mlf == AllCPDLC then messageIsCPDLC else not . messageIsCPDLC)
+                    <$> lift (case mlf of
+                                AllCPDLC -> getAllMessages
+                                Uplinks -> getUplinkMessages
+                                Downlinks -> getDownlinkMessages
+                             )
       curPage <- gets (mcduViewPage . mcduView)
       let curMessages = take 4 . drop (4 * curPage) $ messages
           numPages = (length messages + 3) `div` 4
@@ -544,7 +564,10 @@ messageLogView cpdlcView = defView
         { mcduViewNumPages = numPages
         , mcduViewLSKBindings =
             Map.fromList
-              [ (4, if cpdlcView then ("ATC MENU", loadView atcMenuView) else ("DLK MENU", loadView dlkMenuView))
+              [ (4, case mlf of
+                      AllCPDLC -> ("ATC MENU", loadView atcMenuView)
+                      _ -> ("DLK MENU", loadView dlkMenuView)
+                )
               ]
             <>
             Map.fromList
@@ -798,8 +821,11 @@ messageView uid =
             when (curPage == numPagesTotal - 1) $ do
               if messageIsCPDLC message then
                 addLskBinding 4 "ATC LOG" (loadView cpdlcMessageLogView)
-              else
-                addLskBinding 4 "DLK LOG" (loadView dlkMessageLogView)
+              else case message of
+                UplinkMessage {} ->
+                  addLskBinding 4 "DLK LOG" (loadView dlkUplinkLogView)
+                DownlinkMessage {} ->
+                  addLskBinding 4 "DLK LOG" (loadView dlkDownlinkLogView)
 
 
             modifyView $ \v -> v

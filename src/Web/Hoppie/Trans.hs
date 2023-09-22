@@ -183,6 +183,18 @@ setNetworkStatus s = do
   statusVar <- asks hoppieNetworkStatus
   liftIO $ modifyMVar_ statusVar (const . return $ s)
 
+getUplinkMessages :: MonadIO m => HoppieT m [HoppieMessage]
+getUplinkMessages = do
+  uplinks <- fmap (map UplinkMessage . Map.elems) $
+              asks hoppieUplinks >>= liftIO . readMVar
+  return $ sortOn messageUID $ uplinks
+
+getDownlinkMessages :: MonadIO m => HoppieT m [HoppieMessage]
+getDownlinkMessages = do
+  downlinks <- fmap (map DownlinkMessage . Map.elems) $
+              asks hoppieDownlinks >>= liftIO . readMVar
+  return $ sortOn messageUID $ downlinks
+
 getAllMessages :: MonadIO m => HoppieT m [HoppieMessage]
 getAllMessages = do
   uplinks <- fmap (map UplinkMessage . Map.elems) $
@@ -216,6 +228,26 @@ saveUplink tsm = do
         "HPPU-3" -> cpdlcAtcLogoff callsign (cpdlcMIN cpdlc)
         -- Others are just processed normally
         _ -> return ()
+
+clearUplinksLog :: MonadIO m => HoppieT m ()
+clearUplinksLog = do
+  uplinksVar <- asks hoppieUplinks
+  liftIO $ modifyMVar_ uplinksVar $ return . Map.filter (isCPDLC . payload)
+
+clearDownlinksLog :: MonadIO m => HoppieT m ()
+clearDownlinksLog = do
+  uplinksVar <- asks hoppieUplinks
+  liftIO $ modifyMVar_ uplinksVar $ return . Map.filter (isCPDLC . payload)
+
+clearCpdlcUplinksLog :: MonadIO m => HoppieT m ()
+clearCpdlcUplinksLog = do
+  uplinksVar <- asks hoppieUplinks
+  liftIO $ modifyMVar_ uplinksVar $ return . Map.filter (not . isCPDLC . payload)
+
+clearCpdlcDownlinksLog :: MonadIO m => HoppieT m ()
+clearCpdlcDownlinksLog = do
+  uplinksVar <- asks hoppieUplinks
+  liftIO $ modifyMVar_ uplinksVar $ return . Map.filter (not . isCPDLC . payload)
 
 getCallsign :: MonadIO m => HoppieT m ByteString
 getCallsign = asks hoppieCallsign >>= liftIO . readMVar
