@@ -1,0 +1,55 @@
+name: Linux Build
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        ghc: ['9.4']
+
+    runs-on: ${{matrix.os}}
+
+    steps:
+    - uses: actions/checkout@v3
+    - uses: haskell/actions/setup@v2.3.6
+      with:
+        ghc-version: ${{ matrix.ghc }}
+        cabal-version: '3.10.1.0'
+
+    - name: Cache
+      uses: actions/cache@v3
+      env:
+        cache-name: cache-cabal
+      with:
+        path: ~/.cabal
+        key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('**/*.cabal') }}-${{ hashFiles('**/cabal.project') }}
+        restore-keys: |
+          ${{ runner.os }}-build-${{ env.cache-name }}-
+          ${{ runner.os }}-build-
+          ${{ runner.os }}-
+
+    - name: Install dependencies
+      run: |
+        cabal update
+        cabal build --only-dependencies --enable-tests --enable-benchmarks
+    - name: Build
+      run: cabal build --enable-tests --enable-benchmarks all
+    # - name: Run tests
+    #   run: cabal test all
+    - name: Install
+      run: |
+        mkdir -p ${{ github.workspace }}/dist
+        cp *.yaml.dist ${{ github.workspace }}/dist/
+        cabal install --install-method=copy --installdir=${{ github.workspace }}/dist
+    - name: Upload
+      uses: actions/upload-artifact@v3
+      with:
+        name: hoppie-mcdu ${{ runner.os }}
+        path: ${{ github.workspace }}/dist/*
