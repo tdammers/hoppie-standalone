@@ -1,5 +1,10 @@
 html {
-    font-size: 3.25vh;
+    font-family: sans-serif;
+    font-size: 2.9vh;
+    overflow: hidden;
+    width: 100vw;
+    height: 100vh;
+    background: linear-gradient(#000, #001);
 }
 
 body {
@@ -7,6 +12,63 @@ body {
     padding: 0;
 }
 
+div.case {
+    background: linear-gradient(silver, gray);
+    display: inline-block;
+    padding: 0.5rem;
+    margin: 0.1rem;
+    color: black;
+    box-shadow: inset -0.125rem -0.125rem 0.1rem black
+              , inset 0.125rem 0.125rem 0.03rem white;
+    border-radius: 0.3rem;
+}
+
+div.case hr {
+    border: none;
+    border-top: solid 0.1rem white;
+    border-bottom: solid 0.1rem rgba(0,0,0,0.5);
+    height: 0;
+    width: 1rem;
+    display: inline-block;
+    vertical-align: middle;
+    margin-right: 0.1rem;
+    margin-left: -0.6rem;
+}
+
+div.case button + hr {
+    margin-left: 0.1rem;
+    margin-right: -0.6rem;
+}
+
+table {
+    border-collapse: collapse;
+    background: transparent;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+div.case th {
+    text-align: left;
+    font-weight: bold;
+    font-style: italic;
+    color: white;
+    text-shadow: 0.05rem 0.05rem 0.1rem black;
+}
+
+tr.spacer,
+tr.spacer td {
+    height: 0.5rem;
+}
+
+td.hspacer {
+    width: 0.5rem;
+}
+
+td {
+    margin: 0;
+    padding: 0;
+    vertical-align: middle;
+}
 #mcduScreen {
     background-color: black;
     color: #DDD;
@@ -27,25 +89,28 @@ button {
     height: 1.6rem;
     line-height: 1;
     box-sizing: border-box;
-    margin-top: 0.2rem;
-    margin-bottom: 0.2rem;
-    margin-left: 0.2rem;
-    margin-right: 0.2rem;
+
+    margin-top: 0.4rem;
+    margin-bottom: 0.4rem;
+    margin-left: 0.4rem;
+    margin-right: 0.4rem;
+
     padding-left: 0.5rem;
     padding-right: 0.5rem;
     padding-top: 0.0rem;
     padding-bottom: 0.0rem;
     font-size: inherit;
     color: white;
-    background-color: #222;
+    background: linear-gradient(to right, #111, #333);
     border-radius: 0.3rem;
     border-color: silver black black silver;
-    border-width: 0.1rem;
+    border-width: 0.06rem;
     border-style: solid;
     outline: solid 0.05rem black;
     box-shadow: 0.1rem 0.1rem 0.2rem black
-              , 0.05rem 0.05rem 0.1rem white;
-              , -0.05rem -0.05rem 0.1rem black;
+              , 0.05rem 0.05rem 0.1rem white
+              , -0.05rem -0.05rem 0.1rem black
+              , inset 0.02rem 0.02rem 0.04rem rgba(255,255,255,0.5);
 }
 
 button:active {
@@ -74,44 +139,3 @@ button.num {
     margin-bottom: 0.15rem;
 }
 
-div.case {
-    background: linear-gradient(silver, gray);
-    display: inline-block;
-    padding: 0.5rem;
-}
-
-div.case hr {
-    border: none;
-    border-top: solid 0.1rem white;
-    border-bottom: solid 0.1rem rgba(0,0,0,0.5);
-    height: 0;
-    width: 1rem;
-    display: inline-block;
-    vertical-align: middle;
-    margin-right: 0.1rem;
-    margin-left: -0.6rem;
-}
-
-div.case button + hr {
-    margin-left: 0.1rem;
-    margin-right: -0.6rem;
-}
-
-table {
-    border-collapse: collapse;
-    background: transparent;
-}
-
-tr.spacer {
-    height: 2.2rem;
-}
-
-td.hspacer {
-    width: 1rem;
-}
-
-td {
-    margin: 0;
-    padding: 0;
-    vertical-align: top;
-}
