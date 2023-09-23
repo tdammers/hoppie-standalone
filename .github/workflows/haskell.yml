@@ -46,7 +46,7 @@ jobs:
     - name: Install
       run: |
         mkdir -p ${{ github.workspace }}/dist
-        cabal install --install-method=copy --installdir=${{ github.workspace }}/dist
+        cabal install --installdir=${{ github.workspace }}/dist
     - name: Upload
       uses: actions/upload-artifact@v3
       with:
