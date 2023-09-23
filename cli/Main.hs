@@ -9,6 +9,7 @@ import Web.Hoppie.TUI.Input
 import Web.Hoppie.TUI.MCDU
 import Web.Hoppie.TUI.StringUtil
 import Web.Hoppie.Telex
+import Web.Hoppie.FGFS.Connection
 
 import Control.Applicative
 import Control.Concurrent.Async (race_)
@@ -338,3 +339,9 @@ runInputTest = do
     runLogger kcl inputChan = forever $ do
       c <- readCommand kcl inputChan
       print c
+
+runFGFSTest :: IO ()
+runFGFSTest = do
+  withFGFSConnection "http://localhost:10000" $ \conn -> do
+    print =<< runNasalResult conn "return 'Hello';"
+    print =<< runNasalResult conn "return 'world!';"
