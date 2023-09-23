@@ -18,8 +18,14 @@ mcduMain eventChan = do
   flushAll
   forever $ do
     serverMay <- gets mcduHttpServer
+    headless <- gets mcduHeadless
     evs <- liftIO . atomically $ do
-      localMay <- tryReadTChan eventChan
+      localMay <- do
+        ev <- tryReadTChan eventChan
+        if headless then
+          return Nothing
+        else
+          return ev
       webMay <- case serverMay of
         Nothing ->
           return Nothing

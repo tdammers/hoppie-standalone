@@ -375,7 +375,13 @@ unlessHeadless action = do
 
 flushAll :: MCDU ()
 flushAll = do
-  unlessHeadless $ do
+  headless <- gets mcduHeadless
+  liftIO $ do
+    clearScreen
+    moveTo 0 0
+  if headless then do
+    liftIO $ putStrLn "HEADLESS MODE"
+  else do
     buf <- gets mcduScreenBuffer
     liftIO $ drawMCDU buf
   redrawLog
@@ -427,7 +433,7 @@ redrawLog = do
         if headless then
           (0, terminalW)
         else
-          (screenW + 13, terminalW - screenW - 14)
+          (screenW + 15, terminalW - screenW - 15)
   logLines <- gets $ reverse . take terminalH . concatMap (reverse . lineWrap logW) . mcduDebugLog
   liftIO $ do
     when logVisible $ do
@@ -554,6 +560,20 @@ handleLSK n = do
     Nothing -> return ()
     Just (_, action) -> action
 
+mcduPrintHttpServerQR :: MCDU ()
+mcduPrintHttpServerQR = do
+  portMay <- gets mcduHttpPort
+  forM_ portMay $ \port -> do
+    hostnameMay <- gets mcduHttpHostname
+    mcduPrintHttpServerQRWith port hostnameMay
+
+mcduPrintHttpServerQRWith :: Int -> Maybe String -> MCDU ()
+mcduPrintHttpServerQRWith port hostnameMay = do
+  let hostname = fromMaybe "localhost" hostnameMay
+  let url = Text.pack ("http://" <> hostname <> ":" <> show port)
+  forM_ (formatQR $ encodeUtf8 url) $
+    debugPrint . colorize 254
+
 mcduStartHttpServer :: MCDU ()
 mcduStartHttpServer = do
   portMay <- gets mcduHttpPort
@@ -562,8 +582,7 @@ mcduStartHttpServer = do
     let url = Text.pack ("http://" <> hostname <> ":" <> show port)
     debugPrint $ colorize blue $
       "Starting HTTP server on " <> url
-    forM_ (formatQR $ encodeUtf8 url) $
-      debugPrint . colorize 254
+    mcduPrintHttpServerQRWith port (Just hostname)
     httpServer <- liftIO $ startHttpServer port
     modify $ \s -> s { mcduHttpServer = Just httpServer }
 

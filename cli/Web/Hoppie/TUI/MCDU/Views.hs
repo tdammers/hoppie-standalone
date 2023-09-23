@@ -123,16 +123,25 @@ configView = defView
                 mcduPrint 0 6 white "SHOW LOG"
                 mcduPrintR (screenW - 1) 6 green (if showLog then "ON" else "OFF")
                 mcduPrint 0 8 white "HEADLESS MODE"
-                mcduPrintR (screenW - 1) 8 green (if headless then "ON" else "OFF")
-                unless serverEnabled $
-                  mcduPrint 0 9 red "HTTP OFF"
-            , mcduViewLSKBindings = Map.fromList
+                if serverEnabled then do
+                  mcduPrintR (screenW - 1) 8 green (if headless then "ON" else "OFF")
+                else do
+                  if headless then
+                    mcduPrintR (screenW - 1) 8 red "ON"
+                  else
+                    mcduPrintR (screenW - 1) 8 yellow "DISABLED"
+                  mcduPrint 1 9 white "(HTTP SERVER OFF)"
+            , mcduViewLSKBindings = Map.fromList $ 
                 [ (4, ("MAIN MENU", loadView mainMenuView))
                 , (5, ("", scratchInteract setACType getACType >> reloadView))
                 , (6, ("", scratchInteract setMyCallsign getMyCallsign >> reloadView))
-                , (7, ("", modify (\s -> s { mcduShowLog = not (mcduShowLog s) }) >> redrawLog >> reloadView))
-                , (8, ("", modify (\s -> s { mcduHeadless = not (mcduHeadless s) }) >> flushAll >> redrawLog >> reloadView))
+                , (7, ("", modify (\s -> s { mcduShowLog = not (mcduShowLog s) }) >> flushAll >> reloadView))
                 ]
+                ++
+                if serverEnabled then
+                  [ (8, ("", modify (\s -> s { mcduHeadless = not (mcduHeadless s) }) >> flushAll >> reloadView)) ]
+                else
+                  [ (8, ("", modify (\s -> s { mcduScratchMessage = Just "NOT ALLOWED" }) >> redrawScratch)) ]
             }
         1 -> do
           serverEnabled <- gets (isJust . mcduHttpServer)
@@ -153,29 +162,65 @@ configView = defView
               getPort :: MCDU (Maybe ByteString)
               getPort =
                 gets (fmap (BS8.pack . show) . mcduHttpPort)
+
+          let setHostname :: Maybe ByteString -> MCDU Bool
+              setHostname hostnameMay =
+                case hostnameMay of
+                  Nothing ->
+                    True <$ modify (\s -> s { mcduHttpHostname = Nothing })
+                  Just hostname -> do
+                    modify (\s -> s { mcduHttpHostname = Just (map toLower $ BS8.unpack hostname) })
+                    return True
+              getHostname :: MCDU (Maybe ByteString)
+              getHostname =
+                gets (fmap BS8.pack . mcduHttpHostname)
+
           port <- gets mcduHttpPort
+          hostname <- gets mcduHttpHostname
           modifyView $ \v -> v
             { mcduViewDraw = do
-                mcduPrint 0 2 white "HTTP SERVER"
-                mcduPrint 0 4 white "PORT"
+                mcduPrintC (screenW `div` 2) 1 white "--- HTTP SERVER ---"
+                mcduPrint 1 3 white "HOSTNAME"
+                mcduPrint 1 4 green (maybe "----" BS8.pack hostname)
+                mcduPrintR (screenW - 1) 3 white "PORT"
                 mcduPrintR (screenW - 1) 4 green (maybe "----" (BS8.pack . show) port)
-                mcduPrint 0 6 white "SERVER ENABLE"
-                mcduPrintR (screenW - 1) 6 green (if serverEnabled then "ON" else "OFF")
-                when headless $
-                  mcduPrint 0 7 red "HEADLESS"
-            , mcduViewLSKBindings = Map.fromList
+                if headless then do
+                  if serverEnabled then
+                    mcduPrint 1 2 green "FORCED ON"
+                  else
+                    mcduPrint 1 2 red "OFF"
+                  mcduPrintR (screenW - 1) 2 white "(HEADLESS)"
+                else do
+                  mcduPrint 1 2 green (if serverEnabled then "ON" else "OFF")
+            , mcduViewLSKBindings = Map.fromList $
                 [ (4, ("MAIN MENU", loadView mainMenuView))
+                , (1, ("", scratchInteract setHostname getHostname >> reloadView))
                 , (6, ("", scratchInteract setPort getPort >> reloadView))
-                , (7, ( ""
-                      , do
-                          if serverEnabled then
-                            mcduStopHttpServer
-                          else
-                            mcduStartHttpServer
-                          reloadView
-                      )
-                  )
                 ]
+                ++
+                (
+                  if not serverEnabled || not headless then
+                    [ (0, ( ""
+                          , do
+                              if serverEnabled then
+                                mcduStopHttpServer
+                              else
+                                mcduStartHttpServer
+                              reloadView
+                          )
+                      )
+                    ]
+                  else
+                    [ (0, ("", modify (\s -> s { mcduScratchMessage = Just "NOT ALLOWED" }) >> redrawScratch)) ]
+                )
+                ++
+                (
+                  if serverEnabled then
+                    [ (7, ("QR", mcduPrintHttpServerQR))
+                    ]
+                  else
+                    [ ]
+                )
             }
         _ -> modifyView $ \v -> v
               { mcduViewDraw = do
