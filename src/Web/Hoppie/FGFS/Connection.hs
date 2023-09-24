@@ -3,31 +3,29 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE FlexibleInstances #-}
 
 module Web.Hoppie.FGFS.Connection
 where
 
-import Control.Applicative
 import Control.Concurrent.Async
 import Control.Concurrent.STM
 import Control.Exception
 import Control.Monad
-import Data.Aeson (ToJSON (..), FromJSON (..), (.=), (.:), (.:?))
+import Data.Aeson (ToJSON (..), FromJSON (..), (.=), (.:))
 import qualified Data.Aeson as JSON
 import Data.ByteString (ByteString)
-import Data.Map (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe
-import Data.Scientific (floatingOrInteger)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.Text.Encoding
 import qualified Data.Text.IO as Text
-import Data.Vector (Vector)
-import qualified Data.Vector as Vector
 import qualified Network.HTTP.Simple as HTTP
 import qualified Network.WebSockets as WS
 import System.Random
+
+import Web.Hoppie.FGFS.NasalValue
 
 import Paths_hoppie_standalone
 
@@ -145,59 +143,21 @@ nasalCommand :: Text -> FGCommand
 nasalCommand script =
   mkCommand "nasal" [ ("script", script) ]
 
-data NasalValue
-  = NasalNil
-  | NasalString !Text
-  | NasalInt !Int
-  | NasalFloat !Double
-  | NasalVector !(Vector NasalValue)
-  | NasalHash !(Map Text NasalValue)
-  deriving (Show, Eq, Ord)
-
-instance FromJSON NasalValue where
-  parseJSON JSON.Null = pure NasalNil
-  parseJSON (JSON.String txt) = pure $ NasalString txt
-  parseJSON (JSON.Number num) =
-    pure $ either NasalFloat NasalInt $ floatingOrInteger num
-  parseJSON (JSON.Array xs) =
-    NasalVector <$> Vector.mapM parseJSON xs
-  parseJSON j@JSON.Object {} =
-    NasalHash <$> parseJSON j
-  parseJSON (JSON.Bool True) =
-    pure $ NasalInt 1
-  parseJSON (JSON.Bool False) =
-    pure $ NasalInt 0
-
-instance ToJSON NasalValue where
-  toJSON NasalNil = JSON.Null
-  toJSON (NasalString txt) = toJSON txt
-  toJSON (NasalInt i) = toJSON i
-  toJSON (NasalFloat f) = toJSON f
-  toJSON (NasalVector v) = toJSON v
-  toJSON (NasalHash m) = toJSON m
-
-data NasalValueOrError
-  = NasalValue NasalValue
-  | NasalError Text
-  deriving (Show, Eq)
-
-instance FromJSON NasalValueOrError where
-  parseJSON = JSON.withObject "NasalValueOrError" $ \obj -> do
-    errMay <- fmap NasalError <$> obj .:? "error"
-    valMay <- fmap NasalValue <$> obj .:? "value"
-    maybe (fail "Invalid nasal") return $ errMay <|> valMay
-
 runNasal_ :: FGFSConnection -> Text -> IO ()
 runNasal_ conn script =
   runFGCommand conn (nasalCommand script)
 
-runNasal :: FGFSConnection -> Text -> IO NasalValue
+runNasal :: FromNasal a => FGFSConnection -> Text -> IO a
 runNasal conn script = do
   runNasalOrError conn script >>= \case
     NasalError err ->
-      error (Text.unpack err)
-    NasalValue val ->
-      return val
+      throw err
+    NasalValue nval ->
+      case fromNasal nval of
+        Left err ->
+          throw err
+        Right val ->
+          return val
 
 runNasalOrError :: FGFSConnection -> Text -> IO NasalValueOrError
 runNasalOrError conn script = do
@@ -258,6 +218,12 @@ instance FromJSON a => FromJSON (PropResponse a) where
       <*> obj .: "index"
       <*> obj .: "nChildren"
 
+newtype PropJSONError =
+  PropJSONDecodeError String
+  deriving (Show)
+
+instance Exception PropJSONError where
+
 getFGProp :: forall a. FromJSON a => FGFSConnection -> Text -> IO a
 getFGProp conn path = do
   let rqURL = fgfsBaseURL conn <> "/json/" <> Text.unpack path;
@@ -265,17 +231,14 @@ getFGProp conn path = do
   httpRq <- HTTP.parseRequest rqURL
   rp <- HTTP.httpBS httpRq
   let raw = HTTP.getResponseBody rp
-  let parsed = either error id $ JSON.eitherDecodeStrict raw :: PropResponse a
+  let parsed = either (throw . PropJSONDecodeError) id $ JSON.eitherDecodeStrict raw :: PropResponse a
   return $ propResponseValue parsed
 
-getFGOutput :: FGFSConnection -> IO NasalValueOrError
+getFGOutput :: forall a. FromJSON a => FGFSConnection -> IO a
 getFGOutput conn = do
   rawResponse <- atomically $ readTChan $ fgfsOutputChan conn
   case JSON.decodeStrict rawResponse of
     Nothing ->
-      error $ "Invalid response: " ++ Text.unpack (decodeUtf8 rawResponse)
+      throw $ PropJSONDecodeError $ Text.unpack (decodeUtf8 rawResponse)
     Just r -> do
-      -- putStrLn "-----"
-      -- print rawResponse
-      -- print r
       return $ propResponseValue r

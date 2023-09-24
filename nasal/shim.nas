@@ -60,7 +60,7 @@
 
     var runScript = func (outputPath, f) {
         var err = [];
-        var value = call(f, [], me, {}, err);
+        var value = call(f, [], me, globals.hoppieStandaloneShim, err);
         if (size(err) > 0) {
             result = { "error": err };
         }
@@ -82,5 +82,5 @@
     globals.hoppieStandaloneShim = {
         "jsonEncode": jsonEncode,
         "runScript": runScript,
-    }
+    };
 })();
