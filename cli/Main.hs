@@ -5,12 +5,12 @@
 
 module Main where
 
+import Web.Hoppie.FGFS.Connection
 import Web.Hoppie.System
 import Web.Hoppie.TUI.Input
 import Web.Hoppie.TUI.MCDU
 import Web.Hoppie.TUI.StringUtil
 import Web.Hoppie.Telex
-import Web.Hoppie.FGFS.Connection
 
 import Control.Applicative
 import Control.Concurrent.Async (race_)
@@ -25,18 +25,19 @@ import qualified Data.Aeson as JSON
 import Data.Aeson.TH (deriveJSON)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as BS8
+import Data.List
+import qualified Data.Map.Strict as Map
 import Data.Maybe
+import Data.String.QQ (s)
+import Data.Text (Text)
 import Data.Word
 import qualified Data.Yaml as YAML
 import Options.Applicative
 import System.Environment
 import System.FilePath
 import Text.Casing
-import Text.Read (readMaybe)
-import qualified Data.Map.Strict as Map
 import Text.Printf
-import Data.List
-import Data.String.QQ (s)
+import Text.Read (readMaybe)
 
 data ProgramOptions =
   ProgramOptions
@@ -345,11 +346,35 @@ runInputTest = do
 runFGFSTest :: IO ()
 runFGFSTest = do
   withFGFSConnection "localhost" 10000 $ \conn -> do
-    print =<< runNasal conn
-                [s| var fp = flightplan();
-                    var result = [];
-                    for (var i = 0; i < fp.getPlanSize(); i += 1) {
-                      append(result, fp.getWP(i).wp_name);
-                    }
-                    return result;
-                  |]
+    sidMay <- runNasal conn
+      [s| var fp = flightplan();
+          if (fp.sid == nil)
+            return nil;
+          else
+            return fp.sid.id;
+        |]
+    starMay <- runNasal conn
+      [s| var fp = flightplan();
+          if (fp.star == nil)
+            return nil;
+          else
+            return fp.star.id;
+        |]
+    waypoints <- runNasal conn
+      [s| var fp = flightplan();
+          var result = [];
+          for (var i = 0; i < fp.getPlanSize(); i += 1) {
+            var wp = fp.getWP(i);
+            append(result, [wp.wp_name, wp.wp_role]);
+          }
+          return result;
+        |]
+    forM_ (sidMay :: Maybe Text) $ \sid -> do
+      printf "SID: %s\n" sid
+    forM_ (starMay :: Maybe Text) $ \star -> do
+      printf "STAR: %s\n" star
+    putStrLn ""
+    forM_ (waypoints :: [(Text, Maybe Text)]) $ \(wp_name, wp_role) -> do
+      printf "%-10s %s\n"
+        wp_name
+        (fromMaybe "-" wp_role)

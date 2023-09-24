@@ -32,6 +32,7 @@ library
         Web.Hoppie.CPDLC.Message
         Web.Hoppie.CPDLC.MessageTypes
         Web.Hoppie.FGFS.Connection
+        Web.Hoppie.FGFS.NasalValue
         Paths_hoppie_standalone
     -- other-modules:
     -- other-extensions:
