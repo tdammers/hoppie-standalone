@@ -51,6 +51,8 @@ data ProgramOptions =
     , poHttpServerHostname :: Maybe String
     , poHttpServerPort :: Maybe Int
     , poHeadless :: Maybe Bool
+    , poFlightgearHostname :: Maybe String
+    , poFlightgearPort :: Maybe Int
     }
     deriving (Show)
 
@@ -67,6 +69,8 @@ emptyProgramOptions =
     , poHttpServerHostname = Nothing
     , poHttpServerPort = Nothing
     , poHeadless = Nothing
+    , poFlightgearHostname = Nothing
+    , poFlightgearPort = Nothing
     }
 
 defaultProgramOptions :: ProgramOptions
@@ -82,11 +86,13 @@ defaultProgramOptions =
     , poHttpServerHostname = Nothing
     , poHttpServerPort = Nothing
     , poHeadless = Just False
+    , poFlightgearHostname = Nothing
+    , poFlightgearPort = Nothing
     }
 
 instance Semigroup ProgramOptions where
-  ProgramOptions l1 c1 ty1 fp1 sp1 url1 sl1 httph1 http1 hl1 <>
-    ProgramOptions l2 c2 ty2 fp2 sp2 url2 sl2 httph2 http2 hl2 =
+  ProgramOptions l1 c1 ty1 fp1 sp1 url1 sl1 httph1 http1 hl1 fgh1 fgp1 <>
+    ProgramOptions l2 c2 ty2 fp2 sp2 url2 sl2 httph2 http2 hl2 fgh2 fgp2 =
       ProgramOptions
         (l1 <|> l2)
         (c1 <|> c2)
@@ -98,6 +104,8 @@ instance Semigroup ProgramOptions where
         (httph1 <|> httph2)
         (http1 <|> http2)
         (hl1 <|> hl2)
+        (fgh1 <|> fgh2)
+        (fgp1 <|> fgp2)
 
 $(deriveJSON
     JSON.defaultOptions
@@ -178,6 +186,18 @@ optionsP = ProgramOptions
         <> short 'h'
         <> help "Headless mode (no terminal UI, only HTTP)"
         )
+  <*> option (Just <$> str)
+        ( long "fgfs-hostname"
+        <> metavar "HOSTNAME"
+        <> help "Where to find a FlightGear HTTP server"
+        <> value Nothing
+        )
+  <*> option (Just <$> auto)
+        ( long "fgfs-port"
+        <> metavar "PORT"
+        <> help "Where to find a FlightGear HTTP server"
+        <> value Nothing
+        )
 
 optionsFromArgs :: IO ProgramOptions
 optionsFromArgs =
@@ -243,6 +263,25 @@ optionsToConfig po = runExcept $ do
       slowPollingInterval
       fastPollingInterval
 
+hoppieMainOptionsFromProgramOptions :: ProgramOptions -> HoppieMainOptions
+hoppieMainOptionsFromProgramOptions po =
+  let headless = fromMaybe False $ poHeadless po
+      actype = fmap BS8.pack $ poAircraftType po
+      showLog = fromMaybe False $ poShowLog po
+      httpPort = poHttpServerPort po
+      httpHostname = poHttpServerHostname po
+      fgfsPort = poFlightgearPort po
+      fgfsHostname = poFlightgearHostname po
+  in
+    defHoppieMainOptions
+      { hoppieMainShowLog = showLog
+      , hoppieMainHeadless = headless
+      , hoppieMainHttpHostname = httpHostname
+      , hoppieMainHttpPort = httpPort
+      , hoppieMainFlightgearHostname = fgfsHostname
+      , hoppieMainFlightgearPort = fgfsPort
+      , hoppieMainAircraftType = actype
+      }
 
 main :: IO ()
 main = do
@@ -254,17 +293,13 @@ main = do
   let po = poFromArgs <> poFromEnv <> poFromConfigFile <> defaultProgramOptions
   config <- either error return $ optionsToConfig po
   callsign <- maybe (error "No callsign configured") return $ poCallsign po
-  let headless = fromMaybe False $ poHeadless po
-  let actype = fmap BS8.pack $ poAircraftType po
-      showLog = fromMaybe False $ poShowLog po
-      httpPort = poHttpServerPort po
-      httpHostname = poHttpServerHostname po
-      hooks = HoppieHooks
+  let hooks = HoppieHooks
                 { onUplink = handleUplink eventChan
                 , onDownlink = handleDownlink eventChan
                 , onNetworkStatus = handleNetworkStatus eventChan
                 , onCpdlcLogon = handleCurrentDataAuthority eventChan
                 }
+      hmo = hoppieMainOptionsFromProgramOptions po
   runInput inputChan
     `race_`
     runInputPusher inputChan eventChan
@@ -273,7 +308,7 @@ main = do
       (BS8.pack callsign)
       config
       hooks
-      (hoppieMain showLog headless httpHostname httpPort actype eventChan)
+      (hoppieMain hmo eventChan)
 
 runInputPusher :: TChan Word8 -> TChan MCDUEvent -> IO ()
 runInputPusher inputChan eventChan = do
@@ -297,22 +332,49 @@ handleCurrentDataAuthority :: TChan MCDUEvent -> Maybe ByteString -> Hoppie ()
 handleCurrentDataAuthority eventChan = do
   liftIO . atomically . writeTChan eventChan . CurrentDataAuthorityEvent
 
-hoppieMain :: Bool
-           -> Bool
-           -> Maybe String
-           -> Maybe Int
-           -> Maybe ByteString
+data HoppieMainOptions =
+  HoppieMainOptions
+    { hoppieMainShowLog :: Bool
+    , hoppieMainHeadless :: Bool
+    , hoppieMainHttpHostname :: Maybe String
+    , hoppieMainHttpPort :: Maybe Int
+    , hoppieMainFlightgearHostname :: Maybe String
+    , hoppieMainFlightgearPort :: Maybe Int
+    , hoppieMainAircraftType :: Maybe ByteString
+    }
+    deriving (Show)
+
+defHoppieMainOptions :: HoppieMainOptions
+defHoppieMainOptions =
+  HoppieMainOptions
+    { hoppieMainShowLog = True
+    , hoppieMainHeadless = False
+    , hoppieMainHttpHostname = Nothing
+    , hoppieMainHttpPort = Nothing
+    , hoppieMainFlightgearHostname = Nothing
+    , hoppieMainFlightgearPort = Nothing
+    , hoppieMainAircraftType = Nothing
+    }
+
+applyHoppieMainOptions :: HoppieMainOptions -> MCDUState -> MCDUState
+applyHoppieMainOptions hmo m =
+  m
+    { mcduAircraftType = hoppieMainAircraftType hmo
+    , mcduShowLog = hoppieMainShowLog hmo
+    , mcduHttpHostname = hoppieMainHttpHostname hmo
+    , mcduHttpPort = hoppieMainHttpPort hmo
+    , mcduFlightgearHostname = hoppieMainFlightgearHostname hmo
+    , mcduFlightgearPort = hoppieMainFlightgearPort hmo
+    , mcduHeadless = hoppieMainHeadless hmo
+    }
+
+
+hoppieMain :: HoppieMainOptions
            -> TChan MCDUEvent
            -> (TypedMessage -> Hoppie ()) -> Hoppie ()
-hoppieMain showLog headless httpHostnameMay httpPortMay actypeMay eventChan rawSend = do
+hoppieMain hmo eventChan rawSend = do
   runMCDU rawSend $ do
-    modify $ \m -> m
-      { mcduAircraftType = actypeMay
-      , mcduShowLog = showLog
-      , mcduHttpHostname = httpHostnameMay
-      , mcduHttpPort = httpPortMay
-      , mcduHeadless = headless
-      }
+    modify (applyHoppieMainOptions hmo)
     mcduMain eventChan
 
 runColoredTests :: IO ()

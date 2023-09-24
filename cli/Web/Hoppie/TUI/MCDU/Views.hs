@@ -55,11 +55,16 @@ mainMenuView = defView
   , mcduViewNumPages = 2
   , mcduViewOnLoad = do
       curPage <- gets (mcduViewPage . mcduView)
+      fgfsEnabled <-
+          (&&)
+            <$> gets (isJust . mcduFlightgearHostname)
+            <*> gets (isJust . mcduFlightgearPort)
       modifyView $ \v -> v
         { mcduViewLSKBindings = Map.fromList $ case curPage of
             0 ->
-              [ (0, ("DLK", loadView dlkMenuView))
-              , (5, ("ATC", loadView atcMenuView))
+              [ (0, ("FPL", return () {- TODO -} )) | fgfsEnabled ] ++
+              [ (5, ("DLK", loadView dlkMenuView))
+              , (6, ("ATC", loadView atcMenuView))
               ]
             1 ->
               [ (0, ("CONFIG", loadView configView))
@@ -214,13 +219,7 @@ configView = defView
                     [ (0, ("", modify (\s -> s { mcduScratchMessage = Just "NOT ALLOWED" }) >> redrawScratch)) ]
                 )
                 ++
-                (
-                  if serverEnabled then
-                    [ (7, ("QR", mcduPrintHttpServerQR))
-                    ]
-                  else
-                    [ ]
-                )
+                [ (7, ("QR", mcduPrintHttpServerQR)) | serverEnabled ]
             }
         _ -> modifyView $ \v -> v
               { mcduViewDraw = do
