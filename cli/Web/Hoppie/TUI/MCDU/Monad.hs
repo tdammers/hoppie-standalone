@@ -86,6 +86,9 @@ data MCDUState =
     , mcduHttpHostname :: Maybe String
     , mcduHttpPort :: Maybe Int
     , mcduHttpServer :: Maybe MCDUHttpServer
+
+    , mcduFlightgearHostname :: Maybe String
+    , mcduFlightgearPort :: Maybe Int
     }
 
 defMCDUState :: MCDUState
@@ -118,6 +121,9 @@ defMCDUState =
     , mcduHttpHostname = Nothing
     , mcduHttpPort = Nothing
     , mcduHttpServer = Nothing
+
+    , mcduFlightgearHostname = Nothing
+    , mcduFlightgearPort = Nothing
     }
 
 data MCDUView =
