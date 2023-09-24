@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE QuasiQuotes #-}
 
 module Main where
 
@@ -35,6 +36,7 @@ import Text.Read (readMaybe)
 import qualified Data.Map.Strict as Map
 import Text.Printf
 import Data.List
+import Data.String.QQ (s)
 
 data ProgramOptions =
   ProgramOptions
@@ -303,7 +305,7 @@ hoppieMain :: Bool
            -> (TypedMessage -> Hoppie ()) -> Hoppie ()
 hoppieMain showLog headless httpHostnameMay httpPortMay actypeMay eventChan rawSend = do
   runMCDU rawSend $ do
-    modify $ \s -> s
+    modify $ \m -> m
       { mcduAircraftType = actypeMay
       , mcduShowLog = showLog
       , mcduHttpHostname = httpHostnameMay
@@ -343,6 +345,11 @@ runInputTest = do
 runFGFSTest :: IO ()
 runFGFSTest = do
   withFGFSConnection "localhost" 10000 $ \conn -> do
-    print =<< runNasalResultWS conn "print('Hello'); return 'Hello';"
-    print =<< runNasalResultWS conn "print('world!'); return 1;"
-    print =<< runNasalResultWS conn "var fp = flightplan(); return fp.getPlanSize();"
+    print =<< runNasal conn
+                [s| var fp = flightplan();
+                    var result = [];
+                    for (var i = 0; i < fp.getPlanSize(); i += 1) {
+                      append(result, fp.getWP(i).wp_name);
+                    }
+                    return result;
+                  |]
