@@ -342,6 +342,7 @@ runInputTest = do
 
 runFGFSTest :: IO ()
 runFGFSTest = do
-  withFGFSConnection "http://localhost:10000" $ \conn -> do
-    print =<< runNasalResult conn "return 'Hello';"
-    print =<< runNasalResult conn "return 'world!';"
+  withFGFSConnection "localhost" 10000 $ \conn -> do
+    print =<< runNasalResultWS conn "print('Hello'); return 'Hello';"
+    print =<< runNasalResultWS conn "print('world!'); return 1;"
+    print =<< runNasalResultWS conn "var fp = flightplan(); return fp.getPlanSize();"
