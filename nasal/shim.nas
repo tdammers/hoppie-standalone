@@ -1,6 +1,5 @@
 (func {
     var jsonEncode = func (val) {
-        debug.dump("ENCODE:", val);
         var ty = typeof(val);
         var encoded = 'null';
         if (ty == 'scalar') {
