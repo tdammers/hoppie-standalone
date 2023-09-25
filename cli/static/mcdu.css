@@ -47,6 +47,10 @@ table {
     margin-right: auto;
 }
 
+table.lalign {
+    margin-left: 0;
+}
+
 div.case th {
     text-align: left;
     font-weight: bold;
@@ -89,6 +93,7 @@ button {
     height: 1.6rem;
     line-height: 1;
     box-sizing: border-box;
+    display: inline-block;
 
     margin-top: 0.4rem;
     margin-bottom: 0.4rem;
@@ -97,8 +102,8 @@ button {
 
     padding-left: 0.5rem;
     padding-right: 0.5rem;
-    padding-top: 0.0rem;
-    padding-bottom: 0.0rem;
+    padding-top: 0.1rem;
+    padding-bottom: 0.1rem;
     font-size: inherit;
     color: white;
     background: linear-gradient(to right, #111, #333);
@@ -116,8 +121,8 @@ button {
 button:active {
     padding-left: 0.55rem;
     padding-right: 0.45rem;
-    padding-top: 0.1rem;
-    padding-bottom: -0.1rem;
+    padding-top: 0.2rem;
+    padding-bottom: 0.0rem;
     border-color: black black black black;
     box-shadow: inset 2px 2px 4px black
               , 0.05rem 0.05rem 0.1rem white;
