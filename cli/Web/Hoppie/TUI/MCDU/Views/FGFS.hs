@@ -134,7 +134,7 @@ fplView = defView
                     , "alt_type": wp.alt_cstr_type
                     , "parent": parent_id
                     , "role": wp.wp_role
-                    , "discontinuity": wp.wp_type == "discontinuity"
+                    , "discontinuity": (wp.wp_type == "discontinuity" or wp.wp_type == "vectors")
                     });
                 }
                 return result;
