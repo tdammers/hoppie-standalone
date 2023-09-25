@@ -30,6 +30,7 @@ import Data.Proxy
 
 data NasalDecodeError
   = NasalUnexpected String String
+  | NasalMissingKey String
   deriving (Show)
 
 instance Exception NasalDecodeError where
@@ -147,6 +148,13 @@ class ToNasal a where
 class FromNasal a where
   fromNasal :: NasalValue -> Either NasalDecodeError a
 
+fromNasalField :: FromNasal a => Text -> NasalValue -> Either NasalDecodeError a
+fromNasalField key (NasalHash m) =
+  case Map.lookup key m of
+    Nothing -> Left $ NasalMissingKey (Text.unpack key)
+    Just n -> fromNasal n
+fromNasalField _ n = Left $ NasalUnexpected "hash" (show n)
+
 instance ToNasal NasalValue where
   toNasal = id
 
@@ -169,6 +177,13 @@ instance ToNasal () where
 instance FromNasal () where
   fromNasal NasalNil = pure ()
   fromNasal n = Left $ NasalUnexpected "nil" (show n)
+
+instance ToNasal Bool where
+  toNasal True = NasalInt 1
+  toNasal False = NasalInt 0
+instance FromNasal Bool where
+  fromNasal (NasalInt i) = pure (i /= 0)
+  fromNasal n = Left $ NasalUnexpected "integer" (show n)
 
 instance ToNasal Int where
   toNasal = NasalInt

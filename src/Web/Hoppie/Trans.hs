@@ -144,7 +144,7 @@ data WithMeta status a =
     , metaTimestamp :: !UTCTime
     , payload :: !a
     }
-    deriving (Show)
+    deriving (Show, Eq)
 
 data HoppieMessage
   = UplinkMessage (WithMeta UplinkStatus TypedMessage)

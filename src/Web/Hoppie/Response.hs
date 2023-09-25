@@ -58,7 +58,7 @@ data TypedMessage =
     , typedMessageCallsign :: ByteString
     , typedMessagePayload :: TypedPayload
     }
-    deriving (Show)
+    deriving (Show, Eq)
 
 typedPayloadTypeBS :: TypedPayload -> ByteString
 typedPayloadTypeBS (TelexPayload {}) = "TELEX"
@@ -73,7 +73,7 @@ data TypedPayload
   | CPDLCPayload !CPDLCMessage
   | UnsupportedPayload !MessageType !ByteString
   | ErrorPayload !(Maybe MessageType) !ByteString !String
-  deriving (Show)
+  deriving (Show, Eq)
 
 toTypedResponse :: Response -> [TypedMessage]
 toTypedResponse (Response msgs) = map toTypedUplink msgs

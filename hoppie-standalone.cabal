@@ -74,6 +74,7 @@ executable hoppie-mcdu
                  , Web.Hoppie.TUI.MCDU.Views.Status
                  , Web.Hoppie.TUI.MCDU.Views.Config
                  , Web.Hoppie.TUI.MCDU.Views.Messages
+                 , Web.Hoppie.TUI.MCDU.Views.FGFS
                  , Web.Hoppie.TUI.MCDU.HttpServer
                  , Web.Hoppie.TUI.MCDU.Main
                  , Paths_hoppie_standalone

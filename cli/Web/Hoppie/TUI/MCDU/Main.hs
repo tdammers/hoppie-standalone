@@ -15,6 +15,9 @@ mcduMain eventChan = do
   modify $ \s -> s { mcduResolveViewID = defResolveViewID }
   portMay <- gets mcduHttpPort
   when (isJust portMay) mcduStartHttpServer
+  fgfsHostMay <- gets mcduFlightgearHostname
+  fgfsPortMay <- gets mcduFlightgearPort
+  when (isJust fgfsHostMay && isJust fgfsPortMay) mcduConnectFlightgear
   loadView mainMenuView
   flushAll
   forever $ do
@@ -23,7 +26,7 @@ mcduMain eventChan = do
     evs <- liftIO . atomically $ do
       localMay <- do
         ev <- tryReadTChan eventChan
-        if headless then
+        if headless && ev /= Just TickEvent then
           return Nothing
         else
           return ev

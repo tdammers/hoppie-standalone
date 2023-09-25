@@ -9,6 +9,7 @@ where
 import qualified Web.Hoppie.CPDLC.Message as CPDLC
 import qualified Web.Hoppie.CPDLC.MessageTypes as CPDLC
 import Web.Hoppie.System
+import Web.Hoppie.FGFS.Connection
 import Web.Hoppie.TUI.Input
 import Web.Hoppie.TUI.MCDU.Draw
 import Web.Hoppie.TUI.MCDU.HttpServer
@@ -19,6 +20,7 @@ import Web.Hoppie.Telex
 import Web.Hoppie.TUI.MCDU.Views.Enum
 
 import Control.Applicative
+import Control.Concurrent.Async
 import Control.Concurrent.MVar
 import Control.Concurrent.STM
 import Control.Monad
@@ -50,7 +52,8 @@ data MCDUEvent
   | NetworkStatusEvent NetworkStatus
   | CurrentDataAuthorityEvent (Maybe ByteString)
   | LogEvent Text
-  deriving (Show)
+  | TickEvent
+  deriving (Show, Eq)
 
 data ScratchVal
   = ScratchEmpty
@@ -89,6 +92,8 @@ data MCDUState =
     , mcduHttpPort :: Maybe Int
     , mcduHttpServer :: Maybe MCDUHttpServer
 
+    , mcduFlightgearConnection :: Maybe FGFSConnection
+    , mcduFlightgearThread :: Maybe (Async ())
     , mcduFlightgearHostname :: Maybe String
     , mcduFlightgearPort :: Maybe Int
     }
@@ -125,6 +130,8 @@ defMCDUState =
     , mcduHttpPort = Nothing
     , mcduHttpServer = Nothing
 
+    , mcduFlightgearConnection = Nothing
+    , mcduFlightgearThread = Nothing
     , mcduFlightgearHostname = Nothing
     , mcduFlightgearPort = Nothing
     }
@@ -138,6 +145,7 @@ data MCDUView =
     , mcduViewNumPages :: Int
     , mcduViewGoToPage :: Int -> MCDU ()
     , mcduViewOnLoad :: MCDU ()
+    , mcduViewAutoReload :: Bool
     }
 
 defView :: MCDUView
@@ -149,6 +157,7 @@ defView = MCDUView
   , mcduViewNumPages = 1
   , mcduViewGoToPage = defGoToPage
   , mcduViewOnLoad = return ()
+  , mcduViewAutoReload = False
   }
 
 defGoToPage :: Int -> MCDU ()
@@ -612,6 +621,53 @@ mcduStopHttpServer = do
     liftIO $ stopHttpServer server
     modify $ \s -> s { mcduHttpServer = Nothing }
 
+mcduConnectFlightgear :: MCDU ()
+mcduConnectFlightgear = do
+  fgthread <- gets mcduFlightgearThread
+  fghostMay <- gets mcduFlightgearHostname
+  fgportMay <- gets mcduFlightgearPort
+  case (fgthread, fghostMay, fgportMay) of
+    (Nothing, Just fghost, Just fgport) -> do
+      debugPrint . colorize blue $
+        "Connecting to FlightGear on " <> Text.pack fghost <> ":" <> Text.pack (show fgport)
+      connVar <- liftIO newEmptyMVar
+      fgfsThread <- liftIO . async $ do
+        withFGFSConnection fghost fgport $ \fgconn -> forever $ do
+          putMVar connVar fgconn
+      fgconn <- liftIO $ takeMVar connVar
+      modify $ \s -> s
+        { mcduFlightgearConnection = Just fgconn
+        , mcduFlightgearThread = Just fgfsThread
+        }
+      debugPrint . colorize green $
+        "Connected to FlightGear on " <> Text.pack fghost <> ":" <> Text.pack (show fgport)
+    (Just _, _, _) -> do
+      scratchWarn "FGFS ALREADY CONN"
+    _ -> do
+      scratchWarn "FGFS NO CONFIG"
+
+mcduDisconnectFlightgear :: MCDU ()
+mcduDisconnectFlightgear = do
+  gets mcduFlightgearThread >>= \case
+    Nothing ->
+      return ()
+    Just thread -> do
+      liftIO $ cancel thread
+      modify $ \s -> s
+        { mcduFlightgearConnection = Nothing
+        , mcduFlightgearThread = Nothing
+        }
+      debugPrint . colorize magenta $
+        "Disconnected from FlightGear"
+
+mcduWithFGFS :: (FGFSConnection -> MCDU ()) -> MCDU ()
+mcduWithFGFS action = do
+  gets mcduFlightgearConnection >>= \case
+    Nothing -> do
+      scratchWarn "NO FGFS CONNECTION"
+    Just conn ->
+      action conn
+
 debugPrint :: Colored Text -> MCDU ()
 debugPrint str = do
   modify $ \s -> s
@@ -676,7 +732,10 @@ handleMCDUEvent mainMenuView dlkMenuView atcMenuView ev = do
             return ()
       modify $ \s -> s { mcduNetworkStatus = ns' }
       reloadView
-      
+
+    TickEvent -> do
+      autoReload <- gets (mcduViewAutoReload . mcduView)
+      when autoReload reloadView
 
     DownlinkEvent mtm -> do
       debugPrint $ colorize cyan $ wordJoin
