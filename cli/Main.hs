@@ -2,10 +2,12 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE DataKinds #-}
 
 module Main where
 
 import Web.Hoppie.FGFS.Connection
+import Web.Hoppie.FGFS.NasalValue
 import Web.Hoppie.System
 import Web.Hoppie.TUI.Input
 import Web.Hoppie.TUI.MCDU
@@ -408,7 +410,10 @@ runInputTest = do
 runFGFSTest :: IO ()
 runFGFSTest = do
   withFGFSConnection "localhost" 10000 $ \conn -> do
-    putStrLn "Get SID"
+    (flightplan :: NasalGhost "flightplan") <- runNasal conn "return flightplan();"
+    print flightplan
+    print (encodeNasal flightplan)
+    runNasal_ conn $ "debug.dump(" <> encodeNasal flightplan <> "); return nil"
     sidMay <- runNasal conn
       [s| var fp = flightplan();
           if (fp.sid == nil)
@@ -416,7 +421,6 @@ runFGFSTest = do
           else
             return fp.sid.id;
         |]
-    putStrLn "Get STAR"
     starMay <- runNasal conn
       [s| var fp = flightplan();
           if (fp.star == nil)
@@ -424,22 +428,38 @@ runFGFSTest = do
           else
             return fp.star.id;
         |]
-    putStrLn "Get waypoints"
     waypoints <- runNasal conn
       [s| var fp = flightplan();
           var result = [];
           for (var i = 0; i < fp.getPlanSize(); i += 1) {
             var wp = fp.getWP(i);
-            append(result, [wp.wp_name, wp.wp_role]);
+            var parent_id = nil;
+            if (wp.wp_parent != nil)
+              parent_id = wp.wp_parent.id;
+            append(result, [wp.wp_name, wp.wp_role, parent_id]);
           }
           return result;
         |]
-    forM_ (sidMay :: Maybe Text) $ \sid -> do
-      printf "SID: %s\n" sid
-    forM_ (starMay :: Maybe Text) $ \star -> do
-      printf "STAR: %s\n" star
-    putStrLn ""
-    forM_ (waypoints :: [(Text, Maybe Text)]) $ \(wp_name, wp_role) -> do
-      printf "%-10s %s\n"
-        wp_name
-        (fromMaybe "-" wp_role)
+    currentWP <- runNasal conn
+      [s| var fp = flightplan();
+          if (fp == nil)
+            return nil;
+          else
+            return fp.current;
+        |]
+    printf "SID: %s\n" (fromMaybe "n/a" sidMay :: Text)
+    printf "STAR: %s\n" (fromMaybe "n/a" starMay :: Text)
+    putStrLn "WAYPOINTS:"
+    zipWithM_
+        (\i (wp_name, wp_role, wp_parent_id) -> do
+          printf "%s %3i %-10s %-8s %s\n"
+            (if Just i == currentWP then "*" else " " :: Text)
+            i
+            wp_name
+            (fromMaybe "-" wp_role)
+            (fromMaybe "-" wp_parent_id)
+        )
+        ([0,1..] :: [Int]) (waypoints :: [(Text, Maybe Text, Maybe Text)])
+    when (null waypoints) $ do
+      putStrLn "--- NO WAYPOINTS ---"
+    runNasal_ conn "debug.dump(refTable);"
