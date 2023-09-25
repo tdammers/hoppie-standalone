@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -Wno-unused-imports #-}
+
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -8,7 +10,7 @@ module Web.Hoppie.FGFS.NasalValue
 where
 
 import Control.Applicative
-import Data.Aeson (ToJSON (..), FromJSON (..), (.:?))
+import Data.Aeson (ToJSON (..), FromJSON (..), (.:), (.:?))
 import qualified Data.Aeson as JSON
 import Data.Map (Map)
 import Data.Scientific (floatingOrInteger)
@@ -18,6 +20,7 @@ import Data.Vector (Vector)
 import qualified Data.Vector as Vector
 import Text.Printf
 import Control.Exception
+import Debug.Trace
 
 data NasalDecodeError
   = NasalUnexpected String String
@@ -79,8 +82,11 @@ instance FromJSON NasalError where
 instance FromJSON NasalValueOrError where
   parseJSON = JSON.withObject "NasalValueOrError" $ \obj -> do
     errMay <- fmap NasalError <$> obj .:? "error"
-    valMay <- fmap NasalValue <$> obj .:? "value"
-    maybe (fail "Invalid nasal") return $ errMay <|> valMay
+    case errMay of
+      Just err ->
+        return err
+      Nothing -> do
+        NasalValue <$> (parseJSON =<< obj .: "value")
 
 class FromNasal a where
   fromNasal :: NasalValue -> Either NasalDecodeError a
