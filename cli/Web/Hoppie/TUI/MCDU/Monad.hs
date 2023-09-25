@@ -16,6 +16,7 @@ import Web.Hoppie.TUI.Output
 import Web.Hoppie.TUI.QR
 import Web.Hoppie.TUI.StringUtil
 import Web.Hoppie.Telex
+import Web.Hoppie.TUI.MCDU.Views.Enum
 
 import Control.Applicative
 import Control.Concurrent.MVar
@@ -63,6 +64,7 @@ data MCDUState =
     , mcduScratchMessage :: Maybe ByteString
     , mcduScreenBuffer :: MCDUScreenBuffer
     , mcduView :: MCDUView
+    , mcduResolveViewID :: ViewID -> MCDUView
 
     , mcduUnreadDLK :: Maybe Word
     , mcduUnreadCPDLC :: Maybe Word
@@ -98,6 +100,7 @@ defMCDUState =
     , mcduScratchMessage = Nothing
     , mcduScreenBuffer = emptyMCDUScreenBuffer
     , mcduView = defView
+    , mcduResolveViewID = const defView
 
     , mcduUnreadDLK = Nothing
     , mcduUnreadCPDLC = Nothing
@@ -518,6 +521,15 @@ scratchClearWarn :: MCDU ()
 scratchClearWarn = do
   modify $ \s -> s { mcduScratchMessage = Nothing }
   redrawScratch
+
+loadViewByID :: ViewID -> MCDU ()
+loadViewByID viewID = do
+  loadView =<< resolveViewID viewID
+
+resolveViewID :: ViewID -> MCDU MCDUView
+resolveViewID viewID = do
+  resolver <- gets mcduResolveViewID
+  return $ resolver viewID
 
 loadView :: MCDUView -> MCDU ()
 loadView view = do

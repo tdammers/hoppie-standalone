@@ -408,6 +408,7 @@ runInputTest = do
 runFGFSTest :: IO ()
 runFGFSTest = do
   withFGFSConnection "localhost" 10000 $ \conn -> do
+    putStrLn "Get SID"
     sidMay <- runNasal conn
       [s| var fp = flightplan();
           if (fp.sid == nil)
@@ -415,6 +416,7 @@ runFGFSTest = do
           else
             return fp.sid.id;
         |]
+    putStrLn "Get STAR"
     starMay <- runNasal conn
       [s| var fp = flightplan();
           if (fp.star == nil)
@@ -422,6 +424,7 @@ runFGFSTest = do
           else
             return fp.star.id;
         |]
+    putStrLn "Get waypoints"
     waypoints <- runNasal conn
       [s| var fp = flightplan();
           var result = [];

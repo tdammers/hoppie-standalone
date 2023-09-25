@@ -12,6 +12,7 @@ import Web.Hoppie.TUI.MCDU.Views
 
 mcduMain :: TChan MCDUEvent -> MCDU ()
 mcduMain eventChan = do
+  modify $ \s -> s { mcduResolveViewID = defResolveViewID }
   portMay <- gets mcduHttpPort
   when (isJust portMay) mcduStartHttpServer
   loadView mainMenuView
