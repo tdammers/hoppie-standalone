@@ -68,6 +68,12 @@ executable hoppie-mcdu
                  , Web.Hoppie.TUI.MCDU.Draw
                  , Web.Hoppie.TUI.MCDU.Monad
                  , Web.Hoppie.TUI.MCDU.Views
+                 , Web.Hoppie.TUI.MCDU.Views.Enum
+                 , Web.Hoppie.TUI.MCDU.Views.Common
+                 , Web.Hoppie.TUI.MCDU.Views.MainMenu
+                 , Web.Hoppie.TUI.MCDU.Views.Status
+                 , Web.Hoppie.TUI.MCDU.Views.Config
+                 , Web.Hoppie.TUI.MCDU.Views.Messages
                  , Web.Hoppie.TUI.MCDU.HttpServer
                  , Web.Hoppie.TUI.MCDU.Main
                  , Paths_hoppie_standalone
