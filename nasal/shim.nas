@@ -1,8 +1,66 @@
 (func {
-    var jsonEncode = func (val) {
+    var refTable = {};
+
+    var registerRef = func (val) {
+        if (contains(refTable, id(val))) {
+            refTable[id(val)].refcount += 1;
+        }
+        else {
+            refTable[id(val)] =
+                { value: val
+                , refcount: 1
+                }
+        }
+    };
+
+    var releaseRef = func (ident) {
+        if (contains(refTable, ident)) {
+            refTable[ident].refcount -= 1;
+            if (refTable[ident].refcount <= 0) {
+                delete(refTable, ident);
+            }
+        }
+    };
+
+    var deref = func (ref) {
+        if (!contains(ref, '__reftype__'))
+            return nil;
+        if (!contains(ref, '__refid__'))
+            return nil;
+        var refid = ref['__refid__'];
+        if (!contains(refTable, refid))
+            return nil;
+        return refTable[refid].value;
+    };
+
+    var grabRef = func (ident) {
+        if (contains(refTable, ident)) {
+            refTable[ident].refcount += 1;
+            return refTable[ident].value;
+        }
+        else
+            return nil;
+    };
+
+    var jsonEncode = func (val, register=1) {
         var ty = typeof(val);
         var encoded = 'null';
-        if (ty == 'scalar') {
+        if (ty == 'ghost') {
+            if (register) registerRef(val);
+            encoded = jsonEncode({
+                            '__reftype__': 'ghost',
+                            '__refid__': id(val),
+                            '__ghosttype__': ghosttype(val)
+                        });
+        }
+        elsif (ty == 'func') {
+            if (register) registerRef(val);
+            encoded = jsonEncode({
+                            '__reftype__': 'func',
+                            '__refid__': id(val),
+                        });
+        }
+        elsif (ty == 'scalar') {
             if (isint(val)) {
                 ty = 'int';
                 return sprintf('%i', val);
@@ -57,14 +115,20 @@
         return '"' ~ encoded ~ '"';
     };
 
+    # Uniquely identifies each individual call, so that the output property is
+    # guaranteed to change when we write to it, even if the output value itself
+    # is the same as the last one.
+    var callCounter = 0;
+
     var runScript = func (outputPath, f) {
+        callCounter += 1;
         var err = [];
-        var value = call(f, [], me, globals.hoppieStandaloneShim, err);
+        var value = call(f, [], nil, globals.hoppieStandaloneShim, err);
         if (size(err) > 0) {
-            result = { "error": err };
+            result = { "error": err, "num": callCounter };
         }
         else {
-            result = { "value": value };
+            result = { "value": value, "num": callCounter };
         }
         setprop(outputPath, jsonEncode(result));
 
@@ -81,5 +145,7 @@
     globals.hoppieStandaloneShim = {
         "jsonEncode": jsonEncode,
         "runScript": runScript,
+        "deref": deref,
+        "refTable": refTable,
     };
 })();

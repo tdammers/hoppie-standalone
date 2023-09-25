@@ -53,7 +53,9 @@ withFGFSConnection host0 port action = do
                   disconnect
                   action
             runReader = forever $ do
-                WS.receiveData wsConn >>= atomically . writeTChan outputChan
+                value <- WS.receiveData wsConn
+                -- print value
+                atomically . writeTChan outputChan $ value
         snd <$> concurrently runReader runSender 
   where
 
@@ -63,10 +65,10 @@ withFGFSConnection host0 port action = do
 
       -- Load our shim
       shimSrc <- Text.readFile =<< getDataFileName "nasal/shim.nas"
-      runNasal_ conn shimSrc
+      runNasalVoid conn shimSrc
 
       -- Create the output property we use to get Nasal values back out of FGFS
-      runNasal_ conn $ "setprop(\"" <> Text.pack path <> "\", '');"
+      runNasalVoid conn $ "setprop(\"" <> Text.pack path <> "\", '');"
       WS.sendBinaryData wsConn . JSON.encode $
         JSON.object
           [ "command" .= ("addListener" :: Text)
@@ -83,7 +85,7 @@ withFGFSConnection host0 port action = do
           , "node" .= path
           ]
       -- -- This will crash FG:
-      -- runNasal_ conn $
+      -- runNasalVoid conn $
       --     "(func () { " <>
       --     "    var p = props.globals.getNode(\"" <> Text.pack path <> "\");" <>
       --     "    if (p != nil) p.remove();" <>
@@ -143,9 +145,14 @@ nasalCommand :: Text -> FGCommand
 nasalCommand script =
   mkCommand "nasal" [ ("script", script) ]
 
-runNasal_ :: FGFSConnection -> Text -> IO ()
-runNasal_ conn script =
+runNasalVoid :: FGFSConnection -> Text -> IO ()
+runNasalVoid conn script =
   runFGCommand conn (nasalCommand script)
+
+runNasal_ :: FGFSConnection -> Text -> IO ()
+runNasal_ conn script = do
+  (_ :: NasalValue) <- runNasal conn script
+  return ()
 
 runNasal :: FromNasal a => FGFSConnection -> Text -> IO a
 runNasal conn script = do
@@ -164,7 +171,7 @@ runNasalOrError conn script = do
   let script' =
         "hoppieStandaloneShim.runScript('" <>
           Text.pack (fgfsOutputPropertyPath conn) <> "', func {" <> script <> "});"
-  runNasal_ conn script'
+  runNasalVoid conn script'
   getFGOutput conn
 
 runFGCommandRaw :: String -> FGCommand -> IO ()
