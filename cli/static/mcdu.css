@@ -119,10 +119,12 @@ button {
 }
 
 button:active {
+    /*
     padding-left: 0.55rem;
     padding-right: 0.45rem;
     padding-top: 0.2rem;
     padding-bottom: 0.0rem;
+    */
     border-color: black black black black;
     box-shadow: inset 2px 2px 4px black
               , 0.05rem 0.05rem 0.1rem white;

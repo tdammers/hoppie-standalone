@@ -8,4 +8,5 @@ data ViewID
   | MessageView Word
   | DLKMenuView
   | ATCMenuView
+  | FPLView
   deriving (Show, Eq, Ord)

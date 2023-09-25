@@ -15,6 +15,7 @@ import Web.Hoppie.TUI.StringUtil
 import Web.Hoppie.Telex
 
 import Control.Applicative
+import Control.Concurrent
 import Control.Concurrent.Async (race_)
 import Control.Concurrent.STM
 import Control.Exception
@@ -306,6 +307,8 @@ main = do
     `race_`
     runInputPusher inputChan eventChan
     `race_`
+    runTickTimer eventChan
+    `race_`
     runSystem
       (BS8.pack callsign)
       config
@@ -317,6 +320,11 @@ runInputPusher inputChan eventChan = do
   kcl <- loadKeyCodes
   forever $ do
     readCommand kcl inputChan >>= atomically . writeTChan eventChan . InputCommandEvent
+
+runTickTimer :: TChan MCDUEvent -> IO ()
+runTickTimer eventChan = liftIO . forever $ do
+  atomically . writeTChan eventChan $ TickEvent
+  threadDelay 1000000
 
 handleUplink :: TChan MCDUEvent -> WithMeta UplinkStatus TypedMessage -> Hoppie ()
 handleUplink eventChan = do

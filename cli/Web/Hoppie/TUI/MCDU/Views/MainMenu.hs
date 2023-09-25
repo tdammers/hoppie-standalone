@@ -27,7 +27,7 @@ mainMenuView = defView
       modifyView $ \v -> v
         { mcduViewLSKBindings = Map.fromList $ case curPage of
             0 ->
-              [ (0, ("FPL", return () {- TODO -} )) | fgfsEnabled ] ++
+              [ (0, ("FPL", loadViewByID FPLView )) | fgfsEnabled ] ++
               [ (5, ("DLK", loadViewByID DLKMenuView))
               , (6, ("ATC", loadViewByID ATCMenuView))
               ]
