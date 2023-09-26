@@ -120,15 +120,22 @@
     # is the same as the last one.
     var callCounter = 0;
 
-    var runScript = func (outputPath, f) {
-        callCounter += 1;
+    var runScript = func (outputPath, script) {
         var err = [];
-        var value = call(f, [], nil, globals.hoppieStandaloneShim, err);
+        callCounter += 1;
+
+        var f = call(func { compile(script, 'websocket'); }, nil, nil, err);
         if (size(err) > 0) {
             result = { "error": err, "num": callCounter };
         }
         else {
-            result = { "value": value, "num": callCounter };
+            var value = call(f, [], me, globals.hoppieStandaloneShim, err);
+            if (size(err) > 0) {
+                result = { "error": err, "num": callCounter };
+            }
+            else {
+                result = { "value": value, "num": callCounter };
+            }
         }
         setprop(outputPath, jsonEncode(result));
 

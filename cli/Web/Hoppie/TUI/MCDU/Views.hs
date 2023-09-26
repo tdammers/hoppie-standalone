@@ -21,3 +21,4 @@ defResolveViewID (MessageView uid) = messageView uid
 defResolveViewID DLKMenuView = dlkMenuView
 defResolveViewID ATCMenuView = atcMenuView
 defResolveViewID FPLView = fplView
+defResolveViewID RTEView = rteView

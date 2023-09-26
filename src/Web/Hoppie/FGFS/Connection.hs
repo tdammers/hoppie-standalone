@@ -170,7 +170,7 @@ runNasalOrError :: FGFSConnection -> Text -> IO NasalValueOrError
 runNasalOrError conn script = do
   let script' =
         "hoppieStandaloneShim.runScript('" <>
-          Text.pack (fgfsOutputPropertyPath conn) <> "', func {" <> script <> "});"
+          Text.pack (fgfsOutputPropertyPath conn) <> "', " <> encodeNasal script <> ");"
   runNasalVoid conn script'
   getFGOutput conn
 
