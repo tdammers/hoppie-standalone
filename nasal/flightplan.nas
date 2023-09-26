@@ -42,26 +42,36 @@ var getUTCMinutes = func {
 };
 
 var getFlightplanLegs = func {
+    var acpos = geo.aircraft_position();
     var fp = fms.getVisibleFlightplan();
     var result = [];
+    var distanceRemaining = 0;
     for (var i = 0; i < fp.getPlanSize(); i += 1) {
-      var wp = fp.getWP(i);
-      var parent_id = nil;
-      if (wp.wp_parent != nil)
-        parent_id = wp.wp_parent.id;
-      append(result,
-        { "name": wp.wp_name
-        , "heading": wp.leg_bearing
-        , "leg_dist": wp.leg_distance
-        , "route_dist": wp.distance_along_route
-        , "speed": wp.speed_cstr
-        , "speed_type": wp.speed_cstr_type
-        , "alt": wp.alt_cstr
-        , "alt_type": wp.alt_cstr_type
-        , "parent": parent_id
-        , "role": wp.wp_role
-        , "discontinuity": (wp.wp_type == "discontinuity" or wp.wp_type == "vectors")
-        });
+        var wp = fp.getWP(i);
+        var parent_id = nil;
+        if (wp.wp_parent != nil)
+            parent_id = wp.wp_parent.id;
+        if (i == fp.current) {
+            (course, dist) = wp.courseAndDistanceFrom(acpos);
+            distanceRemaining += dist;
+        }
+        elsif (i > fp.current) {
+            distanceRemaining += wp.leg_distance;
+        }
+        append(result,
+                { "name": wp.wp_name
+                , "heading": wp.leg_bearing
+                , "leg_dist": wp.leg_distance
+                , "route_dist": wp.distance_along_route
+                , "remaining_dist": distanceRemaining
+                , "speed": wp.speed_cstr
+                , "speed_type": wp.speed_cstr_type
+                , "alt": wp.alt_cstr
+                , "alt_type": wp.alt_cstr_type
+                , "parent": parent_id
+                , "role": wp.wp_role
+                , "discontinuity": (wp.wp_type == "discontinuity" or wp.wp_type == "vectors")
+                });
     }
     return result;
 };
