@@ -205,16 +205,12 @@ fplViewLoad = withFGView $ \conn -> do
           (\n leg -> do
             let isCurrent = n + legsDropped == 1
                 isPrevious = n + legsDropped == 0
-                color = if isPrevious then
-                          yellow
-                        else if isCurrent then
-                          magenta
-                        else if legIsDiscontinuity leg then
-                          white
-                        else if (legRole leg == Just "missed") then
-                          cyan
-                        else
-                          green
+                color
+                  | isPrevious = yellow
+                  | isCurrent = magenta
+                  | legIsDiscontinuity leg = white
+                  | legRole leg == Just "missed" = cyan
+                  | otherwise = green
             forM_ (legRemainingDist leg) $ \dist -> do
               when (groundspeed > 40) $ do
                 let eta = utcMinutes + dist / groundspeed * 60
