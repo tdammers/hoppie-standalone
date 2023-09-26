@@ -12,7 +12,10 @@ import Web.Hoppie.TUI.MCDU.Views
 
 mcduMain :: TChan MCDUEvent -> MCDU ()
 mcduMain eventChan = do
-  modify $ \s -> s { mcduResolveViewID = defResolveViewID }
+  modify $ \s -> s
+    { mcduResolveViewID = defResolveViewID
+    , mcduEventChan = Just eventChan
+    }
   portMay <- gets mcduHttpPort
   when (isJust portMay) mcduStartHttpServer
   fgfsHostMay <- gets mcduFlightgearHostname
@@ -26,10 +29,9 @@ mcduMain eventChan = do
     evs <- liftIO . atomically $ do
       localMay <- do
         ev <- tryReadTChan eventChan
-        if headless && ev /= Just TickEvent then
-          return Nothing
-        else
-          return ev
+        case (headless, ev) of
+          (True, Just InputCommandEvent {}) -> return Nothing
+          _ -> return ev
       webMay <- case serverMay of
         Nothing ->
           return Nothing
