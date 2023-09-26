@@ -131,12 +131,12 @@
 
         var f = call(func { compile(script, 'websocket'); }, nil, nil, err);
         if (size(err) > 0) {
-            result = { "error": err, "num": callCounter };
+            result = { "error": err, "num": callCounter, "caller": caller() };
         }
         else {
             var value = call(f, [], me, globals.externalMCDU, err);
             if (size(err) > 0) {
-                result = { "error": err, "num": callCounter };
+                result = { "error": err, "num": callCounter, "caller": caller() };
             }
             else {
                 result = { "value": value, "num": callCounter };

@@ -250,8 +250,8 @@ instance FromJSON a => FromJSON (PropResponse a) where
       <*> obj .: "index"
       <*> obj .: "nChildren"
 
-newtype PropJSONError =
-  PropJSONDecodeError String
+data PropJSONError =
+  PropJSONDecodeError !String !String
   deriving (Show)
 
 instance Exception PropJSONError where
@@ -263,13 +263,13 @@ getFGProp conn path = do
   httpRq <- HTTP.parseRequest rqURL
   rp <- HTTP.httpBS httpRq
   let raw = HTTP.getResponseBody rp
-  let parsed = either (throw . PropJSONDecodeError) id $ JSON.eitherDecodeStrict raw :: PropResponse a
+  let parsed = either (throw . PropJSONDecodeError (Text.unpack $ decodeUtf8 raw)) id $ JSON.eitherDecodeStrict raw :: PropResponse a
   return $ propResponseValue parsed
 
 getFGOutput :: forall a. FromJSON a => FGFSConnection -> IO a
 getFGOutput conn =
   race catchFailed go >>= \case
-    Left () -> throw $ PropJSONDecodeError "Connection closed"
+    Left () -> throw $ PropJSONDecodeError "<EOF>" "Connection closed"
     Right x -> return x
   where
     catchFailed = do
@@ -277,8 +277,10 @@ getFGOutput conn =
 
     go = do
       rawResponse <- atomically $ readTChan $ fgfsOutputChan conn
-      case JSON.decodeStrict rawResponse of
-        Nothing ->
-          throw $ PropJSONDecodeError $ Text.unpack (decodeUtf8 rawResponse)
-        Just r -> do
+      case JSON.eitherDecodeStrict rawResponse of
+        Left err ->
+          throw $ PropJSONDecodeError
+            (Text.unpack (decodeUtf8 rawResponse))
+            err
+        Right r -> do
           return $ propResponseValue r

@@ -140,10 +140,16 @@ withFGNasalDef defval action = do
             handleError "SERVER ERROR" . Just $
               "Nasal value error: map key " <> key <> "missing"
       , MCDUHandler $ \case
-          NasalRuntimeError msg fileMay lineMay -> do
+          NasalRuntimeError msg stackTrace -> do
             handleError "SERVER ERROR" . Just $
-                "Nasal runtime error:" <> fromMaybe "?" fileMay <> ":" <> maybe "-" show lineMay <> "\n" <>
-                msg
+                "Nasal runtime error:" <> msg <> "\n" <>
+                unlines
+                  [ fromMaybe "?" fileMay <> ":" <> maybe "-" show lineMay
+                  | (fileMay, lineMay) <- stackTrace
+                  ]
+      , MCDUHandler $ \case
+          PropJSONDecodeError raw err -> do
+            handleError "JSON ERROR" . Just $ "JSON decoder error: " <> err <> "\n" <> raw
       , MCDUHandler $ \(e :: SomeException) -> do
             handleError "ERROR" . Just $ "Error:\n" <> show e
       ]
@@ -151,6 +157,9 @@ withFGNasalDef defval action = do
 
 fgCallNasal :: forall a r. (ToNasal a, FromNasal r, Monoid r) => Text -> a -> MCDU r
 fgCallNasal = fgCallNasalDef mempty
+
+fgCallNasalBool :: forall a. (ToNasal a) => Text -> a -> MCDU Bool
+fgCallNasalBool = fgCallNasalDef False
 
 fgCallNasalDef :: forall a r. (ToNasal a, FromNasal r) => r -> Text -> a -> MCDU r
 fgCallNasalDef defval func args =
@@ -440,11 +449,14 @@ withFGView go = do
               "Nasal value error: map key " <> key <> "missing"
             fgErrorView "SERVER ERROR"
       , MCDUHandler $ \case
-          NasalRuntimeError msg fileMay lineMay -> do
+          NasalRuntimeError msg stackTrace -> do
             debugPrint $
               colorize red . Text.pack $
-                "Nasal runtime error:" <> fromMaybe "?" fileMay <> ":" <> maybe "-" show lineMay <> "\n" <>
-                msg
+                "Nasal runtime error:" <> msg <> "\n" <>
+                unlines
+                  [ fromMaybe "?" fileMay <> ":" <> maybe "-" show lineMay
+                  | (fileMay, lineMay) <- stackTrace
+                  ]
             fgErrorView "SERVER ERROR"
       , MCDUHandler $ \(e :: SomeException) -> do
             debugPrint $
@@ -453,126 +465,74 @@ withFGView go = do
             fgErrorView "ERROR"
       ]
 
-setDepartureRunway :: Maybe ByteString -> MCDU Bool
-setDepartureRunway Nothing = do
-  fgRunNasalBool
-    [s| var departureAirport = flightplan().departure;
-        flightplan().departure = nil;
-        flightplan().departure = departureAirport;
-        return 1;
-      |]
-setDepartureRunway (Just rwyID) = do
-  fgRunNasalBool $
-    "var runwayID = " <> encodeNasal (decodeUtf8 rwyID) <> ";\n" <>
-    [s| var departure = flightplan().departure;
-        if (departure == nil) return 0;
-        var runway = departure.runways[runwayID];
-        if (runway == nil) return 0;
-        flightplan().departure_runway = runway;
-        return 1;
-      |]
-
-selectDepartureRunway :: MCDU ()
-selectDepartureRunway = do
-  runwaysMay <- fgRunNasal
-    [s| var runways = flightplan().departure.runways;
-        return keys(runways);
-      |]
-  case runwaysMay of
+selectWith :: Text
+           -> ByteString
+           -> ByteString
+           -> (ByteString -> MCDU Bool)
+           -> ByteString
+           -> MCDUView
+           -> MCDU ()
+selectWith nasalFunc selectTitle warnMsg handleValue returnTitle returnView = do
+  itemsMay <- fgCallNasal nasalFunc ()
+  case itemsMay of
     [] -> do
-      scratchWarn "NO RUNWAYS"
-    runways -> do
-      let handleResult Nothing = loadView departureView
-          handleResult (Just rwy) = do
-            setDepartureRunway (Just rwy) >>= \case
+      scratchWarn warnMsg
+    items -> do
+      let handleResult Nothing = loadView returnView
+          handleResult (Just item) = do
+            handleValue item >>= \case
               True ->
-                loadView departureView
+                loadView returnView
               False -> do
                 return ()
-      loadView (selectView "SELECT RUNWAY" runways "DEPARTURE" handleResult)
-    
+      loadView (selectView ("SELECT " <> selectTitle) items returnTitle handleResult)
+
+setDepartureRunway :: Maybe ByteString -> MCDU Bool
+setDepartureRunway rwyID =
+  fgCallNasalBool "fms.setDepartureRunway" [rwyID]
 
 getDepartureRunway :: MCDU (Maybe ByteString)
-getDepartureRunway = do
-  fgRunNasal
-    [s| var fp = flightplan();
-        var rwyID = ((fp.departure_runway == nil) ? nil : fp.departure_runway.id);
-        return rwyID
-      |]
+getDepartureRunway =
+  fgCallNasal "fms.getDepartureRunway" ()
+
+selectDepartureRunway :: MCDU ()
+selectDepartureRunway =
+  selectWith
+    "fms.listDepartureRunways"
+    "RUNWAY"
+    "NO RUNWAYS"
+    (setDepartureRunway . Just)
+    "DEPARTURE"
+    departureView
+
+warnOrSucceed :: Maybe ByteString -> MCDU Bool
+warnOrSucceed Nothing = return True
+warnOrSucceed (Just e) = do
+  scratchWarn e
+  return False
 
 setSID :: Maybe ByteString -> MCDU Bool
-setSID Nothing = do
-  fgRunNasalBool
-    [s| flightplan().sid = nil;
-        return 1;
-      |]
-setSID (Just sidID) = do
-  err <- fgRunNasal $
-    "var sidID = " <> encodeNasal (decodeUtf8 sidID) <> ";\n" <>
-    [s| var departure = flightplan().departure;
-        if (departure == nil) return "NO DEPARTURE";
-        var sid = departure.getSid(sidID);
-        if (sid == nil) return "INVALID";
-        flightplan().sid = sid;
-        runways = flightplan().sid.runways;
-        if (size(runways) == 1) {
-          var runway = departure.runways[runways[0]];
-          if (runway == nil) {
-            return "INVALID RWY";
-          }
-          flightplan().departure_runway = runway;
-        }
-        elsif (size(runways) > 1) {
-          var runway = flightplan().departure_runway;
-          if (runway != nil and !contains(runways, runway.id)) {
-            flightplan().departure = nil;
-            flightplan().departure = departure;
-          }
-        }
-        return nil;
-      |]
-  case err of
-    Nothing ->
-      return True
-    Just e -> do
-      scratchWarn e
-      return False
+setSID sidID = do
+  fgCallNasal "fms.setSID" [sidID] >>= warnOrSucceed
 
 selectSID :: MCDU ()
-selectSID = do
-  availableSIDs <- fgRunNasal
-    [s| var departure = flightplan().departure;
-        if (departure == nil) return [];
-        var runway = flightplan().departure_runway;
-        if (runway == nil)
-          return departure.sids()
-        else
-          return departure.sids(runway.id);
-      |]
-  case availableSIDs of
-    [] ->
-      scratchWarn "NO SIDS"
-    sids -> do
-      let handleResult Nothing = loadView departureView
-          handleResult (Just sid) = do
-            setSID (Just sid) >>= \case
-              True ->
-                loadView departureView
-              False -> do
-                return ()
-      loadView (selectView "SELECT SID" sids "DEPARTURE" handleResult)
+selectSID =
+  selectWith
+    "fms.listSIDs"
+    "SID"
+    "NO SIDS"
+    (setSID . Just)
+    "DEPARTURE"
+    departureView
+
 
 getSID :: MCDU (Maybe ByteString)
-getSID = do
-  fgRunNasal
-    [s| var fp = flightplan();
-        return ((fp.sid == nil) ? nil : fp.sid.id);
-      |]
+getSID = fgCallNasal "fms.getSID" ()
 
 setSidTransition :: Maybe ByteString -> MCDU Bool
 setSidTransition Nothing = do
   fgRunNasalBool
-    [s| flightplan().transition = nil;
+    [s| flightplan().sid_trans = nil;
         return 1;
       |]
 setSidTransition (Just transitionID) = do
