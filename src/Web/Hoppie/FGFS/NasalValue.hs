@@ -16,6 +16,7 @@ import Control.Applicative
 import Control.Exception
 import Data.Aeson (ToJSON (..), FromJSON (..), (.:), (.:?), (.=) )
 import qualified Data.Aeson as JSON
+import qualified Data.Aeson.Types as JSON
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Proxy
@@ -124,17 +125,32 @@ data NasalValueOrError
 data NasalError =
   NasalRuntimeError
     { nasalRuntimeErrorMessage :: String
-    , nasalRuntimeErrorSourceFile :: Maybe FilePath
-    , nasalRuntimeErrorSourceLine :: Maybe Int
+    , nasalRuntimeErrorStackTrace :: [(Maybe String, Maybe Int)]
     }
     deriving (Show, Eq)
 
 instance Exception NasalError where
 
 instance FromJSON NasalError where
+  parseJSON j@(JSON.Array v) = do
+    case Vector.toList v of
+      (x:xs) -> do
+        err <- parseJSON x
+        stackTrace <- parseStackTrace xs
+        return $ NasalRuntimeError err stackTrace
+      _ -> JSON.typeMismatch "non-empty Array" j
+    where
+      parseStackTrace [] =
+        pure []
+      parseStackTrace [_] =
+        JSON.typeMismatch "uneven-sized Array" j
+      parseStackTrace (x:y:xs) = do
+        src <- parseJSON x
+        l <- parseJSON y
+        r <- parseStackTrace xs
+        return $ (src, l):r
   parseJSON j = do
-    (err, sourceMay, lineMay) <- parseJSON j
-    return $ NasalRuntimeError err sourceMay lineMay
+    JSON.typeMismatch "non-empty Array" j
 
 instance FromJSON NasalValueOrError where
   parseJSON = JSON.withObject "NasalValueOrError" $ \obj -> do
