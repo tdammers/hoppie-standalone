@@ -13,20 +13,23 @@ module Web.Hoppie.FGFS.NasalValue
 where
 
 import Control.Applicative
+import Control.Exception
 import Data.Aeson (ToJSON (..), FromJSON (..), (.:), (.:?), (.=) )
 import qualified Data.Aeson as JSON
 import Data.Map (Map)
 import qualified Data.Map as Map
+import Data.Proxy
 import Data.Scientific (floatingOrInteger)
 import Data.Text (Text)
 import qualified Data.Text as Text
+import Data.Text.Encoding (encodeUtf8, decodeUtf8)
+import Data.ByteString (ByteString)
+import qualified Data.ByteString.Char8 as BS8
 import Data.Vector (Vector)
 import qualified Data.Vector as Vector
-import Text.Printf
-import Control.Exception
 import Debug.Trace
 import GHC.TypeLits
-import Data.Proxy
+import Text.Printf
 
 data NasalDecodeError
   = NasalUnexpected String String
@@ -206,6 +209,14 @@ instance FromNasal Text where
   fromNasal (NasalString txt) = pure txt
   fromNasal (NasalInt i) = pure . Text.pack . show $ i
   fromNasal (NasalFloat f) = pure . Text.pack . printf "%1.6f" $ f
+  fromNasal n = Left $ NasalUnexpected "string" (show n)
+
+instance ToNasal ByteString where
+  toNasal = NasalString . decodeUtf8
+instance FromNasal ByteString where
+  fromNasal (NasalString txt) = pure (encodeUtf8 txt)
+  fromNasal (NasalInt i) = pure . BS8.pack . show $ i
+  fromNasal (NasalFloat f) = pure . BS8.pack . printf "%1.6f" $ f
   fromNasal n = Left $ NasalUnexpected "string" (show n)
 
 instance ToNasal a => ToNasal (Maybe a) where

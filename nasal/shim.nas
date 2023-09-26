@@ -61,17 +61,17 @@
                         });
         }
         elsif (ty == 'scalar') {
-            if (isint(val)) {
+            if (isint(val) and sprintf(':%i', val) == ':' ~ val) {
                 ty = 'int';
-                return sprintf('%i', val);
+                encoded = sprintf('%i', val);
             }
-            elsif (isnum(val)) {
+            elsif (isnum(val) and sprintf(':%i', val) == ':' ~ val) {
                 ty = 'float';
-                return sprintf('%1.12f', val);
+                encoded = sprintf('%1.12f', val);
             }
             else {
                 ty = 'string';
-                return jsonEncodeString(val);
+                encoded = jsonEncodeString(val);
             }
         }
         elsif (ty == 'vector') {
@@ -95,6 +95,7 @@
         else {
             ty = 'null';
         }
+        # debug.dump("--- JSON ENCODE ---", val, ty, encoded);
         return encoded;
     };
 
