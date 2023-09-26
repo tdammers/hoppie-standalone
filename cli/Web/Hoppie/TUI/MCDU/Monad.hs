@@ -349,6 +349,16 @@ setReferenceAirport =
     (\val -> True <$ modify (\s -> s { mcduReferenceAirport = val }))
     (gets mcduReferenceAirport)
 
+scratchInteractOrSelect :: MCDU () -> (Maybe ByteString -> MCDU Bool) -> MCDU ()
+scratchInteractOrSelect select setVal = do
+  scratchGet >>= \case
+    ScratchEmpty -> do
+      select
+    ScratchStr scratchStr -> do
+      setVal (Just scratchStr) >>= flip when scratchClear
+    ScratchDel -> do
+      setVal Nothing >>= flip when scratchClear
+
 scratchInteract :: (Maybe ByteString -> MCDU Bool) -> MCDU (Maybe ByteString) -> MCDU ()
 scratchInteract setVal getVal = do
   scratchGet >>= \case

@@ -104,6 +104,43 @@ fplView = defView
   , mcduViewOnLoad = withFG $ fplViewLoad
   }
 
+fgNasal :: forall a. FromNasal a => FGFSConnection -> a -> Text -> MCDU a
+fgNasal conn defval script = do
+  debugPrint $ colorize cyan $ "Running script: " <> script
+  liftIO (runNasal conn script) `mcduCatches` handlers
+  where
+    handlers :: [MCDUHandler a]
+    handlers =
+      [ MCDUHandler $ \case
+          NasalUnexpected expected found -> do
+            debugPrint $
+              colorize red . Text.pack $
+              "Nasal value error: expected " <> expected <> ", but found " <> found
+            scratchWarn "SERVER ERROR"
+            return defval
+          NasalMissingKey key -> do
+            debugPrint $
+              colorize red . Text.pack $
+              "Nasal value error: map key " <> key <> "missing"
+            scratchWarn "SERVER ERROR"
+            return defval
+      , MCDUHandler $ \case
+          NasalRuntimeError msg fileMay lineMay -> do
+            debugPrint $
+              colorize red . Text.pack $
+                "Nasal runtime error:" <> fromMaybe "?" fileMay <> ":" <> maybe "-" show lineMay <> "\n" <>
+                msg
+            scratchWarn "SERVER ERROR"
+            return defval
+      , MCDUHandler $ \(e :: SomeException) -> do
+            debugPrint $
+              colorize red . Text.pack $
+                "Error:\n" <> show e
+            scratchWarn "ERROR"
+            return defval
+      ]
+
+
 fplViewLoad :: FGFSConnection -> MCDU ()
 fplViewLoad conn = do
   (groundspeed :: Double) <- fmap (max 100) . liftIO $ runNasal conn [s| getprop('/velocities/groundspeed-kt'); |]
@@ -180,7 +217,7 @@ fplViewLoad conn = do
 rteView :: MCDUView
 rteView = defView
   { mcduViewTitle = "ACT RTE"
-  , mcduViewOnLoad = withFG $ rteViewLoad
+  , mcduViewOnLoad = withFG rteViewLoad
   }
 
 
@@ -188,12 +225,12 @@ rteViewLoad :: FGFSConnection -> MCDU ()
 rteViewLoad conn = do
   let setDeparture :: Maybe ByteString -> MCDU Bool
       setDeparture Nothing = do
-        liftIO $ runNasal conn $
+        fgNasal conn False $
           [s| flightplan().departure = nil;
               return 1;
             |]
       setDeparture (Just icao) = do
-        liftIO $ runNasal conn $
+        fgNasal conn False $
           "var icao = " <> encodeNasal (decodeUtf8 icao) <> ";\n" <>
           [s| var airports = findAirportsByICAO(icao);
               if (size(airports) == 0) return 0;
@@ -202,19 +239,20 @@ rteViewLoad conn = do
             |]
   let getDeparture :: MCDU (Maybe ByteString)
       getDeparture = do
-        liftIO $ fmap (fmap encodeUtf8) <$> runNasal conn $
-          [s| var fp = flightplan();
+        fgNasal conn Nothing $
+          [s| print("get departure");
+              var fp = flightplan();
               return ((fp.departure == nil) ? nil : fp.departure.id);
             |]
 
   let setDestination :: Maybe ByteString -> MCDU Bool
       setDestination Nothing = do
-        liftIO $ runNasal conn $
+        fgNasal conn False $
           [s| flightplan().destination = nil;
               return 1;
             |]
       setDestination (Just icao) = do
-        liftIO $ runNasal conn $
+        fgNasal conn False $
           "var icao = " <> encodeNasal (decodeUtf8 icao) <> ";\n" <>
           [s| var airports = findAirportsByICAO(icao);
               if (size(airports) == 0) return 0;
@@ -223,7 +261,7 @@ rteViewLoad conn = do
             |]
   let getDestination :: MCDU (Maybe ByteString)
       getDestination = do
-        liftIO $ fmap (fmap encodeUtf8) <$> runNasal conn $
+        fgNasal conn Nothing $
           [s| var fp = flightplan();
               return ((fp.destination == nil) ? nil : fp.destination.id);
             |]
@@ -235,11 +273,14 @@ rteViewLoad conn = do
     { mcduViewNumPages = 1
     , mcduViewLSKBindings = Map.fromList
         [ (0, ("", scratchInteract setDeparture getDeparture >> reloadView))
+        , (3, ("DEPARTURE", loadView departureView))
+
         , (5, ("", scratchInteract setDestination getDestination >> reloadView))
         , (6, ("", scratchInteract
                       (maybe (return False) (\c -> lift (setCallsign c) >> return True))
                       (Just <$> lift getCallsign)
                    >> reloadView))
+        , (8, ("ARRIVAL", fgErrorView "NOT IMPLEMENTED"))
         ]
     , mcduViewDraw = do
         mcduPrint 1 1 white "ORIGIN"
@@ -251,6 +292,246 @@ rteViewLoad conn = do
         mcduPrintR (screenW - 1) 3 white "FLT NO"
         mcduPrintR (screenW - 1) 4 green callsign
     }
+
+departureView :: MCDUView
+departureView = defView
+  { mcduViewTitle = "DEPARTURE"
+  , mcduViewOnLoad = withFG departureViewLoad
+  }
+
+selectView :: ByteString -> [ByteString] -> ByteString -> (Maybe ByteString -> MCDU ()) -> MCDUView
+selectView title options returnLabel handleResult= defView
+  { mcduViewTitle = title
+  , mcduViewNumPages = (length options + 7) `div` 8
+  , mcduViewLSKBindings = mempty
+  , mcduViewOnLoad = do
+      curPage <- gets (mcduViewPage . mcduView)
+      let curOptions = take 8 . drop (curPage * 8) $ options
+      modifyView $ \v -> v {
+        mcduViewLSKBindings = Map.fromList
+          [ (n, (option, handleResult (Just option)))
+          | (n, option) <- zip [0,5,1,6,2,7,3,8] curOptions
+          ]
+      }
+      addLskBinding 4 returnLabel (handleResult Nothing)
+  }
+
+departureViewLoad :: FGFSConnection -> MCDU ()
+departureViewLoad conn = do
+  let setRunway :: Maybe ByteString -> MCDU Bool
+      setRunway Nothing = do
+        fgNasal conn False $
+          [s| var departureAirport = flightplan().departure;
+              flightplan().departure = nil;
+              flightplan().departure = departureAirport;
+              return 1;
+            |]
+      setRunway (Just rwyID) = do
+        fgNasal conn False $
+          "var runwayID = " <> encodeNasal (decodeUtf8 rwyID) <> ";\n" <>
+          [s| var departure = flightplan().departure;
+              if (departure == nil) return 0;
+              var runway = departure.runways[runwayID];
+              if (runway == nil) return 0;
+              flightplan().departure_runway = runway;
+              return 1;
+            |]
+      selectRunway = do
+        runwaysMay <- fgNasal conn [] $
+          [s| var runways = flightplan().departure.runways;
+              return keys(runways);
+            |]
+        case runwaysMay of
+          [] -> do
+            scratchWarn "NO RUNWAYS"
+          runways -> do
+            let handleResult Nothing = loadView departureView
+                handleResult (Just rwy) = do
+                  setRunway (Just rwy) >>= \case
+                    True ->
+                      loadView departureView
+                    False -> do
+                      return ()
+            loadView (selectView "SELECT RUNWAY" runways "DEPARTURE" handleResult)
+          
+
+  let getRunway :: MCDU (Maybe ByteString)
+      getRunway = do
+        fgNasal conn Nothing $
+          [s| var fp = flightplan();
+              var rwyID = ((fp.departure_runway == nil) ? nil : fp.departure_runway.id);
+              return rwyID
+            |]
+
+  let setSID :: Maybe ByteString -> MCDU Bool
+      setSID Nothing = do
+        fgNasal conn False $
+          [s| flightplan().sid = nil;
+              return 1;
+            |]
+      setSID (Just sidID) = do
+        err <- fgNasal conn Nothing $
+          "var sidID = " <> encodeNasal (decodeUtf8 sidID) <> ";\n" <>
+          [s| var departure = flightplan().departure;
+              if (departure == nil) return "NO DEPARTURE";
+              var sid = departure.getSid(sidID);
+              if (sid == nil) return "INVALID";
+              flightplan().sid = sid;
+              runways = flightplan().sid.runways;
+              if (size(runways) == 1) {
+                var runway = departure.runways[runways[0]];
+                if (runway == nil) {
+                  return "INVALID RWY";
+                }
+                flightplan().departure_runway = runway;
+              }
+              elsif (size(runways) > 1) {
+                var runway = flightplan().departure_runway;
+                if (runway != nil and !contains(runways, runway.id)) {
+                  flightplan().departure = nil;
+                  flightplan().departure = departure;
+                }
+              }
+              return nil;
+            |]
+        case err of
+          Nothing ->
+            return True
+          Just e -> do
+            scratchWarn e
+            return False
+
+      selectSID :: MCDU ()
+      selectSID = do
+        availableSIDs <- fgNasal conn [] $
+          [s| var departure = flightplan().departure;
+              if (departure == nil) return [];
+              var runway = flightplan().departure_runway;
+              if (runway == nil)
+                return departure.sids()
+              else
+                return departure.sids(runway.id);
+            |]
+        case availableSIDs of
+          [] ->
+            scratchWarn "NO SIDS"
+          sids -> do
+            let handleResult Nothing = loadView departureView
+                handleResult (Just sid) = do
+                  setSID (Just sid) >>= \case
+                    True ->
+                      loadView departureView
+                    False -> do
+                      return ()
+            loadView (selectView "SELECT SID" sids "DEPARTURE" handleResult)
+
+  let getSID :: MCDU (Maybe ByteString)
+      getSID = do
+        fgNasal conn Nothing $
+          [s| var fp = flightplan();
+              return ((fp.sid == nil) ? nil : fp.sid.id);
+            |]
+
+  let setTransition :: Maybe ByteString -> MCDU Bool
+      setTransition Nothing = do
+        fgNasal conn False $
+          [s| flightplan().transition = nil;
+              return 1;
+            |]
+      setTransition (Just transitionID) = do
+        err <- fgNasal conn Nothing $
+          "var transitionID = " <> encodeNasal (decodeUtf8 transitionID) <> ";\n" <>
+          [s| var departure = flightplan().departure;
+              if (departure == nil) return "NO DEPARTURE";
+              var sid = flightplan().sid;
+              if (sid == nil) return "NO SID";
+              var transitions = sid.transitions;
+              debug.dump(transitions);
+              if (!contains(transitions, transitionID)) return "INVALID";
+              flightplan().sid_trans = sid.transition(transitionID);
+              return nil;
+            |]
+        case err of
+          Nothing ->
+            return True
+          Just e -> do
+            scratchWarn e
+            return False
+
+      selectTransition = do
+        availableTransitions <- fgNasal conn [] $
+          [s| var departure = flightplan().departure;
+              if (departure == nil) return [];
+              var sid = flightplan().sid;
+              if (sid == nil)
+                return [];
+              else
+                return sid.transitions;
+            |]
+        case availableTransitions of
+          [] ->
+            scratchWarn "NO TRANSITIONS"
+          transitions -> do
+            let handleResult Nothing = loadView departureView
+                handleResult (Just transition) = do
+                  setTransition (Just transition) >>= \case
+                    True ->
+                      loadView departureView
+                    False -> do
+                      return ()
+            loadView (selectView "SELECT TRANSITION" transitions "DEPARTURE" handleResult)
+
+  let getTransition :: MCDU (Maybe ByteString)
+      getTransition = do
+        fgNasal conn Nothing $
+          [s| var fp = flightplan();
+              return ((fp.sid_trans == nil) ? nil : fp.sid_trans.id);
+            |]
+
+  let getDeparture :: MCDU (Maybe ByteString)
+      getDeparture = do
+        fgNasal conn Nothing $
+          [s| var fp = flightplan();
+              return ((fp.departure == nil) ? nil : fp.departure.id);
+            |]
+
+  departureMay <- getDeparture
+
+  case departureMay of
+    Nothing ->
+      fgErrorView "NO DEPARTURE"
+    Just departure -> do
+      runway <- getRunway
+      debugPrint $ colorize cyan $ Text.pack (show runway)
+      sid <- getSID
+      transition <- getTransition
+      sidValid <- fgNasal conn False
+                    [s| var fp = flightplan();
+                        if (fp.departure == nil) return 1;
+                        if (fp.sid == nil) return 1;
+                        if (fp.departure_runway == nil) return 1;
+                        var runways = fp.sid.runways;
+                        var runway = fp.departure_runway.id;
+                        return contains(runways, runway);
+                      |]
+      modifyView $ \v -> v
+        { mcduViewNumPages = 1
+        , mcduViewLSKBindings = Map.fromList
+            [ (0, ("", scratchInteractOrSelect selectRunway setRunway >> reloadView))
+            , (1, ("", scratchInteractOrSelect selectSID setSID >> reloadView))
+            , (2, ("", scratchInteractOrSelect selectTransition setTransition >> reloadView))
+            , (4, ("RTE", loadView rteView))
+            ]
+        , mcduViewTitle = departure <> " DEPARTURE"
+        , mcduViewDraw = do
+            mcduPrint 1 1 white "RUNWAY"
+            mcduPrint 1 2 green (fromMaybe "----" runway)
+            mcduPrint 1 3 white "SID"
+            mcduPrint 1 4 (if sidValid then green else yellow) (fromMaybe "------" sid)
+            mcduPrint 1 5 white "TRANSITION"
+            mcduPrint 1 6 green (fromMaybe "------" transition)
+        }
+
 
 fgErrorView :: ByteString -> MCDU ()
 fgErrorView err = do
