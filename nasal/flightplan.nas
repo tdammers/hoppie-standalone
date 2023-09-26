@@ -8,7 +8,6 @@ var hasFlightplanModifications = func {
 };
 
 var getModifyableFlightplan = func {
-    return flightplan();
     if (mcdu.modifiedFlightplan == nil) {
         mcdu.modifiedFlightplan = flightplan().clone();
     }
@@ -16,7 +15,6 @@ var getModifyableFlightplan = func {
 };
 
 var getVisibleFlightplan = func {
-    return flightplan();
     if (mcdu.modifiedFlightplan != nil)
         return mcdu.modifiedFlightplan;
     else
@@ -151,6 +149,274 @@ var getSID = func {
     return ((fp.sid == nil) ? nil : fp.sid.id);
 }
 
+var setSidTransition = func (transitionID) {
+    var fp = getModifyableFlightplan();
+    if (transitionID == nil) {
+        fp.sid_trans = nil;
+        return 1;
+    }
+    else {
+        var departure = fp.departure;
+        if (departure == nil) return "NO DEPARTURE";
+        var sid = fp.sid;
+        if (sid == nil) return "NO SID";
+        var transitions = sid.transitions;
+        debug.dump(transitions);
+        if (!contains(transitions, transitionID)) return "INVALID";
+        fp.sid_trans = sid.transition(transitionID);
+        return nil;
+    }
+}
+
+var listSidTransitions = func {
+    var fp = getVisibleFlightplan();
+    var departure = fp.departure;
+    if (departure == nil) return [];
+    var sid = fp.sid;
+    if (sid == nil)
+      return [];
+    else
+      return sid.transitions;
+}
+
+var getSidTransition = func {
+    var fp = getVisibleFlightplan();
+    return ((fp.sid_trans == nil) ? nil : fp.sid_trans.id);
+}
+
+var setDeparture = func (icao) {
+    var fp = getModifyableFlightplan();
+    if (icao == nil) {
+        fp.departure = nil;
+        return 1;
+    }
+    else {
+        var airports = findAirportsByICAO(icao);
+        if (size(airports) == 0) return 0;
+        fp.departure = airports[0];
+        return 1;
+    }
+}
+
+var getDeparture = func {
+    var fp = getVisibleFlightplan();
+    return ((fp.departure == nil) ? nil : fp.departure.id);
+}
+
+var setDestination = func (icao) {
+    var fp = getModifyableFlightplan();
+    if (icao == nil) {
+        fp.destination = nil;
+        return 1;
+    }
+    else {
+        var airports = findAirportsByICAO(icao);
+        if (size(airports) == 0) return 0;
+        fp.destination = airports[0];
+        return 1;
+    }
+}
+
+var getDestination = func {
+    var fp = getVisibleFlightplan();
+    return ((fp.destination == nil) ? nil : fp.destination.id);
+}
+
+var setDestinationRunway = func (runwayID) {
+    var fp = getModifyableFlightplan();
+    if (runwayID == nil) {
+        var destinationAirport = fp.destination;
+        fp.destination = nil;
+        fp.destination = destinationAirport;
+        return 1;
+    }
+    else {
+        var destination = fp.destination;
+        if (destination == nil) return 0;
+        var runway = destination.runways[runwayID];
+        if (runway == nil) return 0;
+        fp.destination_runway = runway;
+        return 1;
+    }
+}
+
+var listDestinationRunways = func {
+    var fp = getVisibleFlightplan();
+    var runways = fp.destination.runways;
+    return keys(runways);
+}
+
+var getDestinationRunway = func {
+    var fp = getVisibleFlightplan();
+    var rwyID = ((fp.destination_runway == nil) ? nil : fp.destination_runway.id);
+    return rwyID
+}
+
+var setSTAR = func (starID) {
+    var fp = getModifyableFlightplan();
+    if (starID == nil) {
+        fp.star = nil;
+        return nil;
+    }
+    else {
+        var destination = fp.destination;
+        if (destination == nil) return "NO DESTINATION";
+        var star = destination.getStar(starID);
+        if (star == nil) return "INVALID";
+        fp.star = star;
+        var runways = fp.star.runways;
+        if (size(runways) == 1) {
+          var runway = destination.runways[runways[0]];
+          if (runway == nil) {
+            return "INVALID RWY";
+          }
+          fp.destination_runway = runway;
+        }
+        elsif (size(runways) > 1) {
+          var runway = fp.destination_runway;
+          if (runway != nil and !contains(runways, runway.id)) {
+            fp.destination = nil;
+            fp.destination = destination;
+          }
+        }
+        return nil;
+    }
+}
+
+var listSTARs = func {
+    var fp = getVisibleFlightplan();
+    var destination = fp.destination;
+    if (destination == nil) return [];
+    var runway = fp.destination_runway;
+    if (runway == nil)
+      return destination.stars()
+    else
+      return destination.stars(runway.id);
+}
+
+var getSTAR = func {
+    var fp = getVisibleFlightplan();
+    return ((fp.star == nil) ? nil : fp.star.id);
+}
+
+var setStarTransition = func (transitionID) {
+    var fp = getModifyableFlightplan();
+    if (transitionID == nil) {
+        fp.star_trans = nil;
+        return 1;
+    }
+    else {
+        var destination = fp.destination;
+        if (destination == nil) return "NO DESTINATION";
+        var star = fp.star;
+        if (star == nil) return "NO STAR";
+        var transitions = star.transitions;
+        debug.dump(transitions);
+        if (!contains(transitions, transitionID)) return "INVALID";
+        fp.star_trans = star.transition(transitionID);
+        return nil;
+    }
+}
+
+var listStarTransitions = func {
+    var fp = getVisibleFlightplan();
+    var destination = fp.destination;
+    if (destination == nil) return [];
+    var star = fp.star;
+    if (star == nil)
+      return [];
+    else
+      return star.transitions;
+}
+
+var getStarTransition = func {
+    var fp = getVisibleFlightplan();
+    return ((fp.star_trans == nil) ? nil : fp.star_trans.id);
+}
+
+var setApproach = func (approachID) {
+    var fp = getModifyableFlightplan();
+    if (approachID == nil) {
+        fp.approach = nil;
+        return nil;
+    }
+    else {
+        var destination = fp.destination;
+        if (destination == nil) return "NO ARRIVAL";
+        var approach = destination.getIAP(approachID);
+        if (approach == nil) return "INVALID";
+        fp.approach = approach;
+        runways = fp.approach.runways;
+        if (size(runways) == 1) {
+            var runway = destination.runways[runways[0]];
+            if (runway == nil) {
+                return "INVALID RWY";
+            }
+            fp.destination_runway = runway;
+        }
+        elsif (size(runways) > 1) {
+            var runway = fp.destination_runway;
+            if (runway != nil and !contains(runways, runway.id)) {
+                fp.destination = nil;
+                fp.destination = destination;
+            }
+        }
+        return nil;
+    }
+}
+
+var listApproaches = func {
+    var fp = getVisibleFlightplan();
+    var destination = fp.destination;
+    if (destination == nil) return [];
+    var runway = fp.destination_runway;
+    if (runway == nil)
+        return destination.getApproachList()
+    else
+        return destination.getApproachList(runway.id);
+}
+
+var getApproach = func {
+    var fp = getVisibleFlightplan();
+    return ((fp.approach == nil) ? nil : fp.approach.id);
+}
+
+var setApproachTransition = func (transitionID) {
+    var fp = getModifyableFlightplan();
+    if (transitionID == nil) {
+        fp.approach_trans = nil;
+        return 1;
+    }
+    else {
+        var destination = fp.destination;
+        if (destination == nil) return "NO DESTINATION";
+        var approach = fp.approach;
+        if (approach == nil) return "NO APPROACH";
+        var transitions = approach.transitions;
+        debug.dump(transitions);
+        if (!contains(transitions, transitionID)) return "INVALID";
+        fp.approach_trans = approach.transition(transitionID);
+        return nil;
+    }
+}
+
+
+var listApproachTransitions = func {
+    var fp = getVisibleFlightplan();
+    var destination = fp.destination;
+    if (destination == nil) return [];
+    var approach = fp.approach;
+    if (approach == nil)
+        return [];
+    else
+        return approach.transitions;
+}
+
+var getApproachTransition = func {
+    var fp = getVisibleFlightplan();
+    return ((fp.approach_trans == nil) ? nil : fp.approach_trans.id);
+}
+
 return {
     'hasFlightplanModifications': hasFlightplanModifications,
     'getModifyableFlightplan': getModifyableFlightplan,
@@ -163,6 +429,9 @@ return {
     'getFlightplanLegs': getFlightplanLegs,
     'getCurrentLeg': getCurrentLeg,
 
+    'setDeparture': setDeparture,
+    'getDeparture': getDeparture,
+
     'setDepartureRunway': setDepartureRunway,
     'listDepartureRunways': listDepartureRunways,
     'getDepartureRunway': getDepartureRunway,
@@ -170,4 +439,31 @@ return {
     'setSID': setSID,
     'listSIDs': listSIDs,
     'getSID': getSID,
+
+    'setSidTransition': setSidTransition,
+    'listSidTransitions': listSidTransitions,
+    'getSidTransition': getSidTransition,
+
+    'setDestination': setDestination,
+    'getDestination': getDestination,
+
+    'setDestinationRunway': setDestinationRunway,
+    'listDestinationRunways': listDestinationRunways,
+    'getDestinationRunway': getDestinationRunway,
+
+    'setSTAR': setSTAR,
+    'listSTARs': listSTARs,
+    'getSTAR': getSTAR,
+
+    'setStarTransition': setStarTransition,
+    'listStarTransitions': listStarTransitions,
+    'getStarTransition': getStarTransition,
+
+    'setApproach': setApproach,
+    'listApproaches': listApproaches,
+    'getApproach': getApproach,
+
+    'setApproachTransition': setApproachTransition,
+    'listApproachTransitions': listApproachTransitions,
+    'getApproachTransition': getApproachTransition,
 };
