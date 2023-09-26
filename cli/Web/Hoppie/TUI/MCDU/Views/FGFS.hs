@@ -1,6 +1,7 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE LambdaCase #-}
 
 module Web.Hoppie.TUI.MCDU.Views.FGFS
 where
@@ -10,16 +11,20 @@ import Web.Hoppie.TUI.MCDU.Monad
 import Web.Hoppie.TUI.StringUtil
 import Web.Hoppie.FGFS.Connection
 import Web.Hoppie.FGFS.NasalValue
+import Web.Hoppie.Trans
 
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.String.QQ (s)
+import Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as BS8
 import Control.Monad.State
 import Control.Monad
 import Text.Printf
 import Data.Text.Encoding
 import Data.Maybe
+import Control.Exception
+import qualified Data.Map.Strict as Map
 
 data FPLeg =
   FPLeg
@@ -94,86 +99,202 @@ formatETA eta =
 
 fplView :: MCDUView
 fplView = defView
-  { mcduViewTitle = "ACT RTE LEGS"
+  { mcduViewTitle = "ACT FPL"
   , mcduViewAutoReload = True
-  , mcduViewOnLoad = do
-      connMay <- gets mcduFlightgearConnection
-      case connMay of
-        Nothing -> do
-          modifyView $ \v -> v
-            { mcduViewNumPages = 1
-            , mcduViewPage = 0
-            , mcduViewDraw = do
-                mcduPrintC (screenW `div` 2) (screenH `div` 2) red "FGFS NOT CONNECTED"
-            , mcduViewLSKBindings = mempty
-            }
-        Just conn -> do
-          (groundspeed :: Double) <- fmap (max 100) . liftIO $ runNasal conn [s| getprop('/velocities/groundspeed-kt') |]
-          (utcMinutes :: Double) <- liftIO $ runNasal conn
-            [s| var hour = getprop('/sim/time/utc/hour');
-                var minute = getprop('/sim/time/utc/minute');
-                var second = getprop('/sim/time/utc/second');
-                return (hour * 60 + minute + second / 60);
-              |]
-          legs' <- liftIO $ runNasal conn
-            [s| var fp = flightplan();
-                var result = [];
-                for (var i = 0; i < fp.getPlanSize(); i += 1) {
-                  var wp = fp.getWP(i);
-                  var parent_id = nil;
-                  if (wp.wp_parent != nil)
-                    parent_id = wp.wp_parent.id;
-                  append(result,
-                    { "name": wp.wp_name
-                    , "heading": wp.leg_bearing
-                    , "leg_dist": wp.leg_distance
-                    , "route_dist": wp.distance_along_route
-                    , "speed": wp.speed_cstr
-                    , "speed_type": wp.speed_cstr_type
-                    , "alt": wp.alt_cstr
-                    , "alt_type": wp.alt_cstr_type
-                    , "parent": parent_id
-                    , "role": wp.wp_role
-                    , "discontinuity": (wp.wp_type == "discontinuity" or wp.wp_type == "vectors")
-                    });
-                }
-                return result;
-              |]
-          currentLeg <- liftIO $ runNasal conn
-            [s| var fp = flightplan();
-                return fp.current
-              |]
-          let legs = case currentLeg of
-                        Nothing -> legs'
-                        Just i -> drop i legs'
-          curPage <- gets (mcduViewPage . mcduView)
-          let legsDropped = curPage * 5
-          let numPages = (length legs + 4) `div` 5
-          let curLegs = take 5 . drop legsDropped $ legs
-          modifyView $ \v -> v
-            { mcduViewNumPages = numPages
-            , mcduViewDraw = do
-                zipWithM_
-                  (\n leg -> do
-                    let isCurrent = (n + legsDropped == 0)
-                        color = if isCurrent then
-                                  magenta
-                                else if legIsDiscontinuity leg then
-                                  white
-                                else if (legRole leg == Just "missed") then
-                                  cyan
-                                else
-                                  green
-                    forM_ (legRouteDist leg) $ \routeDist -> do
-                      when (groundspeed > 40) $ do
-                        let eta = utcMinutes + routeDist / groundspeed * 60
-                        mcduPrint (screenW - 6) (n * 2 + 1) color (BS8.pack $ formatETA eta <> "z")
-                    mcduPrint 1 (n * 2 + 1) color (BS8.pack . maybe "---°" (printf "%03.0f°") $ legHeading leg)
-                    mcduPrint 9 (n * 2 + 1) color (BS8.pack . maybe "----NM" formatDistance $ legDist leg)
-                    mcduPrint 0 (n * 2 + 2) color (encodeUtf8 $ legName leg)
-                    mcduPrint (screenW - 11) (n * 2 + 2) color (BS8.pack $ formatSpeed (legSpeed leg) (legSpeedType leg))
-                    mcduPrint (screenW - 7) (n * 2 + 2) color "/"
-                    mcduPrint (screenW - 6) (n * 2 + 2) color (BS8.pack $ formatAltitude (legAlt leg) (legAltType leg))
-                  ) [0,1..] curLegs
-            }
+  , mcduViewOnLoad = withFG $ fplViewLoad
   }
+
+fplViewLoad :: FGFSConnection -> MCDU ()
+fplViewLoad conn = do
+  (groundspeed :: Double) <- fmap (max 100) . liftIO $ runNasal conn [s| getprop('/velocities/groundspeed-kt'); |]
+  (utcMinutes :: Double) <- liftIO $ runNasal conn
+    [s| var hour = getprop('/sim/time/utc/hour');
+        var minute = getprop('/sim/time/utc/minute');
+        var second = getprop('/sim/time/utc/second');
+        return (hour * 60 + minute + second / 60);
+      |]
+  legs' <- liftIO $ runNasal conn
+    [s| var fp = flightplan();
+        var result = [];
+        for (var i = 0; i < fp.getPlanSize(); i += 1) {
+          var wp = fp.getWP(i);
+          var parent_id = nil;
+          if (wp.wp_parent != nil)
+            parent_id = wp.wp_parent.id;
+          append(result,
+            { "name": wp.wp_name
+            , "heading": wp.leg_bearing
+            , "leg_dist": wp.leg_distance
+            , "route_dist": wp.distance_along_route
+            , "speed": wp.speed_cstr
+            , "speed_type": wp.speed_cstr_type
+            , "alt": wp.alt_cstr
+            , "alt_type": wp.alt_cstr_type
+            , "parent": parent_id
+            , "role": wp.wp_role
+            , "discontinuity": (wp.wp_type == "discontinuity" or wp.wp_type == "vectors")
+            });
+        }
+        return result;
+      |]
+  currentLeg <- liftIO $ runNasal conn
+    [s| var fp = flightplan();
+        return fp.current
+      |]
+  let legs = case currentLeg of
+                Nothing -> legs'
+                Just i -> drop i legs'
+  curPage <- gets (mcduViewPage . mcduView)
+  let legsDropped = curPage * 5
+  let numPages = (length legs + 4) `div` 5
+  let curLegs = take 5 . drop legsDropped $ legs
+  modifyView $ \v -> v
+    { mcduViewNumPages = numPages
+    , mcduViewDraw = do
+        when (null legs) $ do
+          mcduPrintC (screenW `div` 2) (screenH `div` 2) white "NO FPL"
+        zipWithM_
+          (\n leg -> do
+            let isCurrent = n + legsDropped == 0
+                color = if isCurrent then
+                          magenta
+                        else if legIsDiscontinuity leg then
+                          white
+                        else if (legRole leg == Just "missed") then
+                          cyan
+                        else
+                          green
+            forM_ (legRouteDist leg) $ \routeDist -> do
+              when (groundspeed > 40) $ do
+                let eta = utcMinutes + routeDist / groundspeed * 60
+                mcduPrint (screenW - 6) (n * 2 + 1) color (BS8.pack $ formatETA eta <> "z")
+            mcduPrint 1 (n * 2 + 1) color (BS8.pack . maybe "---°" (printf "%03.0f°") $ legHeading leg)
+            mcduPrint 9 (n * 2 + 1) color (BS8.pack . maybe "----NM" formatDistance $ legDist leg)
+            mcduPrint 0 (n * 2 + 2) color (encodeUtf8 $ legName leg)
+            mcduPrint (screenW - 11) (n * 2 + 2) color (BS8.pack $ formatSpeed (legSpeed leg) (legSpeedType leg))
+            mcduPrint (screenW - 7) (n * 2 + 2) color "/"
+            mcduPrint (screenW - 6) (n * 2 + 2) color (BS8.pack $ formatAltitude (legAlt leg) (legAltType leg))
+          ) [0,1..] curLegs
+    }
+
+rteView :: MCDUView
+rteView = defView
+  { mcduViewTitle = "ACT RTE"
+  , mcduViewOnLoad = withFG $ rteViewLoad
+  }
+
+
+rteViewLoad :: FGFSConnection -> MCDU ()
+rteViewLoad conn = do
+  let setDeparture :: Maybe ByteString -> MCDU Bool
+      setDeparture Nothing = do
+        liftIO $ runNasal conn $
+          [s| flightplan().departure = nil;
+              return 1;
+            |]
+      setDeparture (Just icao) = do
+        liftIO $ runNasal conn $
+          "var icao = " <> encodeNasal (decodeUtf8 icao) <> ";\n" <>
+          [s| var airports = findAirportsByICAO(icao);
+              if (size(airports) == 0) return 0;
+              flightplan().departure = airports[0];
+              return 1;
+            |]
+  let getDeparture :: MCDU (Maybe ByteString)
+      getDeparture = do
+        liftIO $ fmap (fmap encodeUtf8) <$> runNasal conn $
+          [s| var fp = flightplan();
+              return ((fp.departure == nil) ? nil : fp.departure.id);
+            |]
+
+  let setDestination :: Maybe ByteString -> MCDU Bool
+      setDestination Nothing = do
+        liftIO $ runNasal conn $
+          [s| flightplan().destination = nil;
+              return 1;
+            |]
+      setDestination (Just icao) = do
+        liftIO $ runNasal conn $
+          "var icao = " <> encodeNasal (decodeUtf8 icao) <> ";\n" <>
+          [s| var airports = findAirportsByICAO(icao);
+              if (size(airports) == 0) return 0;
+              flightplan().destination = airports[0];
+              return 1;
+            |]
+  let getDestination :: MCDU (Maybe ByteString)
+      getDestination = do
+        liftIO $ fmap (fmap encodeUtf8) <$> runNasal conn $
+          [s| var fp = flightplan();
+              return ((fp.destination == nil) ? nil : fp.destination.id);
+            |]
+
+  departureMay <- getDeparture
+  destinationMay <- getDestination
+  callsign <- lift getCallsign
+  modifyView $ \v -> v
+    { mcduViewNumPages = 1
+    , mcduViewLSKBindings = Map.fromList
+        [ (0, ("", scratchInteract setDeparture getDeparture >> reloadView))
+        , (5, ("", scratchInteract setDestination getDestination >> reloadView))
+        , (6, ("", scratchInteract
+                      (maybe (return False) (\c -> lift (setCallsign c) >> return True))
+                      (Just <$> lift getCallsign)
+                   >> reloadView))
+        ]
+    , mcduViewDraw = do
+        mcduPrint 1 1 white "ORIGIN"
+        mcduPrint 1 2 green (fromMaybe "----" departureMay)
+        mcduPrintR (screenW - 1) 1 white "DEST"
+        mcduPrintR (screenW - 1) 2 green (fromMaybe "----" destinationMay)
+        mcduPrint 1 3 white "CO RTE"
+        mcduPrint 1 4 green "----------"
+        mcduPrintR (screenW - 1) 3 white "FLT NO"
+        mcduPrintR (screenW - 1) 4 green callsign
+    }
+
+fgErrorView :: ByteString -> MCDU ()
+fgErrorView err = do
+  scratchWarn err
+  modifyView $ \v -> v
+    { mcduViewNumPages = 1
+    , mcduViewPage = 0
+    , mcduViewDraw = do
+        mcduPrintC (screenW `div` 2) (screenH `div` 2) red "NOT AVAIL"
+    , mcduViewAutoReload = False
+    , mcduViewLSKBindings = mempty
+    }
+
+withFG :: (FGFSConnection -> MCDU ()) -> MCDU ()
+withFG go = do
+  connMay <- gets mcduFlightgearConnection
+  case connMay of
+    Nothing -> fgErrorView "NO CONNECTION"
+    Just conn -> go conn `mcduCatches` handlers
+  where
+    handlers :: [MCDUHandler ()]
+    handlers =
+      [ MCDUHandler $ \case
+          NasalUnexpected expected found -> do
+            debugPrint $
+              colorize red . Text.pack $
+              "Nasal value error: expected " <> expected <> ", but found " <> found
+            fgErrorView "SERVER ERROR"
+          NasalMissingKey key -> do
+            debugPrint $
+              colorize red . Text.pack $
+              "Nasal value error: map key " <> key <> "missing"
+            fgErrorView "SERVER ERROR"
+      , MCDUHandler $ \case
+          NasalRuntimeError msg fileMay lineMay -> do
+            debugPrint $
+              colorize red . Text.pack $
+                "Nasal runtime error:" <> fromMaybe "?" fileMay <> ":" <> maybe "-" show lineMay <> "\n" <>
+                msg
+            fgErrorView "SERVER ERROR"
+      , MCDUHandler $ \(e :: SomeException) -> do
+            debugPrint $
+              colorize red . Text.pack $
+                "Error:\n" <> show e
+            fgErrorView "ERROR"
+      ]
+

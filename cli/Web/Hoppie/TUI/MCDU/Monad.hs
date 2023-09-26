@@ -2,6 +2,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE ExistentialQuantification #-}
 
 module Web.Hoppie.TUI.MCDU.Monad
 where
@@ -42,6 +43,7 @@ import qualified Data.Vector as Vector
 import Data.Word
 import System.IO
 import Text.Printf
+import Control.Exception
 
 {-# ANN module ("HLint: ignore redundant <$>" :: String) #-}
 
@@ -363,6 +365,32 @@ type MCDU = StateT MCDUState Hoppie
 
 runMCDU :: (TypedMessage -> Hoppie ()) -> MCDU a -> Hoppie a
 runMCDU rawSend = flip evalStateT defMCDUState { mcduSendMessage = rawSend }
+
+mcduCatch :: Exception e => MCDU a -> (e -> MCDU a) -> MCDU a
+mcduCatch action handler = do
+  state0 <- get
+  env <- lift ask
+  (result, state') <- liftIO $
+    (runReaderT (runStateT action state0) env)
+    `catch`
+    (\e -> runReaderT (runStateT (handler e) state0) env)
+  put state'
+  return result
+
+data MCDUHandler a = forall e. Exception e => MCDUHandler (e -> MCDU a)
+
+mcduCatches :: MCDU a -> [MCDUHandler a] -> MCDU a
+mcduCatches action handlers = do
+  state0 <- get
+  env <- lift ask
+  (result, state') <- liftIO $
+    (runReaderT (runStateT action state0) env)
+    `catches`
+    [ Handler (\e -> runReaderT (runStateT (handler e) state0) env)
+    | MCDUHandler handler <- handlers
+    ]
+  put state'
+  return result
 
 draw :: (forall s. MCDUDraw s ()) -> MCDU ()
 draw action = do

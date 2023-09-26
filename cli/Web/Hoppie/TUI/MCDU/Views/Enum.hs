@@ -9,4 +9,5 @@ data ViewID
   | DLKMenuView
   | ATCMenuView
   | FPLView
+  | RTEView
   deriving (Show, Eq, Ord)
