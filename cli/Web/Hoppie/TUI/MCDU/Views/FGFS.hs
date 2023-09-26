@@ -422,7 +422,9 @@ withFGView go = do
   connMay <- gets mcduFlightgearConnection
   case connMay of
     Nothing -> fgErrorView "NO CONNECTION"
-    Just conn -> go conn `mcduCatches` handlers
+    Just conn -> do
+      liftIO (loadNasalLibrary conn "fms" "nasal/flightplan.nas")
+      go conn `mcduCatches` handlers
   where
     handlers :: [MCDUHandler ()]
     handlers =

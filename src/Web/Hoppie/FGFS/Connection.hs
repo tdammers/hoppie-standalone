@@ -39,7 +39,11 @@ data FGFSConnection =
     , fgfsOutputPropertyPath :: String
     , fgfsWebsocketConn :: WS.Connection
     , fgfsOutputChan :: TChan ByteString
+    , fgfsConnFailed :: TMVar ()
     }
+
+instance Show FGFSConnection where
+  show conn = "FGFSConnection " ++ show (fgfsBaseURL conn) ++ " " ++ show (fgfsOutputPropertyPath conn)
 
 loadNasalLibrary :: MonadIO m => FGFSConnection -> Text -> FilePath -> m ()
 loadNasalLibrary conn moduleName filePath = liftIO $ do
@@ -48,29 +52,30 @@ loadNasalLibrary conn moduleName filePath = liftIO $ do
         "globals.externalMCDU.loadModule(" <> encodeNasal moduleName <> ", func (mcdu) { " <> src <> "}, 1);"
   runNasal conn wrappedSrc
 
-withFGFSConnection :: String -> Int -> (FGFSConnection -> IO a) -> IO a
+withFGFSConnection :: String -> Int -> (FGFSConnection -> IO ()) -> IO ()
 withFGFSConnection host0 port action = do
   let host = if host0 == "localhost" then "127.0.0.1" else host0
   let url = "http://" ++ host ++ ":" ++ show port
   connID <- mkRandomID
   let path = "/sim/connections/" ++ connID
   outputChan <- newTChanIO
-  WS.runClient host port "/PropertyListener" $ \wsConn -> do
+  connFailedVar <- newEmptyTMVarIO
+  (WS.runClient host port "/PropertyListener" $ \wsConn -> do
         let runSender = do
                 bracket
-                  (connect path url wsConn outputChan)
+                  (connect path url wsConn outputChan connFailedVar)
                   disconnect
                   action
             runReader = forever $ do
                 value <- WS.receiveData wsConn
                 -- print value
                 atomically . writeTChan outputChan $ value
-        snd <$> concurrently runReader runSender 
+        race_ runReader runSender) `finally` (atomically $ putTMVar connFailedVar ())
   where
 
-    connect :: String -> String -> WS.Connection -> TChan ByteString -> IO FGFSConnection
-    connect path url wsConn outputChan = do
-      let conn = FGFSConnection url path wsConn outputChan
+    connect :: String -> String -> WS.Connection -> TChan ByteString -> TMVar () -> IO FGFSConnection
+    connect path url wsConn outputChan connFailedVar = do
+      let conn = FGFSConnection url path wsConn outputChan connFailedVar
 
       -- Load our shim
       shimSrc <- Text.readFile =<< getDataFileName "nasal/shim.nas"
@@ -262,10 +267,18 @@ getFGProp conn path = do
   return $ propResponseValue parsed
 
 getFGOutput :: forall a. FromJSON a => FGFSConnection -> IO a
-getFGOutput conn = do
-  rawResponse <- atomically $ readTChan $ fgfsOutputChan conn
-  case JSON.decodeStrict rawResponse of
-    Nothing ->
-      throw $ PropJSONDecodeError $ Text.unpack (decodeUtf8 rawResponse)
-    Just r -> do
-      return $ propResponseValue r
+getFGOutput conn =
+  race catchFailed go >>= \case
+    Left () -> throw $ PropJSONDecodeError "Connection closed"
+    Right x -> return x
+  where
+    catchFailed = do
+      atomically $ readTMVar (fgfsConnFailed conn)
+
+    go = do
+      rawResponse <- atomically $ readTChan $ fgfsOutputChan conn
+      case JSON.decodeStrict rawResponse of
+        Nothing ->
+          throw $ PropJSONDecodeError $ Text.unpack (decodeUtf8 rawResponse)
+        Just r -> do
+          return $ propResponseValue r

@@ -20,9 +20,9 @@ import Web.Hoppie.TUI.StringUtil
 import Web.Hoppie.Telex
 import Web.Hoppie.TUI.MCDU.Views.Enum
 
+import Control.Concurrent
 import Control.Applicative
 import Control.Concurrent.Async
-import Control.Concurrent.MVar
 import Control.Concurrent.STM
 import Control.Monad
 import Control.Monad.Except
@@ -55,7 +55,9 @@ data MCDUEvent
   | CurrentDataAuthorityEvent (Maybe ByteString)
   | LogEvent Text
   | TickEvent
-  deriving (Show, Eq)
+  | FGFSConnectEvent FGFSConnection
+  | FGFSDisconnectEvent
+  deriving (Show)
 
 data ScratchVal
   = ScratchEmpty
@@ -70,6 +72,8 @@ data MCDUState =
     , mcduScreenBuffer :: MCDUScreenBuffer
     , mcduView :: MCDUView
     , mcduResolveViewID :: ViewID -> MCDUView
+
+    , mcduEventChan :: Maybe (TChan MCDUEvent)
 
     , mcduUnreadDLK :: Maybe Word
     , mcduUnreadCPDLC :: Maybe Word
@@ -108,6 +112,8 @@ defMCDUState =
     , mcduScreenBuffer = emptyMCDUScreenBuffer
     , mcduView = defView
     , mcduResolveViewID = const defView
+
+    , mcduEventChan = Nothing
 
     , mcduUnreadDLK = Nothing
     , mcduUnreadCPDLC = Nothing
@@ -660,29 +666,41 @@ mcduStopHttpServer = do
     modify $ \s -> s { mcduHttpServer = Nothing }
 
 mcduConnectFlightgear :: MCDU ()
-mcduConnectFlightgear = do
+mcduConnectFlightgear = mcduConnectFlightgearAfter 0
+
+mcduConnectFlightgearAfter :: Int -> MCDU ()
+mcduConnectFlightgearAfter time = do
+  eventChan <- gets $ fromMaybe (error "Event chan not set up") . mcduEventChan
   fgthread <- gets mcduFlightgearThread
   fghostMay <- gets mcduFlightgearHostname
   fgportMay <- gets mcduFlightgearPort
   case (fgthread, fghostMay, fgportMay) of
     (Nothing, Just fghost, Just fgport) -> do
-      debugPrint . colorize blue $
-        "Connecting to FlightGear on " <> Text.pack fghost <> ":" <> Text.pack (show fgport)
       connVar <- liftIO newEmptyMVar
-      fgfsThread <- liftIO . async $ do
-        withFGFSConnection fghost fgport $ \fgconn -> forever $ do
-          putMVar connVar fgconn
-      fgconn <- liftIO $ takeMVar connVar
+      fgfsThread <- liftIO . async $
+        (do
+          threadDelay $ time * 1000000
+          atomically $ writeTChan eventChan
+              (LogEvent $
+                "Connecting to FlightGear on " <>
+                Text.pack fghost <> ":" <> Text.pack (show fgport))
+          withFGFSConnection fghost fgport $ \fgconn -> forever $ do
+            putMVar connVar fgconn
+            atomically $ writeTChan eventChan (FGFSConnectEvent fgconn)
+        )
+        `catch`
+        (\(e :: SomeException) -> atomically $ do
+            writeTChan eventChan FGFSDisconnectEvent
+            writeTChan eventChan (LogEvent $ "FGFS disconnected: " <> Text.pack (show e))
+        )
+
       modify $ \s -> s
-        { mcduFlightgearConnection = Just fgconn
-        , mcduFlightgearThread = Just fgfsThread
+        { mcduFlightgearThread = Just fgfsThread
         }
-      debugPrint . colorize green $
-        "Connected to FlightGear on " <> Text.pack fghost <> ":" <> Text.pack (show fgport)
     (Just _, _, _) -> do
-      scratchWarn "FGFS ALREADY CONN"
+      debugPrint . colorize blue $ "FlightGear already connected"
     _ -> do
-      scratchWarn "FGFS NO CONFIG"
+      debugPrint . colorize blue $ "FlightGear not configured"
 
 mcduDisconnectFlightgear :: MCDU ()
 mcduDisconnectFlightgear = do
@@ -809,3 +827,19 @@ handleMCDUEvent mainMenuView dlkMenuView atcMenuView ev = do
 
     LogEvent cmd -> do
       debugPrint (colorize blue cmd)
+
+    FGFSConnectEvent conn -> do
+      debugPrint . colorize green $
+        "Connected to FlightGear"
+      modify $ \s -> s
+        { mcduFlightgearConnection = Just conn
+        }
+
+    FGFSDisconnectEvent -> do
+      debugPrint . colorize magenta $
+        "Lost connection to FlightGear"
+      modify $ \s -> s
+        { mcduFlightgearConnection = Nothing
+        , mcduFlightgearThread = Nothing
+        }
+      mcduConnectFlightgearAfter 10
