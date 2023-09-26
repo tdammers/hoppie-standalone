@@ -24,6 +24,8 @@ import qualified Data.Text.IO as Text
 import qualified Network.HTTP.Simple as HTTP
 import qualified Network.WebSockets as WS
 import System.Random
+import qualified Data.Vector as Vector
+import Control.Monad.IO.Class
 
 import Web.Hoppie.FGFS.NasalValue
 
@@ -38,6 +40,13 @@ data FGFSConnection =
     , fgfsWebsocketConn :: WS.Connection
     , fgfsOutputChan :: TChan ByteString
     }
+
+loadNasalLibrary :: MonadIO m => FGFSConnection -> Text -> FilePath -> m ()
+loadNasalLibrary conn moduleName filePath = liftIO $ do
+  src <- Text.readFile =<< getDataFileName filePath
+  let wrappedSrc =
+        "globals.externalMCDU.loadModule(" <> encodeNasal moduleName <> ", func (mcdu) { " <> src <> "}, 1);"
+  runNasal conn wrappedSrc
 
 withFGFSConnection :: String -> Int -> (FGFSConnection -> IO a) -> IO a
 withFGFSConnection host0 port action = do
@@ -145,17 +154,28 @@ nasalCommand :: Text -> FGCommand
 nasalCommand script =
   mkCommand "nasal" [ ("script", script) ]
 
+callNasalFunc :: (MonadIO m, ToNasal args, FromNasal ret) => FGFSConnection -> Text -> args -> m ret
+callNasalFunc conn funcname args = liftIO $ do
+  let nasalArg = toNasal args
+  case nasalArg of
+    NasalVector nasalArgs -> do
+      let arglist = Text.intercalate ", " . Vector.toList . Vector.map encodeNasalValue $ nasalArgs
+      runNasal conn $ funcname <> "(" <> arglist <> ")"
+    NasalNil -> do
+      runNasal conn $ funcname <> "()"
+    x -> throw $ NasalUnexpected "vector" (show x)
+
 runNasalVoid :: FGFSConnection -> Text -> IO ()
 runNasalVoid conn script =
   runFGCommand conn (nasalCommand script)
 
-runNasal_ :: FGFSConnection -> Text -> IO ()
+runNasal_ :: MonadIO m => FGFSConnection -> Text -> m ()
 runNasal_ conn script = do
   (_ :: NasalValue) <- runNasal conn script
   return ()
 
-runNasal :: FromNasal a => FGFSConnection -> Text -> IO a
-runNasal conn script = do
+runNasal :: MonadIO m => FromNasal a => FGFSConnection -> Text -> m a
+runNasal conn script = liftIO $ do
   runNasalOrError conn script >>= \case
     NasalError err ->
       throw err
@@ -169,7 +189,7 @@ runNasal conn script = do
 runNasalOrError :: FGFSConnection -> Text -> IO NasalValueOrError
 runNasalOrError conn script = do
   let script' =
-        "hoppieStandaloneShim.runScript('" <>
+        "externalMCDU.runScript('" <>
           Text.pack (fgfsOutputPropertyPath conn) <> "', " <> encodeNasal script <> ");"
   runNasalVoid conn script'
   getFGOutput conn

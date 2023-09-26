@@ -1,12 +1,10 @@
 (func {
-    var refTable = {};
-
     var registerRef = func (val) {
-        if (contains(refTable, id(val))) {
-            refTable[id(val)].refcount += 1;
+        if (contains(globals.externalMCDU.refTable, id(val))) {
+            globals.externalMCDU.refTable[id(val)].refcount += 1;
         }
         else {
-            refTable[id(val)] =
+            globals.externalMCDU.refTable[id(val)] =
                 { value: val
                 , refcount: 1
                 }
@@ -14,10 +12,10 @@
     };
 
     var releaseRef = func (ident) {
-        if (contains(refTable, ident)) {
-            refTable[ident].refcount -= 1;
-            if (refTable[ident].refcount <= 0) {
-                delete(refTable, ident);
+        if (contains(globals.externalMCDU.refTable, ident)) {
+            globals.externalMCDU.refTable[ident].refcount -= 1;
+            if (globals.externalMCDU.refTable[ident].refcount <= 0) {
+                delete(globals.externalMCDU.refTable, ident);
             }
         }
     };
@@ -28,15 +26,15 @@
         if (!contains(ref, '__refid__'))
             return nil;
         var refid = ref['__refid__'];
-        if (!contains(refTable, refid))
+        if (!contains(globals.externalMCDU.refTable, refid))
             return nil;
-        return refTable[refid].value;
+        return globals.externalMCDU.refTable[refid].value;
     };
 
     var grabRef = func (ident) {
-        if (contains(refTable, ident)) {
-            refTable[ident].refcount += 1;
-            return refTable[ident].value;
+        if (contains(globals.externalMCDU.refTable, ident)) {
+            globals.externalMCDU.refTable[ident].refcount += 1;
+            return globals.externalMCDU.refTable[ident].value;
         }
         else
             return nil;
@@ -136,7 +134,7 @@
             result = { "error": err, "num": callCounter };
         }
         else {
-            var value = call(f, [], me, globals.hoppieStandaloneShim, err);
+            var value = call(f, [], me, globals.externalMCDU, err);
             if (size(err) > 0) {
                 result = { "error": err, "num": callCounter };
             }
@@ -145,21 +143,30 @@
             }
         }
         setprop(outputPath, jsonEncode(result));
-
-        # setprop(outputPath,
-        #   script' = "setprop(\"" <> Text.pack (fgfsOutputPropertyPath conn) <> "\"," <>
-        #         "(func { " <>
-        #         "var err = []; "<>
-        #         "var result = call(func {" <> script <> "}, [], null, {}, err);" <>
-        #         "return result;" <>
-        #         ")()" <>
-        #         ");"
     };
 
-    globals.hoppieStandaloneShim = {
-        "jsonEncode": jsonEncode,
-        "runScript": runScript,
-        "deref": deref,
-        "refTable": refTable,
+    var loadModule = func (moduleName, moduleLoader, force=0) {
+        if (contains(globals.externalMCDU.libs, moduleName) and !force) {
+            return nil;
+        }
+        var module = moduleLoader(globals.externalMCDU);
+        globals.externalMCDU.libs[moduleName] = module;
+        globals.externalMCDU[moduleName] = module;
+        return nil;
     };
+
+    if (!contains(globals, 'externalMCDU'))
+        globals.externalMCDU = {};
+
+    delete(globals.externalMCDU, 'flightplan');
+    globals.externalMCDU.jsonEncode = jsonEncode;
+    globals.externalMCDU.runScript = runScript;
+    globals.externalMCDU.deref = deref;
+    if (!contains(globals.externalMCDU, 'refTable')) {
+        globals.externalMCDU.refTable = {};
+    }
+    if (!contains(globals.externalMCDU, 'libs')) {
+        globals.externalMCDU.libs = {};
+    }
+    globals.externalMCDU.loadModule = loadModule;
 })();
