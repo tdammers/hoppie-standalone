@@ -32,6 +32,7 @@ data FPLeg =
     , legHeading :: Maybe Double
     , legDist :: Maybe Double
     , legRouteDist :: Maybe Double
+    , legRemainingDist :: Maybe Double
     , legSpeed :: Maybe Double
     , legSpeedType :: Maybe Text
     , legAlt :: Maybe Double
@@ -48,6 +49,7 @@ instance FromNasal FPLeg where
       <*> fromNasalField "heading" n
       <*> fromNasalField "leg_dist" n
       <*> fromNasalField "route_dist" n
+      <*> fromNasalField "remaining_dist" n
       <*> fromNasalField "speed" n
       <*> fromNasalField "speed_type" n
       <*> fromNasalField "alt" n
@@ -96,13 +98,6 @@ formatETA eta =
   let (minutesRaw :: Int) = floor eta `mod` (24 * 60)
       (hours, minutes) = minutesRaw `divMod` 60
   in printf "%02i%02i" hours minutes
-
-fplView :: MCDUView
-fplView = defView
-  { mcduViewTitle = "ACT FPL"
-  , mcduViewAutoReload = True
-  , mcduViewOnLoad = fplViewLoad
-  }
 
 withFGNasal_ :: (FGFSConnection -> MCDU ()) -> MCDU ()
 withFGNasal_ = withFGNasalDef ()
@@ -179,6 +174,13 @@ fgRunNasalDef defval script = do
     loadNasalLibrary conn "fms" "nasal/flightplan.nas"
     runNasal conn script
 
+fplView :: MCDUView
+fplView = defView
+  { mcduViewTitle = "ACT FPL"
+  , mcduViewAutoReload = True
+  , mcduViewOnLoad = fplViewLoad
+  }
+
 fplViewLoad :: MCDU ()
 fplViewLoad = withFGView $ \conn -> do
   (groundspeed :: Double) <- max 100 <$> callNasalFunc conn "fms.getGroundspeed" ()
@@ -188,7 +190,7 @@ fplViewLoad = withFGView $ \conn -> do
   flightplanModified <- callNasalFunc conn "fms.hasFlightplanModifications" ()
   let legs = case currentLeg of
                 Nothing -> legs'
-                Just i -> drop i legs'
+                Just i -> drop (i - 1) legs'
   curPage <- gets (mcduViewPage . mcduView)
   let legsDropped = curPage * 5
   let numPages = (length legs + 4) `div` 5
@@ -201,8 +203,11 @@ fplViewLoad = withFGView $ \conn -> do
           mcduPrintC (screenW `div` 2) (screenH `div` 2) white "NO FPL"
         zipWithM_
           (\n leg -> do
-            let isCurrent = n + legsDropped == 0
-                color = if isCurrent then
+            let isCurrent = n + legsDropped == 1
+                isPrevious = n + legsDropped == 0
+                color = if isPrevious then
+                          yellow
+                        else if isCurrent then
                           magenta
                         else if legIsDiscontinuity leg then
                           white
@@ -210,13 +215,20 @@ fplViewLoad = withFGView $ \conn -> do
                           cyan
                         else
                           green
-            forM_ (legRouteDist leg) $ \routeDist -> do
+            forM_ (legRemainingDist leg) $ \dist -> do
               when (groundspeed > 40) $ do
-                let eta = utcMinutes + routeDist / groundspeed * 60
+                let eta = utcMinutes + dist / groundspeed * 60
                 mcduPrint (screenW - 6) (n * 2 + 1) color (BS8.pack $ formatETA eta <> "z")
-            mcduPrint 1 (n * 2 + 1) color (BS8.pack . maybe "---°" (printf "%03.0f°") $ legHeading leg)
-            mcduPrint 9 (n * 2 + 1) color (BS8.pack . maybe "----NM" formatDistance $ legDist leg)
-            mcduPrint 0 (n * 2 + 2) color (encodeUtf8 $ legName leg)
+            if isPrevious then
+              mcduPrint 0 (n * 2 + 2) color (encodeUtf8 $ legName leg)
+            else if isCurrent then do
+              mcduPrint 1 (n * 2 + 1) color (BS8.pack . maybe "---°" (printf "%03.0f°") $ legHeading leg)
+              mcduPrint 9 (n * 2 + 1) color (BS8.pack . maybe "----NM" formatDistance $ legRemainingDist leg)
+              mcduPrint 0 (n * 2 + 2) color (encodeUtf8 $ legName leg)
+            else do
+              mcduPrint 1 (n * 2 + 1) color (BS8.pack . maybe "---°" (printf "%03.0f°") $ legHeading leg)
+              mcduPrint 9 (n * 2 + 1) color (BS8.pack . maybe "----NM" formatDistance $ legDist leg)
+              mcduPrint 0 (n * 2 + 2) color (encodeUtf8 $ legName leg)
             mcduPrint (screenW - 11) (n * 2 + 2) color (BS8.pack $ formatSpeed (legSpeed leg) (legSpeedType leg))
             mcduPrint (screenW - 7) (n * 2 + 2) color "/"
             mcduPrint (screenW - 6) (n * 2 + 2) color (BS8.pack $ formatAltitude (legAlt leg) (legAltType leg))
