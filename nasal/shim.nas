@@ -61,17 +61,23 @@
                         });
         }
         elsif (ty == 'scalar') {
-            if (isint(val) and sprintf(':%i', val) == ':' ~ val) {
-                ty = 'int';
-                encoded = sprintf('%i', val);
+            if (isint(val)) {
+                if (sprintf(':%i', val) == ':' ~ val) {
+                    ty = 'int';
+                    encoded = sprintf('%i', val);
+                }
+                else {
+                    ty = 'string';
+                    encoded = jsonEncodeString(val ~ '');
+                }
             }
-            elsif (isnum(val) and sprintf(':%i', val) == ':' ~ val) {
+            elsif (isnum(val)) {
                 ty = 'float';
                 encoded = sprintf('%1.12f', val);
             }
             else {
                 ty = 'string';
-                encoded = jsonEncodeString(val);
+                encoded = jsonEncodeString(val ~ '');
             }
         }
         elsif (ty == 'vector') {
