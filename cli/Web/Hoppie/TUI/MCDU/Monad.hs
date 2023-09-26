@@ -730,8 +730,8 @@ debugPrint str = do
     { mcduDebugLog = str : mcduDebugLog s }
   redrawLog
 
-handleInputCommand :: MCDUView -> MCDUView -> MCDUView -> InputCommand -> MCDU ()
-handleInputCommand mainMenuView dlkMenuView atcMenuView cmd =
+handleInputCommand :: InputCommand -> MCDU ()
+handleInputCommand cmd =
   case cmd of
     InputPgUp ->
       prevPage
@@ -748,9 +748,11 @@ handleInputCommand mainMenuView dlkMenuView atcMenuView cmd =
     InputF8 -> handleLSK 7
     InputF9 -> handleLSK 8
     InputF10 -> handleLSK 9
-    InputF11 -> loadView dlkMenuView
-    InputF12 -> loadView atcMenuView
-    InputEscape -> loadView mainMenuView
+    InputF11 -> loadViewByID DLKMenuView
+    InputF12 -> loadViewByID ATCMenuView
+    InputF13 -> loadViewByID FPLView
+    InputF14 -> loadViewByID RTEView
+    InputEscape -> loadViewByID MainMenuView
 
     InputRedraw -> do
       flushAll
@@ -770,8 +772,8 @@ handleInputCommand mainMenuView dlkMenuView atcMenuView cmd =
         return ()
     _ -> return ()
 
-handleMCDUEvent :: MCDUView -> MCDUView -> MCDUView -> MCDUEvent -> MCDU ()
-handleMCDUEvent mainMenuView dlkMenuView atcMenuView ev = do
+handleMCDUEvent :: MCDUEvent -> MCDU ()
+handleMCDUEvent ev = do
   case ev of
     NetworkStatusEvent ns' -> do
       ns <- gets mcduNetworkStatus
@@ -823,7 +825,7 @@ handleMCDUEvent mainMenuView dlkMenuView atcMenuView ev = do
       reloadView
 
     InputCommandEvent cmd -> do
-      handleInputCommand mainMenuView dlkMenuView atcMenuView cmd
+      handleInputCommand cmd
 
     LogEvent cmd -> do
       debugPrint (colorize blue cmd)

@@ -42,7 +42,7 @@ mcduMain eventChan = do
         (Just a, Nothing) -> return [a]
         (Nothing, Just b) -> return [b]
         (Nothing, Nothing) -> retry
-    mapM_ (handleMCDUEvent mainMenuView dlkMenuView atcMenuView) evs
+    mapM_ handleMCDUEvent evs
 
 mapHttpEvent :: HttpServerEvent -> MCDUEvent
 mapHttpEvent (HttpInputCommand cmd) = InputCommandEvent cmd
