@@ -145,12 +145,14 @@
         setprop(outputPath, jsonEncode(result));
     };
 
-    var loadModule = func (moduleName, moduleLoader, force=0) {
-        if (contains(globals.externalMCDU.libs, moduleName) and !force) {
+    var loadModule = func (moduleHash, moduleName, moduleLoader, force=0) {
+        if (contains(globals.externalMCDU.libs, moduleName) and
+                !force and
+                globals.externalMCDU.libs[moduleName] == moduleHash) {
             return nil;
         }
         var module = moduleLoader(globals.externalMCDU);
-        globals.externalMCDU.libs[moduleName] = module;
+        globals.externalMCDU.libs[moduleName] = moduleHash;
         globals.externalMCDU[moduleName] = module;
         return nil;
     };

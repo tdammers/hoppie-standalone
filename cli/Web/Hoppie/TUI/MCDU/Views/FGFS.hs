@@ -200,16 +200,38 @@ fplViewLoad = withFGView $ \conn -> do
   legs' <- callNasalFunc conn "fms.getFlightplanLegs" ()
   currentLeg <- callNasalFunc conn "fms.getCurrentLeg" ()
   flightplanModified <- callNasalFunc conn "fms.hasFlightplanModifications" ()
-  let legsPerPage = numLSKs
+  let legsPerPage = numLSKs - 1
   let legs = case currentLeg of
                 Nothing -> legs'
                 Just i -> drop (i - 1) legs'
   curPage <- gets (mcduViewPage . mcduView)
   let legsDropped = curPage * legsPerPage
   let (numPages, curLegs) = paginate legsPerPage curPage legs
+
+  let putWaypoint :: Int -> Maybe ByteString -> MCDU Bool
+      putWaypoint n Nothing = do
+        callNasalFunc conn "fms.deleteWaypoint" [n]
+      putWaypoint _ (Just _) = do
+        return False
+      getWaypoint n = do
+        callNasalFunc conn "fms.getWaypointName" [n]
+
   modifyView $ \v -> v
     { mcduViewNumPages = numPages
     , mcduViewTitle = if flightplanModified then "MOD FPL" else "ACT FPL"
+    , mcduViewLSKBindings = Map.fromList $
+        [ (LSKL n, ("", do
+              scratchInteract
+                (putWaypoint (n + legsDropped - 1 + fromMaybe 0 currentLeg))
+                (getWaypoint (n + legsDropped - 1 + fromMaybe 0 currentLeg))
+              reloadView
+          ))
+        | n <- [0 .. legsPerPage ]
+        ]
+        ++
+        [ (LSKL 5, ("CANCEL", cancelFlightplanEdits >> reloadView)) | flightplanModified ]
+        ++
+        [ (LSKR 5, ("CONFIRM", commitFlightplanEdits >> reloadView)) | flightplanModified ]
     , mcduViewDraw = do
         when (null legs) $ do
           mcduPrintC (screenW `div` 2) (screenH `div` 2) white "NO FPL"
@@ -240,6 +262,7 @@ fplViewLoad = withFGView $ \conn -> do
             mcduPrint (screenW - 11) (n * 2 + 2) color (BS8.pack $ formatSpeed (legSpeed leg) (legSpeedType leg))
             mcduPrint (screenW - 7) (n * 2 + 2) color "/"
             mcduPrint (screenW - 6) (n * 2 + 2) color (BS8.pack $ formatAltitude (legAlt leg) (legAltType leg))
+
           ) [0,1..] curLegs
     }
 

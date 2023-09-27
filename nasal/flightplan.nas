@@ -1,4 +1,4 @@
-# print("Loading flightplan.nas");
+print("Loading flightplan.nas");
 
 if (!contains(mcdu, 'modifiedFlightplan'))
     mcdu.modifiedFlightplan = nil;
@@ -10,6 +10,7 @@ var hasFlightplanModifications = func {
 var getModifyableFlightplan = func {
     if (mcdu.modifiedFlightplan == nil) {
         mcdu.modifiedFlightplan = flightplan().clone();
+        mcdu.modifiedFlightplan.current = flightplan().current;
     }
     return mcdu.modifiedFlightplan;
 };
@@ -26,7 +27,10 @@ var cancelFlightplanEdits = func {
 };
 
 var commitFlightplanEdits = func {
+    var current = mcdu.modifiedFlightplan.current;
     mcdu.modifiedFlightplan.activate();
+    fgcommand("activate-flightplan", props.Node.new({"activate": 1}));
+    flightplan().current = current;
     mcdu.modifiedFlightplan = nil;
 };
 
@@ -81,6 +85,22 @@ var getCurrentLeg = func {
     return fp.current;
 };
 
+var getWaypointName = func (i) {
+    var fp = fms.getVisibleFlightplan();
+    var wp = fp.getWP(i);
+    if (wp == nil) return nil;
+    return wp.wp_name;
+};
+
+var deleteWaypoint = func (i) {
+    var fp = fms.getModifyableFlightplan();
+    if (i >= fp.getPlanSize() - 1)
+        return 0;
+    if (i <= 0)
+        return 0;
+    fp.deleteWP(i);
+    return 1;
+};
 
 var setDepartureRunway = func (runwayID) {
     var fp = getModifyableFlightplan();
@@ -436,6 +456,9 @@ return {
     'getVisibleFlightplan': getVisibleFlightplan,
     'cancelFlightplanEdits': cancelFlightplanEdits,
     'commitFlightplanEdits': commitFlightplanEdits,
+
+    'getWaypointName': getWaypointName,
+    'deleteWaypoint': deleteWaypoint,
 
     'getGroundspeed': getGroundspeed,
     'getUTCMinutes': getUTCMinutes,

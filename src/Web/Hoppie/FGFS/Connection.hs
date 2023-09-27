@@ -12,20 +12,22 @@ import Control.Concurrent.Async
 import Control.Concurrent.STM
 import Control.Exception
 import Control.Monad
+import Control.Monad.IO.Class
 import Data.Aeson (ToJSON (..), FromJSON (..), (.=), (.:))
 import qualified Data.Aeson as JSON
 import Data.ByteString (ByteString)
+import qualified Data.ByteString.Lazy as LBS
+import Data.Digest.Pure.SHA (showDigest, sha256)
 import qualified Data.Map.Strict as Map
 import Data.Maybe
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.Text.Encoding
 import qualified Data.Text.IO as Text
+import qualified Data.Vector as Vector
 import qualified Network.HTTP.Simple as HTTP
 import qualified Network.WebSockets as WS
 import System.Random
-import qualified Data.Vector as Vector
-import Control.Monad.IO.Class
 
 import Web.Hoppie.FGFS.NasalValue
 
@@ -48,8 +50,13 @@ instance Show FGFSConnection where
 loadNasalLibrary :: MonadIO m => FGFSConnection -> Text -> FilePath -> m ()
 loadNasalLibrary conn moduleName filePath = liftIO $ do
   src <- Text.readFile =<< getDataFileName filePath
+  let hash = Text.pack . showDigest . sha256 . LBS.fromStrict . encodeUtf8 $ src
   let wrappedSrc =
-        "globals.externalMCDU.loadModule(" <> encodeNasal moduleName <> ", func (mcdu) { " <> src <> "}, 1);"
+        "globals.externalMCDU.loadModule(" <>
+          encodeNasal hash <> ", " <>
+          encodeNasal moduleName <>
+          ", func (mcdu) { " <> src <>
+          "}, 0);"
   runNasal conn wrappedSrc
 
 withFGFSConnection :: String -> Int -> (FGFSConnection -> IO ()) -> IO ()

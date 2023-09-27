@@ -157,13 +157,13 @@ mcduPrintC x y fg bs = do
 
 mcduPrintLskL :: Int -> ByteString -> MCDUDraw s ()
 mcduPrintLskL n "" =
-  mcduPrint 0 (mcduLskY $ LSKL n) white "<"
+  mcduPrint 0 (mcduLskY $ LSKL n) white ""
 mcduPrintLskL n msg =
   mcduPrint 0 (mcduLskY $ LSKL n) white ("<" <> msg)
 
 mcduPrintLskR :: Int -> ByteString -> MCDUDraw s ()
 mcduPrintLskR n "" =
-  mcduPrintR screenW (mcduLskY $ LSKR n) white ">"
+  mcduPrintR screenW (mcduLskY $ LSKR n) white ""
 mcduPrintLskR n msg =
   mcduPrintR screenW (mcduLskY $ LSKR n) white (msg <> ">")
 
