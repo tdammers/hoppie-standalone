@@ -22,3 +22,4 @@ defResolveViewID DLKMenuView = dlkMenuView
 defResolveViewID ATCMenuView = atcMenuView
 defResolveViewID FPLView = fplView
 defResolveViewID RTEView = rteView
+defResolveViewID NavView = navView

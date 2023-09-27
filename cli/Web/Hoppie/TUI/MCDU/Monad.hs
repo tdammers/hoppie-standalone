@@ -836,6 +836,7 @@ handleMCDUEvent ev = do
       modify $ \s -> s
         { mcduFlightgearConnection = Just conn
         }
+      reloadView
 
     FGFSDisconnectEvent -> do
       debugPrint . colorize magenta $
@@ -844,4 +845,5 @@ handleMCDUEvent ev = do
         { mcduFlightgearConnection = Nothing
         , mcduFlightgearThread = Nothing
         }
+      reloadView
       mcduConnectFlightgearAfter 10
