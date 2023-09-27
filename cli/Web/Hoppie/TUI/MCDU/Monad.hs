@@ -5,15 +5,18 @@
 {-# LANGUAGE ExistentialQuantification #-}
 
 module Web.Hoppie.TUI.MCDU.Monad
+( module Web.Hoppie.TUI.MCDU.Monad
+, module Web.Hoppie.TUI.MCDU.Keys
+)
 where
 
 import qualified Web.Hoppie.CPDLC.Message as CPDLC
 import qualified Web.Hoppie.CPDLC.MessageTypes as CPDLC
 import Web.Hoppie.System
 import Web.Hoppie.FGFS.Connection
-import Web.Hoppie.TUI.Input
 import Web.Hoppie.TUI.MCDU.Draw
 import Web.Hoppie.TUI.MCDU.HttpServer
+import Web.Hoppie.TUI.MCDU.Keys
 import Web.Hoppie.TUI.Output
 import Web.Hoppie.TUI.QR
 import Web.Hoppie.TUI.StringUtil
@@ -48,7 +51,8 @@ import Control.Exception
 {-# ANN module ("HLint: ignore redundant <$>" :: String) #-}
 
 data MCDUEvent
-  = InputCommandEvent InputCommand
+  = KeyEvent MCDUKey
+  | RedrawEvent
   | UplinkEvent (WithMeta UplinkStatus TypedMessage)
   | DownlinkEvent (WithMeta DownlinkStatus TypedMessage)
   | NetworkStatusEvent NetworkStatus
@@ -147,7 +151,7 @@ defMCDUState =
 data MCDUView =
   MCDUView
     { mcduViewTitle :: ByteString
-    , mcduViewLSKBindings :: Map Int (ByteString, MCDU ())
+    , mcduViewLSKBindings :: Map LSK (ByteString, MCDU ())
     , mcduViewDraw :: forall s. MCDUDraw s ()
     , mcduViewPage :: Int
     , mcduViewNumPages :: Int
@@ -209,14 +213,14 @@ clearTelexBody =
   modify $ \s -> s
     { mcduTelexBody = Nothing }
 
-addLskBinding :: Int -> ByteString -> MCDU () -> MCDU ()
+addLskBinding :: LSK -> ByteString -> MCDU () -> MCDU ()
 addLskBinding lsk label action =
   modifyView $ \v -> v {
     mcduViewLSKBindings =
       Map.insert lsk (label, action) (mcduViewLSKBindings v)
   }
 
-removeLskBinding :: Int -> MCDU ()
+removeLskBinding :: LSK -> MCDU ()
 removeLskBinding lsk =
   modifyView $ \v -> v {
     mcduViewLSKBindings =
@@ -606,10 +610,11 @@ redrawView = do
       mcduPrintR screenW 0 white (BS8.pack pageInfoStr)
     mcduViewDraw view
     forM_ (Map.toList $ mcduViewLSKBindings view) $ \(n, (label, _)) -> do
-      if n `div` 5 == 0 then
-        mcduPrintLskL n label
-      else
-        mcduPrintLskR n label
+      case n of
+        LSKL i ->
+          mcduPrintLskL i label
+        LSKR i ->
+          mcduPrintLskR i label
   redrawScratch
   flushScreen
 
@@ -623,7 +628,7 @@ prevPage = do
   view <- gets mcduView
   mcduViewGoToPage view (mcduViewPage view - 1)
 
-handleLSK :: Int -> MCDU ()
+handleLSK :: LSK -> MCDU ()
 handleLSK n = do
   view <- gets mcduView
   let bindingMay = Map.lookup n (mcduViewLSKBindings view)
@@ -730,38 +735,29 @@ debugPrint str = do
     { mcduDebugLog = str : mcduDebugLog s }
   redrawLog
 
-handleInputCommand :: InputCommand -> MCDU ()
-handleInputCommand cmd =
-  case cmd of
-    InputPgUp ->
+handleKey :: MCDUKey -> MCDU ()
+handleKey key =
+  case key of
+    MCDULSK lsk ->
+      handleLSK lsk
+
+    MCDUFunction PageUp ->
       prevPage
-    InputPgDn ->
+    MCDUFunction PageDown ->
       nextPage
 
-    InputF1 -> handleLSK 0
-    InputF2 -> handleLSK 1
-    InputF3 -> handleLSK 2
-    InputF4 -> handleLSK 3
-    InputF5 -> handleLSK 4
-    InputF6 -> handleLSK 5
-    InputF7 -> handleLSK 6
-    InputF8 -> handleLSK 7
-    InputF9 -> handleLSK 8
-    InputF10 -> handleLSK 9
-    InputF11 -> loadViewByID DLKMenuView
-    InputF12 -> loadViewByID ATCMenuView
-    InputF13 -> loadViewByID FPLView
-    InputF14 -> loadViewByID RTEView
-    InputEscape -> loadViewByID MainMenuView
+    MCDUFunction DLK -> loadViewByID DLKMenuView
+    MCDUFunction ATC -> loadViewByID ATCMenuView
+    MCDUFunction FPL -> loadViewByID FPLView
+    MCDUFunction RTE -> loadViewByID RTEView
+    MCDUFunction Menu -> loadViewByID MainMenuView
 
-    InputRedraw -> do
-      flushAll
-      
-    InputBackspace ->
-      scratchDel
-    InputDel ->
+    MCDUFunction DEL ->
       scratchClear
-    InputChar c ->
+    MCDUFunction CLR ->
+      scratchDel
+
+    MCDUChar c ->
       if isAsciiLower c then
         scratchAppend (ord8 $ toUpper c)
       else if isAsciiUpper c ||
@@ -770,7 +766,6 @@ handleInputCommand cmd =
         scratchAppend (ord8 c)
       else
         return ()
-    _ -> return ()
 
 handleMCDUEvent :: MCDUEvent -> MCDU ()
 handleMCDUEvent ev = do
@@ -824,8 +819,11 @@ handleMCDUEvent ev = do
                  <> maybe (colorize yellow "NONE") (colorize green . decodeUtf8) cda
       reloadView
 
-    InputCommandEvent cmd -> do
-      handleInputCommand cmd
+    KeyEvent key -> do
+      handleKey key
+
+    RedrawEvent ->
+      flushAll
 
     LogEvent cmd -> do
       debugPrint (colorize blue cmd)

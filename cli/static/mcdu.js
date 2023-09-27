@@ -1,5 +1,5 @@
 const screenW = 24;
-const screenH = 12;
+const screenH = 14;
 
 var ws = null;
 

@@ -12,7 +12,7 @@ import Control.Monad.State
 
 {-# ANN module ("HLint: ignore redundant <$>" :: String) #-}
 
-loadUplinkLSK :: Int -> MCDU ()
+loadUplinkLSK :: LSK -> MCDU ()
 loadUplinkLSK lsk = do
   unreadDLK <- gets mcduUnreadDLK
   unreadCPDLC <- gets mcduUnreadCPDLC
@@ -27,3 +27,19 @@ loadUplinkLSK lsk = do
             loadViewByID (MessageView dlkUID)
         Nothing ->
           removeLskBinding lsk
+
+paginateWithHeadroom :: Int
+                     -> Int
+                     -> Int
+                     -> [a]
+                     -> (Int, [a])
+paginateWithHeadroom headroom itemsPerPage page items =
+  let pageItems = take itemsPerPage . drop (itemsPerPage * page) $ items
+      numPages = (length items + headroom + itemsPerPage - 1) `div` itemsPerPage
+  in (numPages, pageItems)
+
+paginate :: Int
+         -> Int
+         -> [a]
+         -> (Int, [a])
+paginate = paginateWithHeadroom 0

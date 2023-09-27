@@ -7,8 +7,8 @@ where
 
 import Paths_hoppie_standalone
 
-import Web.Hoppie.TUI.Input
 import Web.Hoppie.TUI.MCDU.Draw
+import Web.Hoppie.TUI.MCDU.Keys
 
 import Prelude hiding (log)
 
@@ -35,7 +35,7 @@ import Text.Printf
 import Data.Time
 
 data HttpServerEvent
-  = HttpInputCommand InputCommand
+  = HttpInputCommand MCDUKey
   | HttpLogEvent Text
   deriving (Show, Eq, Ord)
 
@@ -174,27 +174,29 @@ httpMain screenBufVar screenBufChan inputChan =
 
         go [c]
           | isAlphaNum c || c `elem` ['.', ' ', '-', '/']
-          = handleInput (InputChar $ toUpper c) >> return True
-        go "F1" = handleInput InputF1 >> return True
-        go "F2" = handleInput InputF2 >> return True
-        go "F3" = handleInput InputF3 >> return True
-        go "F4" = handleInput InputF4 >> return True
-        go "F5" = handleInput InputF5 >> return True
-        go "F6" = handleInput InputF6 >> return True
-        go "F7" = handleInput InputF7 >> return True
-        go "F8" = handleInput InputF8 >> return True
-        go "F9" = handleInput InputF9 >> return True
-        go "F10" = handleInput InputF10 >> return True
-        go "F11" = handleInput InputF11 >> return True
-        go "F12" = handleInput InputF12 >> return True
-        go "F13" = handleInput InputF13 >> return True
-        go "F14" = handleInput InputF14 >> return True
-        go "MENU" = handleInput InputEscape >> return True
-        go "PGUP" = handleInput InputPgUp >> return True
-        go "PGDN" = handleInput InputPgDn >> return True
-        go "BACK" = handleInput InputBackspace >> return True
-        go "DEL" = handleInput InputDel >> return True
-        go "ESC" = handleInput InputEscape >> return True
+          = handleInput (MCDUChar $ toUpper c) >> return True
+        go "L1" = handleInput (MCDULSK $ LSKL 0) >> return True
+        go "L2" = handleInput (MCDULSK $ LSKL 1) >> return True
+        go "L3" = handleInput (MCDULSK $ LSKL 2) >> return True
+        go "L4" = handleInput (MCDULSK $ LSKL 3) >> return True
+        go "L5" = handleInput (MCDULSK $ LSKL 4) >> return True
+        go "L6" = handleInput (MCDULSK $ LSKL 5) >> return True
+        go "R1" = handleInput (MCDULSK $ LSKR 0) >> return True
+        go "R2" = handleInput (MCDULSK $ LSKR 1) >> return True
+        go "R3" = handleInput (MCDULSK $ LSKR 2) >> return True
+        go "R4" = handleInput (MCDULSK $ LSKR 3) >> return True
+        go "R5" = handleInput (MCDULSK $ LSKR 4) >> return True
+        go "R6" = handleInput (MCDULSK $ LSKR 5) >> return True
+
+        go "MENU" = handleInput (MCDUFunction Menu) >> return True
+        go "PGUP" = handleInput (MCDUFunction PageUp) >> return True
+        go "PGDN" = handleInput (MCDUFunction PageDown) >> return True
+        go "CLR" = handleInput (MCDUFunction CLR) >> return True
+        go "DEL" = handleInput (MCDUFunction DEL) >> return True
+        go "DLK" = handleInput (MCDUFunction DLK) >> return True
+        go "ATC" = handleInput (MCDUFunction ATC) >> return True
+        go "FPL" = handleInput (MCDUFunction FPL) >> return True
+        go "RTE" = handleInput (MCDUFunction RTE) >> return True
         go _ = return False
 
     logRq :: Request -> Text -> IO ()

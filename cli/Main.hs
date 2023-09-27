@@ -319,7 +319,34 @@ runInputPusher :: TChan Word8 -> TChan MCDUEvent -> IO ()
 runInputPusher inputChan eventChan = do
   kcl <- loadKeyCodes
   forever $ do
-    readCommand kcl inputChan >>= atomically . writeTChan eventChan . InputCommandEvent
+    inputCommand <- readCommand kcl inputChan
+    forM_ (mapInputCommand inputCommand) $ \ev ->
+      atomically . writeTChan eventChan $ ev
+
+mapInputCommand :: InputCommand -> Maybe MCDUEvent
+mapInputCommand (InputChar c) = Just $ KeyEvent (MCDUChar c)
+mapInputCommand InputF1 = Just $ KeyEvent (MCDULSK $ LSKL 0)
+mapInputCommand InputF2 = Just $ KeyEvent (MCDULSK $ LSKL 1)
+mapInputCommand InputF3 = Just $ KeyEvent (MCDULSK $ LSKL 2)
+mapInputCommand InputF4 = Just $ KeyEvent (MCDULSK $ LSKL 3)
+mapInputCommand InputF5 = Just $ KeyEvent (MCDULSK $ LSKL 4)
+mapInputCommand InputF6 = Just $ KeyEvent (MCDULSK $ LSKL 5)
+mapInputCommand InputF7 = Just $ KeyEvent (MCDULSK $ LSKR 0)
+mapInputCommand InputF8 = Just $ KeyEvent (MCDULSK $ LSKR 1)
+mapInputCommand InputF9 = Just $ KeyEvent (MCDULSK $ LSKR 2)
+mapInputCommand InputF10 = Just $ KeyEvent (MCDULSK $ LSKR 3)
+mapInputCommand InputF11 = Just $ KeyEvent (MCDULSK $ LSKR 4)
+mapInputCommand InputF12 = Just $ KeyEvent (MCDULSK $ LSKR 5)
+mapInputCommand InputEscape = Just $ KeyEvent (MCDUFunction Menu)
+mapInputCommand InputDel = Just $ KeyEvent (MCDUFunction DEL)
+mapInputCommand InputBackspace = Just $ KeyEvent (MCDUFunction CLR)
+mapInputCommand InputF13 = Just $ KeyEvent (MCDUFunction DLK)
+mapInputCommand InputF14 = Just $ KeyEvent (MCDUFunction ATC)
+mapInputCommand InputF15 = Just $ KeyEvent (MCDUFunction FPL)
+mapInputCommand InputF16 = Just $ KeyEvent (MCDUFunction RTE)
+mapInputCommand InputPgUp = Just $ KeyEvent (MCDUFunction PageUp)
+mapInputCommand InputPgDn = Just $ KeyEvent (MCDUFunction PageDown)
+mapInputCommand _ = Nothing
 
 runTickTimer :: TChan MCDUEvent -> IO ()
 runTickTimer eventChan = liftIO . forever $ do

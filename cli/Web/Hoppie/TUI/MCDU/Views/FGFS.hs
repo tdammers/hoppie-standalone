@@ -8,6 +8,7 @@ where
 
 import Web.Hoppie.TUI.MCDU.Draw
 import Web.Hoppie.TUI.MCDU.Monad
+import Web.Hoppie.TUI.MCDU.Views.Common
 import Web.Hoppie.TUI.StringUtil
 import Web.Hoppie.TUI.MCDU.Views.Enum
 import Web.Hoppie.FGFS.Connection
@@ -179,9 +180,9 @@ navView :: MCDUView
 navView = defView
   { mcduViewTitle = "NAV MENU"
   , mcduViewLSKBindings = Map.fromList
-      [ (0, ("DIRECT", scratchWarn "NOT IMPLEMENTED"))
-      , (1, ("NAV INIT", scratchWarn "NOT IMPLEMENTED"))
-      , (4, ("MENU", loadViewByID MainMenuView))
+      [ (LSKL 0, ("DIRECT", scratchWarn "NOT IMPLEMENTED"))
+      , (LSKL 1, ("NAV INIT", scratchWarn "NOT IMPLEMENTED"))
+      , (LSKL 5, ("MENU", loadViewByID MainMenuView))
       ]
   }
 
@@ -199,13 +200,13 @@ fplViewLoad = withFGView $ \conn -> do
   legs' <- callNasalFunc conn "fms.getFlightplanLegs" ()
   currentLeg <- callNasalFunc conn "fms.getCurrentLeg" ()
   flightplanModified <- callNasalFunc conn "fms.hasFlightplanModifications" ()
+  let legsPerPage = numLSKs
   let legs = case currentLeg of
                 Nothing -> legs'
                 Just i -> drop (i - 1) legs'
   curPage <- gets (mcduViewPage . mcduView)
-  let legsDropped = curPage * 5
-  let numPages = (length legs + 4) `div` 5
-  let curLegs = take 5 . drop legsDropped $ legs
+  let legsDropped = curPage * legsPerPage
+  let (numPages, curLegs) = paginate legsPerPage curPage legs
   modifyView $ \v -> v
     { mcduViewNumPages = numPages
     , mcduViewTitle = if flightplanModified then "MOD FPL" else "ACT FPL"
@@ -259,29 +260,29 @@ rteViewLoad = withFGView $ \conn -> do
     { mcduViewNumPages = 1
     , mcduViewTitle = if flightplanModified then "MOD RTE" else "ACT RTE"
     , mcduViewLSKBindings = Map.fromList $
-        [ (0, ("", do
+        [ (LSKL 0, ("", do
                     scratchInteract
                       setDeparture
                       getDeparture
                     reloadView))
-        , (3, ("DEPARTURE", loadView departureView))
+        , (LSKL 4, ("DEPARTURE", loadView departureView))
 
-        , (5, ("", do
+        , (LSKR 0, ("", do
                     scratchInteract
                       setDestination
                       getDestination
                     reloadView))
-        , (6, ("", do
+        , (LSKR 1, ("", do
                     scratchInteract
                       (maybe (return False) (\c -> lift (setCallsign c) >> return True))
                       (Just <$> lift getCallsign)
                     reloadView))
-        , (8, ("ARRIVAL", loadView arrivalView))
+        , (LSKR 4, ("ARRIVAL", loadView arrivalView))
         ]
         ++
-        [ (4, ("CANCEL", cancelFlightplanEdits >> reloadView)) | flightplanModified ]
+        [ (LSKL 5, ("CANCEL", cancelFlightplanEdits >> reloadView)) | flightplanModified ]
         ++
-        [ (9, ("CONFIRM", commitFlightplanEdits >> reloadView)) | flightplanModified ]
+        [ (LSKR 5, ("CONFIRM", commitFlightplanEdits >> reloadView)) | flightplanModified ]
     , mcduViewDraw = do
         mcduPrint 1 1 white "ORIGIN"
         mcduPrint 1 2 green (fromMaybe "----" departureMay)
@@ -296,18 +297,18 @@ rteViewLoad = withFGView $ \conn -> do
 selectView :: ByteString -> [ByteString] -> ByteString -> (Maybe ByteString -> MCDU ()) -> MCDUView
 selectView title options returnLabel handleResult= defView
   { mcduViewTitle = title
-  , mcduViewNumPages = (length options + 7) `div` 8
+  , mcduViewNumPages = (length options + (2 * numLSKs) - 1) `div` (2 * numLSKs)
   , mcduViewLSKBindings = mempty
   , mcduViewOnLoad = do
       curPage <- gets (mcduViewPage . mcduView)
-      let curOptions = take 8 . drop (curPage * 8) $ options
+      let curOptions = take (2 * numLSKs) . drop (curPage * 2 * numLSKs) $ options
       modifyView $ \v -> v {
         mcduViewLSKBindings = Map.fromList
           [ (n, (option, handleResult (Just option)))
-          | (n, option) <- zip [0,5,1,6,2,7,3,8] curOptions
+          | (n, option) <- zip [LSKL 0 .. LSKR 4] curOptions
           ]
       }
-      addLskBinding 4 returnLabel (handleResult Nothing)
+      addLskBinding (LSKL 5) returnLabel (handleResult Nothing)
   }
 
 departureView :: MCDUView
@@ -339,22 +340,22 @@ departureViewLoad = do
       modifyView $ \v -> v
         { mcduViewNumPages = 1
         , mcduViewLSKBindings = Map.fromList
-            [ (0, ("", do
+            [ (LSKL 0, ("", do
                         scratchInteractOrSelect
                           selectDepartureRunway
                           setDepartureRunway
                         reloadView))
-            , (1, ("", do
+            , (LSKL 1, ("", do
                         scratchInteractOrSelect
                           selectSID
                           setSID
                         reloadView))
-            , (2, ("", do
+            , (LSKL 2, ("", do
                         scratchInteractOrSelect
                           selectSidTransition
                           setSidTransition
                         reloadView))
-            , (4, ("RTE", loadView rteView))
+            , (LSKL 5, ("RTE", loadView rteView))
             ]
         , mcduViewTitle = departure <> " DEPARTURE"
         , mcduViewDraw = do
@@ -397,32 +398,32 @@ arrivalViewLoad = do
       modifyView $ \v -> v
         { mcduViewNumPages = 1
         , mcduViewLSKBindings = Map.fromList
-            [ (0, ("", do
+            [ (LSKL 0, ("", do
                         scratchInteractOrSelect
                           selectDestinationRunway
                           setDestinationRunway
                         reloadView))
-            , (1, ("", do
+            , (LSKL 1, ("", do
                         scratchInteractOrSelect
                           selectApproach
                           setApproach
                         reloadView))
-            , (2, ("", do
+            , (LSKL 2, ("", do
                         scratchInteractOrSelect
                           selectSTAR
                           setSTAR
                         reloadView))
-            , (6, ("", do
+            , (LSKR 1, ("", do
                         scratchInteractOrSelect
                           selectApproachTransition
                           setApproachTransition
                         reloadView))
-            , (7, ("", do
+            , (LSKR 2, ("", do
                         scratchInteractOrSelect
                           selectStarTransition
                           setStarTransition
                         reloadView))
-            , (4, ("RTE", loadView rteView))
+            , (LSKL 5, ("RTE", loadView rteView))
             ]
         , mcduViewTitle = destination <> " ARRIVAL"
         , mcduViewDraw = do

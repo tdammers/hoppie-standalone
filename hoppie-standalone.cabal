@@ -77,6 +77,7 @@ executable hoppie-mcdu
                  , Web.Hoppie.TUI.MCDU.Views.FGFS
                  , Web.Hoppie.TUI.MCDU.HttpServer
                  , Web.Hoppie.TUI.MCDU.Main
+                 , Web.Hoppie.TUI.MCDU.Keys
                  , Paths_hoppie_standalone
     -- other-extensions:
     build-depends: base ^>=4.17.0.0

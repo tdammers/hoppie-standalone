@@ -30,7 +30,7 @@ mcduMain eventChan = do
       localMay <- do
         ev <- tryReadTChan eventChan
         case (headless, ev) of
-          (True, Just InputCommandEvent {}) -> return Nothing
+          (True, Just KeyEvent {}) -> return Nothing
           _ -> return ev
       webMay <- case serverMay of
         Nothing ->
@@ -45,5 +45,5 @@ mcduMain eventChan = do
     mapM_ handleMCDUEvent evs
 
 mapHttpEvent :: HttpServerEvent -> MCDUEvent
-mapHttpEvent (HttpInputCommand cmd) = InputCommandEvent cmd
+mapHttpEvent (HttpInputCommand cmd) = KeyEvent cmd
 mapHttpEvent (HttpLogEvent msg) = LogEvent msg

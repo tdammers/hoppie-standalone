@@ -38,17 +38,17 @@ dlkMenuView :: MCDUView
 dlkMenuView = defView
   { mcduViewTitle = "DLK MENU"
   , mcduViewLSKBindings = Map.fromList
-      [ (0, ("RECVD MSGS", loadView dlkUplinkLogView))
-      , (1, ("SENT MSGS", loadView dlkDownlinkLogView))
-      , (3, ("TELEX", clearTelexBody >> loadView (telexSendView False)))
-      , (4, ("MAIN MENU", loadViewByID MainMenuView))
-      , (5, ("ATIS", loadView $ infoMenuView "ATIS" "VATATIS"))
-      , (6, ("METAR", loadView $ infoMenuView "METAR" "METAR"))
-      , (7, ("TAF", loadView $ infoMenuView "TAF" "TAF"))
-      , (8, ("DCL", loadView (clearanceSendView False)))
+      [ (LSKL 0, ("RECVD MSGS", loadView dlkUplinkLogView))
+      , (LSKL 1, ("SENT MSGS", loadView dlkDownlinkLogView))
+      , (LSKL 3, ("TELEX", clearTelexBody >> loadView (telexSendView False)))
+      , (LSKL 5, ("MAIN MENU", loadViewByID MainMenuView))
+      , (LSKR 0, ("ATIS", loadView $ infoMenuView "ATIS" "VATATIS"))
+      , (LSKR 1, ("METAR", loadView $ infoMenuView "METAR" "METAR"))
+      , (LSKR 2, ("TAF", loadView $ infoMenuView "TAF" "TAF"))
+      , (LSKR 3, ("DCL", loadView (clearanceSendView False)))
       ]
   , mcduViewOnLoad = do
-      loadUplinkLSK 9
+      loadUplinkLSK (LSKR 5)
   }
 
 data CPDLCEditorState =
@@ -104,17 +104,18 @@ mkCpdlcComposeView tyID ty toMay mrnMay = do
             ]
           | (partIndex, part) <- zip [0..] entrySpec
           ]
-  let numPages = (length entrySpec + 5) `div` 5
   return defView
             { mcduViewTitle = "CPDLC COMPOSE"
-            , mcduViewNumPages = numPages
+            , mcduViewNumPages = 1
             , mcduViewOnLoad = do
                 entryItems <- hydrate
                 curPage <- gets (mcduViewPage . mcduView)
-                let curEntryItems = take 5 . drop (curPage * 5) $ entryItems
+                let (numPages, curEntryItems) =
+                      paginate numLSKs curPage entryItems
                     lastPage = curPage == numPages - 1
                 modifyView $ \v -> v
                     { mcduViewLSKBindings = mempty
+                    , mcduViewNumPages = numPages
                     , mcduViewDraw = do
                         zipWithM_ (\y (label', _, varMay, valMay) -> do
                             let label = case (label', varMay) of
@@ -132,24 +133,24 @@ mkCpdlcComposeView tyID ty toMay mrnMay = do
                               let valFmt = fromMaybe defValFmt valMay
                               mcduPrintR (screenW - 1) (y * 2 + 2) green valFmt
                           )
-                          [0..4] curEntryItems
+                          [0 .. numLSKs] curEntryItems
                     }
                 let mkBinding n (_, partIndex, varMay, _) = do
                       forM_ varMay $ \(_, index) -> do
-                        addLskBinding (n + 5) "" $ do
+                        addLskBinding (LSKR n) "" $ do
                           scratchInteract
                             (setVar partIndex index)
                             (getVar partIndex index)
                           reloadView
-                zipWithM_ mkBinding [0..4] curEntryItems
+                zipWithM_ mkBinding [0 .. numLSKs] curEntryItems
                 when lastPage $ do
                   vars <- liftIO $ cpdlcEditorVars <$> readMVar editorStateVar
-                  addLskBinding 8 "SEND"
+                  addLskBinding (LSKR 4) "SEND"
                     (sendCpdlc (tyID : supTyIDs) toMay mrnMay vars >>= \case
                       True -> loadView cpdlcMessageLogView
                       False -> reloadView
                     )
-                  loadUplinkLSK 9
+                  loadUplinkLSK (LSKR 5)
             }
 
 getEntryItems :: CPDLC.MessageType -> [(ByteString, Maybe (CPDLC.ArgSpec, Word))]
@@ -198,23 +199,23 @@ telexSendView :: Bool -> MCDUView
 telexSendView sent = defView
   { mcduViewTitle = "TELEX"
   , mcduViewLSKBindings = Map.fromList
-      [ (4, ("DLK MENU", loadView dlkMenuView))
+      [ (LSKL 5, ("DLK MENU", loadView dlkMenuView))
       ]
   , mcduViewOnLoad = do
       callsign <- lift getCallsign
       unless sent $ do
-        addLskBinding 8 "SEND" $ do
+        addLskBinding (LSKR 4) "SEND" $ do
           sendSuccess <- sendTelex
           when sendSuccess $ do
             loadView (telexSendView True)
 
-      addLskBinding 5 "" $ do
+      addLskBinding (LSKR 0) "" $ do
         scratchInteract 
           (\val -> True <$ (modify $ \s -> s { mcduTelexRecipient = val }))
           (gets mcduTelexRecipient)
         reloadView
 
-      addLskBinding 1 "" $ do
+      addLskBinding (LSKL 1) "" $ do
         scratchInteract 
           (\val -> True <$ (modify $ \s -> s { mcduTelexBody = val }))
           (gets mcduTelexBody)
@@ -229,16 +230,16 @@ telexSendView sent = defView
           mcduPrintR (screenW - 1) 2 green recipientStr
           zipWithM_
             (\n l -> mcduPrint 1 (n + 4) green l)
-            [0..4] bodyLines
+            [0 .. numLSKs - 1] bodyLines
       }
-      loadUplinkLSK 9
+      loadUplinkLSK (LSKR 5)
   }
 
 clearanceSendView :: Bool -> MCDUView
 clearanceSendView sent = defView
   { mcduViewTitle = "DATALINK CLEARANCE"
   , mcduViewLSKBindings = Map.fromList
-      [ (4, ("DLK MENU", loadView dlkMenuView))
+      [ (LSKL 5, ("DLK MENU", loadView dlkMenuView))
       ]
   , mcduViewOnLoad = do
       callsign <- lift getCallsign
@@ -250,24 +251,24 @@ clearanceSendView sent = defView
           { mcduClearanceType = atype }
         
       unless sent $ do
-        addLskBinding 8 "SEND" $ do
+        addLskBinding (LSKR 4) "SEND" $ do
           sendSuccess <- sendClearanceRequest
           when sendSuccess $ do
             loadView (clearanceSendView True)
 
-      addLskBinding 1 "" $ do
+      addLskBinding (LSKL 1) "" $ do
         scratchInteract 
           (\val -> True <$ (modify $ \s -> s { mcduClearanceType = val }))
           (gets mcduClearanceType)
         reloadView
 
-      addLskBinding 2 "" $ do
+      addLskBinding (LSKL 2) "" $ do
         scratchInteract 
           (\val -> True <$ (modify $ \s -> s { mcduClearanceStand = val }))
           (gets mcduClearanceStand)
         reloadView
 
-      addLskBinding 3 "" $ do
+      addLskBinding (LSKL 3) "" $ do
         scratchInteract 
           (\case
               Nothing -> True <$ (modify $ \s -> s { mcduClearanceAtis = Nothing })
@@ -278,13 +279,13 @@ clearanceSendView sent = defView
           (fmap BS.singleton <$> gets mcduClearanceAtis)
         reloadView
 
-      addLskBinding 5 "" $ do
+      addLskBinding (LSKR 0) "" $ do
         scratchInteract 
           (\val -> True <$ (modify $ \s -> s { mcduClearanceFacility = val }))
           (gets mcduClearanceFacility)
         reloadView
 
-      addLskBinding 6 "" $ do
+      addLskBinding (LSKR 1) "" $ do
         scratchInteract 
           (\val -> True <$ (modify $ \s -> s { mcduClearanceDestination = val }))
           (gets mcduClearanceDestination)
@@ -311,24 +312,24 @@ clearanceSendView sent = defView
           mcduPrintR (screenW - 1) 3 white "DESTINATION"
           mcduPrintR (screenW - 1) 4 green destinationStr
       }
-      loadUplinkLSK 9
+      loadUplinkLSK (LSKR 5)
   }
 
 infoMenuView :: ByteString -> ByteString -> MCDUView
 infoMenuView title infotype = defView
   { mcduViewTitle = title
   , mcduViewLSKBindings = Map.fromList
-      [ (8, ("SEND", sendInfoRequest infotype >> reloadView ))
-      , (4, ("DLK MENU", loadView dlkMenuView))
+      [ (LSKR 4, ("SEND", sendInfoRequest infotype >> reloadView ))
+      , (LSKL 5, ("DLK MENU", loadView dlkMenuView))
       ]
   , mcduViewOnLoad = do
       refAirport <- gets (fromMaybe "----" . mcduReferenceAirport)
-      addLskBinding 5 "" (setReferenceAirport >> reloadView)
+      addLskBinding (LSKR 0) "" (setReferenceAirport >> reloadView)
       modifyView $ \v -> v
         { mcduViewDraw =
-            mcduPrintR (screenW - 1) (mcduLskY 5) green refAirport
+            mcduPrintR (screenW - 1) (mcduLskY $ LSKR 0) green refAirport
         }
-      loadUplinkLSK 9
+      loadUplinkLSK (LSKR 5)
   }
 
 data MessageLogFilter
@@ -353,7 +354,7 @@ messageLogView mlf = defView
       Downlinks -> "SENT DLK LOG"
       AllCPDLC -> "ATC MESSAGE LOG"
   , mcduViewLSKBindings = Map.fromList
-      [ (4, case mlf of
+      [ (LSKL 5, case mlf of
               AllCPDLC -> ("ATC MENU", loadView atcMenuView)
               _ -> ("DLK MENU", loadView dlkMenuView)
         )
@@ -366,17 +367,16 @@ messageLogView mlf = defView
                                 Downlinks -> getDownlinkMessages
                              )
       curPage <- gets (mcduViewPage . mcduView)
-      let curMessages = take 4 . drop (4 * curPage) $ messages
-          numPages = (length messages + 3) `div` 4
+      let (numPages, curMessages) = paginate (numLSKs - 1) curPage messages
       modifyView $ \s -> s
         { mcduViewNumPages = numPages
         , mcduViewLSKBindings =
             Map.fromList
-              [ (4, case mlf of
+              [ (LSKL 5, case mlf of
                       AllCPDLC -> ("ATC MENU", loadView atcMenuView)
                       _ -> ("DLK MENU", loadView dlkMenuView)
                 )
-              , (9, ( "CLEAR LOG"
+              , (LSKR 5, ( "CLEAR LOG"
                     , do
                         case mlf of
                           AllCPDLC ->
@@ -393,7 +393,7 @@ messageLogView mlf = defView
             <>
             Map.fromList
               ( zip
-                [0..3]
+                [LSKL 0 .. LSKL (numLSKs - 2)]
                 [ ("", loadView $
                     messageView
                     (messageUID message) ) | message <- curMessages
@@ -615,37 +615,35 @@ messageView uid =
             let (statusLine, msgText) = formatMessage message
                 msgLines' = lineWrap screenW msgText
                 msgLines = statusLine : msgLines'
-                -- numPages = (length msgLines + 9) `div` 10
 
             page <- gets $ mcduViewPage . mcduView
 
             messageBindingsRaw <- messageBindings message
             let firstUsableLSKLine = ((length msgLines + 1) `div` 2) * 2
                 numLSKLines = (length messageBindingsRaw `div` 2) * 2
-                numPagesTotal = (firstUsableLSKLine + numLSKLines + 10) `div` 10
+                itemsPerPage = numLSKs * 2
+                (numPagesTotal, curLines) =
+                  paginateWithHeadroom (firstUsableLSKLine + numLSKLines) itemsPerPage page msgLines
 
-            let curLines = take 10 . drop (page * 10) $ msgLines
-
-            let lskTop = firstUsableLSKLine - page * 10
+            let lskTop = firstUsableLSKLine - page * itemsPerPage
 
             modifyView $ \v -> v { mcduViewLSKBindings = mempty }
 
             zipWithM_ (\n (label, action) -> do
                 let n' = n + lskTop
-                let lsk = (n' `div` 2) + (n' `mod` 2) * 5
-                when (lsk >= 0 && lsk < 10) $ do
-                  addLskBinding lsk label action
+                when (n' >= 0 && n' < numLSKs * 2) $ do
+                  addLskBinding (toEnum n') label action
               ) [0,1..] messageBindingsRaw
 
             curPage <- gets $ mcduViewPage . mcduView
             when (curPage == numPagesTotal - 1) $ do
               if messageIsCPDLC message then
-                addLskBinding 4 "ATC LOG" (loadView cpdlcMessageLogView)
+                addLskBinding (LSKL 4) "ATC LOG" (loadView cpdlcMessageLogView)
               else case message of
                 UplinkMessage {} ->
-                  addLskBinding 4 "DLK LOG" (loadView dlkUplinkLogView)
+                  addLskBinding (LSKL 4) "DLK LOG" (loadView dlkUplinkLogView)
                 DownlinkMessage {} ->
-                  addLskBinding 4 "DLK LOG" (loadView dlkDownlinkLogView)
+                  addLskBinding (LSKL 4) "DLK LOG" (loadView dlkDownlinkLogView)
 
 
             modifyView $ \v -> v
@@ -664,25 +662,25 @@ atcMenuView = defView
       if online then
         modifyView $ \v -> v
           { mcduViewLSKBindings = Map.fromList
-              [ (0, ("MSG LOG", loadView cpdlcMessageLogView))
-              , (1, ("LOGON", loadView cpdlcLogonView))
-              , (3, ("FREE TEXT", loadCpdlcComposeViewByID "TXTD-2" Nothing Nothing))
-              , (4, ("MAIN MENU", loadViewByID MainMenuView))
-              , (5, ("EMERGENCY", return ())) -- TODO
-              , (6, ("REQUEST", loadView cpdlcRequestMenuView))
-              , (7, ("REPORT", loadView cpdlcReportMenuView))
-              , (8, ("WHEN CAN WE", loadView cpdlcWhenCanWeMenuView))
+              [ (LSKL 0, ("MSG LOG", loadView cpdlcMessageLogView))
+              , (LSKL 1, ("LOGON", loadView cpdlcLogonView))
+              , (LSKL 3, ("FREE TEXT", loadCpdlcComposeViewByID "TXTD-2" Nothing Nothing))
+              , (LSKL 5, ("MAIN MENU", loadViewByID MainMenuView))
+              , (LSKR 0, ("EMERGENCY", return ())) -- TODO
+              , (LSKR 1, ("REQUEST", loadView cpdlcRequestMenuView))
+              , (LSKR 2, ("REPORT", loadView cpdlcReportMenuView))
+              , (LSKR 3, ("WHEN CAN WE", loadView cpdlcWhenCanWeMenuView))
               ]
           }
       else
         modifyView $ \v -> v
           { mcduViewLSKBindings = Map.fromList
-              [ (0, ("MSG LOG", loadView cpdlcMessageLogView))
-              , (1, ("LOGON", loadView cpdlcLogonView))
-              , (4, ("MAIN MENU", loadViewByID MainMenuView))
+              [ (LSKL 0, ("MSG LOG", loadView cpdlcMessageLogView))
+              , (LSKL 1, ("LOGON", loadView cpdlcLogonView))
+              , (LSKL 5, ("MAIN MENU", loadViewByID MainMenuView))
               ]
           }
-      loadUplinkLSK 9
+      loadUplinkLSK (LSKR 5)
   }
 
 haveCpdlcLogon :: MCDU Bool
@@ -715,14 +713,14 @@ cpdlcLogonView = defView
           case nextDataAuthority da of
             Nothing -> do
               forM_ (logonDataAuthority da) $ \logonDA -> do
-                addLskBinding 5 "SEND" (lift (cpdlcLogon logonDA) >> reloadView)
-              addLskBinding 0 "" (scratchInteract setLogonDA getLogonDA >> reloadView)
+                addLskBinding (LSKR 0) "SEND" (lift (cpdlcLogon logonDA) >> reloadView)
+              addLskBinding (LSKL 0) "" (scratchInteract setLogonDA getLogonDA >> reloadView)
             Just nextDA -> do
-              addLskBinding 6 "CANCEL LOGON" (lift (cpdlcCancelLogon nextDA) >> reloadView)
+              addLskBinding (LSKR 1) "CANCEL LOGON" (lift (cpdlcCancelLogon nextDA) >> reloadView)
         Just currentDA -> do
-          addLskBinding 5 "LOGOFF" (lift (cpdlcPilotLogoff currentDA) >> reloadView)
+          addLskBinding (LSKR 0) "LOGOFF" (lift (cpdlcPilotLogoff currentDA) >> reloadView)
 
-      addLskBinding 4 "ATC MENU" (loadView atcMenuView)
+      addLskBinding (LSKL 5) "ATC MENU" (loadView atcMenuView)
 
       modifyView $ \v -> v
         { mcduViewDraw = do
@@ -754,31 +752,31 @@ cpdlcRequestMenuView = defView
           { mcduViewLSKBindings = Map.fromList $
               case page of
                 0 ->
-                  [ (0, ("DIRECT", loadCpdlcComposeViewByID "RTED-1" Nothing Nothing))
-                  , (1, ("LEVEL", loadCpdlcComposeViewByID "LVLD-1" Nothing Nothing))
-                  , (2, ("CLIMB", loadCpdlcComposeViewByID "LVLD-2" Nothing Nothing))
-                  , (3, ("DESCENT", loadCpdlcComposeViewByID "LVLD-3" Nothing Nothing))
-                  , (5, ("LVL AT POS", loadCpdlcComposeViewByID "LVLD-4" Nothing Nothing))
-                  , (6, ("LVL AT TIME", loadCpdlcComposeViewByID "LVLD-5" Nothing Nothing))
-                  , (7, ("SPEED", loadCpdlcComposeViewByID "SPDD-1" Nothing Nothing))
-                  , (8, ("VOICE CNT", loadCpdlcComposeViewByID "COMD-1" Nothing Nothing))
+                  [ (LSKL 0, ("DIRECT", loadCpdlcComposeViewByID "RTED-1" Nothing Nothing))
+                  , (LSKL 1, ("LEVEL", loadCpdlcComposeViewByID "LVLD-1" Nothing Nothing))
+                  , (LSKL 2, ("CLIMB", loadCpdlcComposeViewByID "LVLD-2" Nothing Nothing))
+                  , (LSKL 3, ("DESCENT", loadCpdlcComposeViewByID "LVLD-3" Nothing Nothing))
+                  , (LSKR 0, ("LVL AT POS", loadCpdlcComposeViewByID "LVLD-4" Nothing Nothing))
+                  , (LSKR 1, ("LVL AT TIME", loadCpdlcComposeViewByID "LVLD-5" Nothing Nothing))
+                  , (LSKR 2, ("SPEED", loadCpdlcComposeViewByID "SPDD-1" Nothing Nothing))
+                  , (LSKR 3, ("VOICE CNT", loadCpdlcComposeViewByID "COMD-1" Nothing Nothing))
 
-                  , (4, ("ATC MENU", loadView atcMenuView))
+                  , (LSKL 5, ("ATC MENU", loadView atcMenuView))
                   ]
                 1 ->
-                  [ (0, ("ROUTE", loadCpdlcComposeViewByID "RTED-2" Nothing Nothing))
-                  , (1, ("RTE CLX", loadCpdlcComposeViewByID "RTED-3" Nothing Nothing))
-                  , (2, ("CLEARANCE", loadCpdlcComposeViewByID "RTED-4" Nothing Nothing))
-                  , (3, ("HEADING", loadCpdlcComposeViewByID "RTED-6" Nothing Nothing))
-                  , (4, ("GROUND TRK", loadCpdlcComposeViewByID "RTED-7" Nothing Nothing))
-                  , (5, ("OFFSET", loadCpdlcComposeViewByID "LATD-1" Nothing Nothing))
-                  , (6, ("WX DEVIATION", loadCpdlcComposeViewByID "LATD-2" Nothing Nothing))
-                  , (7, ("FREE TEXT", loadCpdlcComposeViewByID "TXTD-1" Nothing Nothing))
+                  [ (LSKL 0, ("ROUTE", loadCpdlcComposeViewByID "RTED-2" Nothing Nothing))
+                  , (LSKL 1, ("RTE CLX", loadCpdlcComposeViewByID "RTED-3" Nothing Nothing))
+                  , (LSKL 2, ("CLEARANCE", loadCpdlcComposeViewByID "RTED-4" Nothing Nothing))
+                  , (LSKL 3, ("HEADING", loadCpdlcComposeViewByID "RTED-6" Nothing Nothing))
+                  , (LSKL 5, ("GROUND TRK", loadCpdlcComposeViewByID "RTED-7" Nothing Nothing))
+                  , (LSKR 0, ("OFFSET", loadCpdlcComposeViewByID "LATD-1" Nothing Nothing))
+                  , (LSKR 1, ("WX DEVIATION", loadCpdlcComposeViewByID "LATD-2" Nothing Nothing))
+                  , (LSKR 2, ("FREE TEXT", loadCpdlcComposeViewByID "TXTD-1" Nothing Nothing))
                   ]
                 _ ->
                   []
           }
-        loadUplinkLSK 9
+        loadUplinkLSK (LSKR 5)
       else
         loadView atcMenuView
   }
@@ -787,17 +785,17 @@ cpdlcReportMenuView :: MCDUView
 cpdlcReportMenuView = defView
   { mcduViewTitle = "ATC REPORT"
   , mcduViewLSKBindings = Map.fromList
-      [ (0, ("POSREP", loadCpdlcComposeViewByID "RTED-5" Nothing Nothing))
-      , (1, ("ASSIGNED RTE", loadCpdlcComposeViewByID "RTED-9" Nothing Nothing))
-      , (2, ("ETA", loadCpdlcComposeViewByID "RTED-10" Nothing Nothing))
-      , (3, ("CLEAR OF WX", loadCpdlcComposeViewByID "LATD-3" Nothing Nothing))
-      , (4, ("ATC MENU", loadView atcMenuView))
-      , (5, ("BACK ON RTE", loadCpdlcComposeViewByID "LATD-4" Nothing Nothing))
+      [ (LSKL 0, ("POSREP", loadCpdlcComposeViewByID "RTED-5" Nothing Nothing))
+      , (LSKL 1, ("ASSIGNED RTE", loadCpdlcComposeViewByID "RTED-9" Nothing Nothing))
+      , (LSKL 2, ("ETA", loadCpdlcComposeViewByID "RTED-10" Nothing Nothing))
+      , (LSKL 3, ("CLEAR OF WX", loadCpdlcComposeViewByID "LATD-3" Nothing Nothing))
+      , (LSKL 5, ("ATC MENU", loadView atcMenuView))
+      , (LSKR 0, ("BACK ON RTE", loadCpdlcComposeViewByID "LATD-4" Nothing Nothing))
       ]
   , mcduViewOnLoad = do
       online <- haveCpdlcLogon
       if online then do
-        loadUplinkLSK 9
+        loadUplinkLSK (LSKR 5)
       else
         loadView atcMenuView
   }
@@ -806,13 +804,13 @@ cpdlcWhenCanWeMenuView :: MCDUView
 cpdlcWhenCanWeMenuView = defView
   { mcduViewTitle = "ATC WHEN CAN WE"
   , mcduViewLSKBindings = Map.fromList
-      [ (0, ("BACK ON RTE", loadCpdlcComposeViewByID "RTED-8" Nothing Nothing))
-      , (4, ("ATC MENU", loadView atcMenuView))
+      [ (LSKL 0, ("BACK ON RTE", loadCpdlcComposeViewByID "RTED-8" Nothing Nothing))
+      , (LSKL 5, ("ATC MENU", loadView atcMenuView))
       ]
   , mcduViewOnLoad = do
       online <- haveCpdlcLogon
       if online then do
-        loadUplinkLSK 9
+        loadUplinkLSK (LSKR 5)
       else
         loadView atcMenuView
   }
@@ -821,14 +819,14 @@ cpdlcEmergencyMenuView :: MCDUView
 cpdlcEmergencyMenuView = defView
   { mcduViewTitle = "ATC EMERGENCY"
   , mcduViewLSKBindings = Map.fromList
-      [ (0, ("MAYDAY", loadCpdlcComposeViewByID "EMGD-2" Nothing Nothing))
-      , (1, ("PAN", loadCpdlcComposeViewByID "EMGD-1" Nothing Nothing))
-      , (5, ("CANCEL", loadCpdlcComposeViewByID "EMGD-4" Nothing Nothing))
+      [ (LSKL 0, ("MAYDAY", loadCpdlcComposeViewByID "EMGD-2" Nothing Nothing))
+      , (LSKL 1, ("PAN", loadCpdlcComposeViewByID "EMGD-1" Nothing Nothing))
+      , (LSKR 5, ("CANCEL", loadCpdlcComposeViewByID "EMGD-4" Nothing Nothing))
       ]
   , mcduViewOnLoad = do
       online <- haveCpdlcLogon
       if online then do
-        loadUplinkLSK 9
+        loadUplinkLSK (LSKR 5)
       else
         loadView atcMenuView
   }

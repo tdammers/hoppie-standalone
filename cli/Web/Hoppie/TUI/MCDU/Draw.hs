@@ -6,6 +6,7 @@ module Web.Hoppie.TUI.MCDU.Draw
 where
 
 import Web.Hoppie.TUI.Output
+import Web.Hoppie.TUI.MCDU.Keys
 import Web.Hoppie.Telex
 
 import Control.Monad
@@ -31,7 +32,7 @@ screenW :: Int
 screenW = 24
 
 screenH :: Int
-screenH = 12
+screenH = 14
 
 red :: Word8
 red = 9
@@ -156,26 +157,22 @@ mcduPrintC x y fg bs = do
 
 mcduPrintLskL :: Int -> ByteString -> MCDUDraw s ()
 mcduPrintLskL n "" =
-  mcduPrint 0 (mcduLskY n) white "<"
+  mcduPrint 0 (mcduLskY $ LSKL n) white "<"
 mcduPrintLskL n msg =
-  mcduPrint 0 (mcduLskY n) white ("<" <> msg)
+  mcduPrint 0 (mcduLskY $ LSKL n) white ("<" <> msg)
 
 mcduPrintLskR :: Int -> ByteString -> MCDUDraw s ()
 mcduPrintLskR n "" =
-  mcduPrintR screenW (mcduLskY n) white ">"
+  mcduPrintR screenW (mcduLskY $ LSKR n) white ">"
 mcduPrintLskR n msg =
-  mcduPrintR screenW (mcduLskY n) white (msg <> ">")
+  mcduPrintR screenW (mcduLskY $ LSKR n) white (msg <> ">")
 
-mcduLskSY :: Int -> Int
+mcduLskSY :: LSK -> Int
 mcduLskSY = screenY . mcduLskY
 
-mcduLskY :: Int -> Int
-mcduLskY 0 = 2
-mcduLskY 1 = 4
-mcduLskY 2 = 6
-mcduLskY 3 = 8
-mcduLskY 4 = 10
-mcduLskY n = mcduLskY (n `rem` 5)
+mcduLskY :: LSK -> Int
+mcduLskY (LSKL i) = 2 + 2 * i
+mcduLskY (LSKR i) = 2 + 2 * i
 
 screenX :: Int -> Int
 screenX = (+ 7)
@@ -253,17 +250,21 @@ drawMCDU screenBuf = do
   putStr "  F4 "
   moveTo 1 11
   putStr "  F5 "
+  moveTo 1 13
+  putStr "  F6 "
 
   moveTo (screenW + 8) 3
-  putStr " F6  "
-  moveTo (screenW + 8) 5
   putStr " F7  "
-  moveTo (screenW + 8) 7
+  moveTo (screenW + 8) 5
   putStr " F8  "
-  moveTo (screenW + 8) 9
+  moveTo (screenW + 8) 7
   putStr " F9  "
-  moveTo (screenW + 8) 11
+  moveTo (screenW + 8) 9
   putStr " F10 "
+  moveTo (screenW + 8) 11
+  putStr " F11 "
+  moveTo (screenW + 8) 13
+  putStr " F12 "
 
   setBG 7
   setFG 0
@@ -278,6 +279,8 @@ drawMCDU screenBuf = do
   putStr "-"
   moveTo 6 11
   putStr "-"
+  moveTo 6 13
+  putStr "-"
 
   moveTo (screenW + 7) 3
   putStr "-"
@@ -289,12 +292,16 @@ drawMCDU screenBuf = do
   putStr "-"
   moveTo (screenW + 7) 11
   putStr "-"
+  moveTo (screenW + 7) 13
+  putStr "-"
 
   drawKey 1 (screenH + 1) "PgUp" "PREV"
   drawKey 1 (screenH + 3) "PgDn" "NEXT"
   drawKey 8 (screenH + 1) "Esc" "MENU"
-  drawKey 15 (screenH + 1) "F11" "DLK"
-  drawKey 22 (screenH + 1) "F12" "ATC"
+  drawKey 15 (screenH + 1) "F13" "DLK"
+  drawKey 15 (screenH + 3) "F14" "ATC"
+  drawKey 22 (screenH + 1) "F15" "FPL"
+  drawKey 22 (screenH + 3) "F16" "RTE"
 
   resetFG
   resetBG

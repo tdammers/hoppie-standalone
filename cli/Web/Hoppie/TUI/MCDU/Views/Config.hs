@@ -67,16 +67,16 @@ configView = defView
                     mcduPrintR (screenW - 1) 8 yellow "DISABLED"
                   mcduPrint 1 9 white "(HTTP SERVER OFF)"
             , mcduViewLSKBindings = Map.fromList $ 
-                [ (4, ("MAIN MENU", loadViewByID MainMenuView))
-                , (5, ("", scratchInteract setACType getACType >> reloadView))
-                , (6, ("", scratchInteract setMyCallsign getMyCallsign >> reloadView))
-                , (7, ("", modify (\s -> s { mcduShowLog = not (mcduShowLog s) }) >> flushAll >> reloadView))
+                [ (LSKL 5, ("MAIN MENU", loadViewByID MainMenuView))
+                , (LSKR 0, ("", scratchInteract setACType getACType >> reloadView))
+                , (LSKR 1, ("", scratchInteract setMyCallsign getMyCallsign >> reloadView))
+                , (LSKR 2, ("", modify (\s -> s { mcduShowLog = not (mcduShowLog s) }) >> flushAll >> reloadView))
                 ]
                 ++
                 if serverEnabled then
-                  [ (8, ("", modify (\s -> s { mcduHeadless = not (mcduHeadless s) }) >> flushAll >> reloadView)) ]
+                  [ (LSKR 3, ("", modify (\s -> s { mcduHeadless = not (mcduHeadless s) }) >> flushAll >> reloadView)) ]
                 else
-                  [ (8, ("", modify (\s -> s { mcduScratchMessage = Just "NOT ALLOWED" }) >> redrawScratch)) ]
+                  [ (LSKR 3, ("", modify (\s -> s { mcduScratchMessage = Just "NOT ALLOWED" }) >> redrawScratch)) ]
             }
         1 -> do
           serverEnabled <- gets (isJust . mcduHttpServer)
@@ -114,28 +114,29 @@ configView = defView
           hostname <- gets mcduHttpHostname
           modifyView $ \v -> v
             { mcduViewDraw = do
-                mcduPrintC (screenW `div` 2) 1 white "--- HTTP SERVER ---"
-                mcduPrint 1 3 white "HOSTNAME"
-                mcduPrint 1 4 green (maybe "----" BS8.pack hostname)
-                mcduPrintR (screenW - 1) 3 white "PORT"
-                mcduPrintR (screenW - 1) 4 green (maybe "----" (BS8.pack . show) port)
+                mcduPrintC (screenW `div` 2) 2 white "HTTP SERVER"
+                mcduPrint 1 3 white "ENABLE"
+                mcduPrint 1 5 white "HOSTNAME"
+                mcduPrint 1 6 green (maybe "----" BS8.pack hostname)
+                mcduPrintR (screenW - 1) 5 white "PORT"
+                mcduPrintR (screenW - 1) 6 green (maybe "----" (BS8.pack . show) port)
                 if headless then do
                   if serverEnabled then
-                    mcduPrint 1 2 green "FORCED ON"
+                    mcduPrint 1 4 green "FORCED ON"
                   else
-                    mcduPrint 1 2 red "OFF"
-                  mcduPrintR (screenW - 1) 2 white "(HEADLESS)"
+                    mcduPrint 1 4 red "OFF"
+                  mcduPrintR (screenW - 1) 4 white "(HEADLESS)"
                 else do
-                  mcduPrint 1 2 green (if serverEnabled then "ON" else "OFF")
+                  mcduPrint 1 4 green (if serverEnabled then "ON" else "OFF")
             , mcduViewLSKBindings = Map.fromList $
-                [ (4, ("MAIN MENU", loadViewByID MainMenuView))
-                , (1, ("", scratchInteract setHostname getHostname >> reloadView))
-                , (6, ("", scratchInteract setPort getPort >> reloadView))
+                [ (LSKL 5, ("MAIN MENU", loadViewByID MainMenuView))
+                , (LSKL 2, ("", scratchInteract setHostname getHostname >> reloadView))
+                , (LSKR 2, ("", scratchInteract setPort getPort >> reloadView))
                 ]
                 ++
                 (
                   if not serverEnabled || not headless then
-                    [ (0, ( ""
+                    [ (LSKL 1, ( ""
                           , do
                               if serverEnabled then
                                 mcduStopHttpServer
@@ -146,10 +147,10 @@ configView = defView
                       )
                     ]
                   else
-                    [ (0, ("", modify (\s -> s { mcduScratchMessage = Just "NOT ALLOWED" }) >> redrawScratch)) ]
+                    [ (LSKL 1, ("", modify (\s -> s { mcduScratchMessage = Just "NOT ALLOWED" }) >> redrawScratch)) ]
                 )
                 ++
-                [ (7, ("QR", mcduPrintHttpServerQR)) | serverEnabled ]
+                [ (LSKR 3, ("QR", mcduPrintHttpServerQR)) | serverEnabled ]
             }
         _ -> modifyView $ \v -> v
               { mcduViewDraw = do

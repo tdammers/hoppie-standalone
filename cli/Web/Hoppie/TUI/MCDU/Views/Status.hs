@@ -24,6 +24,18 @@ statusView = defView
       callsign <- lift getCallsign
       actype <- gets mcduAircraftType
       networkStatus <- gets mcduNetworkStatus
+      flightgearConfiguration <- do
+        hostnameMay <- gets mcduFlightgearHostname
+        portMay <- gets mcduFlightgearPort
+        return $ do
+          hostname <- hostnameMay
+          port <- portMay
+          return $ hostname <> ":" <> show port
+      flightgearConnected <- gets mcduFlightgearConnection
+      let flightgearStatusCBS = case (flightgearConfiguration, flightgearConnected) of
+            (Nothing, _) -> colorize blue "N/A"
+            (_, Nothing) -> colorize red "OFF"
+            (_, _) -> colorize green "CONNECTED"
       let networkStatusCBS = case networkStatus of
             NetworkOK -> colorize green "CONNECTED"
             NetworkError str -> lineJoin
@@ -43,17 +55,20 @@ statusView = defView
                 colorize green "s"
             , colorize white "NETWORK: " <>
                 networkStatusCBS
+            , colorize white "FLIGHTGEAR: " <>
+                flightgearStatusCBS
+            , colorize white "FGFS: " <> maybe (colorize blue "") (colorize green . BS8.pack) flightgearConfiguration
             ]
       let lns = lineWrap screenW . lineJoin $ infoLines
-          linesPerPage = 9
-          numPages = (length lns + linesPerPage) `div` linesPerPage
+          linesPerPage = (numLSKs * 2 - 2)
+          numPages = (length lns + linesPerPage - 1) `div` linesPerPage
       curPage <- gets (min (numPages - 1) . mcduViewPage . mcduView)
       let curLns = take linesPerPage . drop (curPage * linesPerPage) $ lns
       modifyView $ \v -> v
         { mcduViewDraw = zipWithM_ (\n cbs -> mcduPrintColored 0 (n + 1) cbs) [0,1..] curLns
         , mcduViewNumPages = numPages
         , mcduViewLSKBindings = Map.fromList
-            [ (4, ("MAIN MENU", loadViewByID MainMenuView))
+            [ (LSKL 5, ("MAIN MENU", loadViewByID MainMenuView))
             ]
         }
   }

@@ -1,4 +1,4 @@
-print("Loading flightplan.nas");
+# print("Loading flightplan.nas");
 
 if (!contains(mcdu, 'modifiedFlightplan'))
     mcdu.modifiedFlightplan = nil;
@@ -313,7 +313,7 @@ var setStarTransition = func (transitionID) {
     var fp = getModifyableFlightplan();
     if (transitionID == nil) {
         fp.star_trans = nil;
-        return 1;
+        return nil;
     }
     else {
         var destination = fp.destination;
@@ -395,7 +395,7 @@ var setApproachTransition = func (transitionID) {
     var fp = getModifyableFlightplan();
     if (transitionID == nil) {
         fp.approach_trans = nil;
-        return 1;
+        return nil;
     }
     else {
         var destination = fp.destination;
@@ -412,10 +412,13 @@ var setApproachTransition = func (transitionID) {
 
 
 var listApproachTransitions = func {
+    print("listApproachTransitions");
     var fp = getVisibleFlightplan();
     var destination = fp.destination;
+    debug.dump(destination);
     if (destination == nil) return [];
     var approach = fp.approach;
+    debug.dump(approach);
     if (approach == nil)
         return [];
     else
