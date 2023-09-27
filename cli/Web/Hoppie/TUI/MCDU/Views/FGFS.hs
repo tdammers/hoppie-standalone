@@ -9,6 +9,7 @@ where
 import Web.Hoppie.TUI.MCDU.Draw
 import Web.Hoppie.TUI.MCDU.Monad
 import Web.Hoppie.TUI.StringUtil
+import Web.Hoppie.TUI.MCDU.Views.Enum
 import Web.Hoppie.FGFS.Connection
 import Web.Hoppie.FGFS.NasalValue
 import Web.Hoppie.Trans
@@ -173,6 +174,16 @@ fgRunNasalDef defval script = do
   withFGNasalDef defval $ \conn -> do
     loadNasalLibrary conn "fms" "nasal/flightplan.nas"
     runNasal conn script
+
+navView :: MCDUView
+navView = defView
+  { mcduViewTitle = "NAV MENU"
+  , mcduViewLSKBindings = Map.fromList
+      [ (0, ("DIRECT", scratchWarn "NOT IMPLEMENTED"))
+      , (1, ("NAV INIT", scratchWarn "NOT IMPLEMENTED"))
+      , (4, ("MENU", loadViewByID MainMenuView))
+      ]
+  }
 
 fplView :: MCDUView
 fplView = defView

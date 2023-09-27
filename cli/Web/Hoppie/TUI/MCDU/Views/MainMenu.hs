@@ -20,15 +20,13 @@ mainMenuView = defView
   , mcduViewNumPages = 2
   , mcduViewOnLoad = do
       curPage <- gets (mcduViewPage . mcduView)
-      fgfsEnabled <-
-          (&&)
-            <$> gets (isJust . mcduFlightgearHostname)
-            <*> gets (isJust . mcduFlightgearPort)
+      fgfsEnabled <- gets (isJust . mcduFlightgearConnection)
       modifyView $ \v -> v
         { mcduViewLSKBindings = Map.fromList $ case curPage of
             0 ->
-              [ (0, ("FPL", loadViewByID FPLView )) | fgfsEnabled ] ++
-              [ (1, ("RTE", loadViewByID RTEView )) | fgfsEnabled ] ++
+              [ (0, ("NAV", loadViewByID NavView )) | fgfsEnabled ] ++
+              [ (1, ("FPL", loadViewByID FPLView )) | fgfsEnabled ] ++
+              [ (2, ("RTE", loadViewByID RTEView )) | fgfsEnabled ] ++
               [ (5, ("DLK", loadViewByID DLKMenuView))
               , (6, ("ATC", loadViewByID ATCMenuView))
               ]
