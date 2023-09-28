@@ -1,5 +1,3 @@
-print("Loading flightplan.nas");
-
 if (!contains(mcdu, 'modifiedFlightplan'))
     mcdu.modifiedFlightplan = nil;
 
@@ -49,6 +47,8 @@ var getFlightplanLegs = func {
     var acpos = geo.aircraft_position();
     var fp = fms.getVisibleFlightplan();
     var result = [];
+    var distanceToCurrent = getprop('/autopilot/route-manager/wp/dist');
+    var totalDistanceRemaining = getprop('/autopilot/route-manager/distance-remaining-nm');
     var distanceRemaining = 0;
     for (var i = 0; i < fp.getPlanSize(); i += 1) {
         var wp = fp.getWP(i);
@@ -56,8 +56,7 @@ var getFlightplanLegs = func {
         if (wp.wp_parent != nil)
             parent_id = wp.wp_parent.id;
         if (i == fp.current) {
-            (course, dist) = wp.courseAndDistanceFrom(acpos);
-            distanceRemaining += dist;
+            distanceRemaining = distanceToCurrent;
         }
         elsif (i > fp.current) {
             distanceRemaining += wp.leg_distance;
@@ -99,6 +98,20 @@ var deleteWaypoint = func (i) {
     if (i <= 0)
         return 0;
     fp.deleteWP(i);
+    return 1;
+};
+
+var clearFlightplan = func {
+    var fp = fms.getModifyableFlightplan();
+    fp.cleanPlan();
+    fp.departure = nil;
+    fp.sid = nil;
+    fp.sid_trans = nil;
+    fp.destination = nil;
+    fp.star = nil;
+    fp.star_trans = nil;
+    fp.approach = nil;
+    fp.approach_trans = nil;
     return 1;
 };
 
@@ -459,6 +472,7 @@ return {
 
     'getWaypointName': getWaypointName,
     'deleteWaypoint': deleteWaypoint,
+    'clearFlightplan': clearFlightplan,
 
     'getGroundspeed': getGroundspeed,
     'getUTCMinutes': getUTCMinutes,

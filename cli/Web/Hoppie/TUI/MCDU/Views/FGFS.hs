@@ -288,9 +288,12 @@ rteViewLoad = withFGView $ \conn -> do
                       setDeparture
                       getDeparture
                     reloadView))
-        , (LSKL 4, ("DEPARTURE", loadView departureView))
-
-        , (LSKR 0, ("", do
+        , (LSKL 2, ("CLEAR", fgCallNasalBool "fms.clearFlightplan" () >> reloadView))
+        ] ++
+        [ (LSKL 4, ("DEPARTURE", loadView departureView))
+        | isJust departureMay
+        ] ++
+        [ (LSKR 0, ("", do
                     scratchInteract
                       setDestination
                       getDestination
@@ -300,7 +303,9 @@ rteViewLoad = withFGView $ \conn -> do
                       (maybe (return False) (\c -> lift (setCallsign c) >> return True))
                       (Just <$> lift getCallsign)
                     reloadView))
-        , (LSKR 4, ("ARRIVAL", loadView arrivalView))
+        ] ++
+        [ (LSKR 4, ("ARRIVAL", loadView arrivalView))
+        | isJust destinationMay
         ]
         ++
         [ (LSKL 5, ("CANCEL", cancelFlightplanEdits >> reloadView)) | flightplanModified ]

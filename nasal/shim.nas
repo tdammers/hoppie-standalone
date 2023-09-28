@@ -151,6 +151,7 @@
                 globals.externalMCDU.libs[moduleName] == moduleHash) {
             return nil;
         }
+        printf("Loading module %s (%s)", moduleName, moduleHash);
         var module = moduleLoader(globals.externalMCDU);
         globals.externalMCDU.libs[moduleName] = moduleHash;
         globals.externalMCDU[moduleName] = module;
