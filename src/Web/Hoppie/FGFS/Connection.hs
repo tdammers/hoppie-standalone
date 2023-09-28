@@ -24,7 +24,7 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.Text.Encoding
 import qualified Data.Text.IO as Text
-import qualified Data.Vector as Vector
+import Data.Vector (Vector)
 import qualified Network.HTTP.Simple as HTTP
 import qualified Network.WebSockets as WS
 import System.Random
@@ -168,14 +168,32 @@ nasalCommand script =
 
 callNasalFunc :: (MonadIO m, ToNasal args, FromNasal ret) => FGFSConnection -> Text -> args -> m ret
 callNasalFunc conn funcname args = liftIO $ do
-  let nasalArg = toNasal args
-  case nasalArg of
-    NasalVector nasalArgs -> do
-      let arglist = Text.intercalate ", " . Vector.toList . Vector.map encodeNasalValue $ nasalArgs
-      runNasal conn $ funcname <> "(" <> arglist <> ")"
-    NasalNil -> do
-      runNasal conn $ funcname <> "()"
-    x -> throw $ NasalUnexpected "vector" (show x)
+  let nasalArg = case toNasal args of
+        NasalVector nasalArgs -> do
+          nasalArgs
+        NasalNil -> do
+          mempty
+        x -> throw $ NasalUnexpected "vector" (show x)
+  callNasalOrError conn funcname nasalArg >>= \case
+    NasalError err ->
+      throw err
+    NasalValue nval ->
+      case fromNasal nval of
+        Left err ->
+          throw err
+        Right val ->
+          return val
+
+callNasalOrError :: FGFSConnection -> Text -> Vector NasalValue -> IO NasalValueOrError
+callNasalOrError conn fun args = do
+  let script' =
+        "externalMCDU.callFunction('" <>
+          Text.pack (fgfsOutputPropertyPath conn) <> "', " <>
+          encodeNasal fun <>
+          "," <>
+          encodeNasal args  <> ");"
+  runNasalVoid conn script'
+  getFGOutput conn
 
 runNasalVoid :: FGFSConnection -> Text -> IO ()
 runNasalVoid conn script =

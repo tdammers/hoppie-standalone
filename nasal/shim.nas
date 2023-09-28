@@ -153,10 +153,42 @@
     # is the same as the last one.
     var callCounter = 0;
 
+    var callFunction = func (outputPath, fn, args) {
+        var err = [];
+        callCounter += 1;
+
+        print("Calling: " ~ substr(fn, 0, 100));
+        var f = call(func {
+            var nameParts = split('.', fn);
+            var resolved = globals.externalMCDU;
+            var result = nil;
+            foreach (var part; nameParts) {
+                resolved = resolved[part];
+                if (resolved == nil)
+                    die("Not found: " ~ part);
+            }
+            return resolved;
+        }, [], me, globals.externalMCDU, err);
+        if (size(err) > 0) {
+            result = { "error": err, "num": callCounter, "caller": caller() };
+        }
+        else {
+            var value = call(f, args, me, globals.externalMCDU, err);
+            if (size(err) > 0) {
+                result = { "error": err, "num": callCounter, "caller": caller() };
+            }
+            else {
+                result = { "value": value, "num": callCounter };
+            }
+        }
+        setprop(outputPath, jsonEncode(result));
+    };
+
     var runScript = func (outputPath, script) {
         var err = [];
         callCounter += 1;
 
+        print("Running: " ~ substr(script, 0, 100));
         var f = call(func { compile(script, 'websocket'); }, nil, nil, err);
         if (size(err) > 0) {
             result = { "error": err, "num": callCounter, "caller": caller() };
@@ -192,6 +224,7 @@
     delete(globals.externalMCDU, 'flightplan');
     globals.externalMCDU.jsonEncode = jsonEncode;
     globals.externalMCDU.runScript = runScript;
+    globals.externalMCDU.callFunction = callFunction;
     globals.externalMCDU.deref = deref;
     globals.externalMCDU.acquire = acquire;
     globals.externalMCDU.release = release;
