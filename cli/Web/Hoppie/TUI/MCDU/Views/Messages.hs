@@ -632,7 +632,7 @@ messageView uid =
             zipWithM_ (\n (label, action) -> do
                 let n' = n + lskTop
                 when (n' >= 0 && n' < numLSKs * 2) $ do
-                  addLskBinding (toEnum n') label action
+                  addLskBinding (toEnum n') (colorize white label) action
               ) [0,1..] messageBindingsRaw
 
             curPage <- gets $ mcduViewPage . mcduView

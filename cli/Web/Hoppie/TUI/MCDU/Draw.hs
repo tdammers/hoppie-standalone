@@ -7,6 +7,7 @@ where
 
 import Web.Hoppie.TUI.Output
 import Web.Hoppie.TUI.MCDU.Keys
+import Web.Hoppie.TUI.StringUtil
 import Web.Hoppie.Telex
 
 import Control.Monad
@@ -155,17 +156,32 @@ mcduPrintC x y fg bs = do
   let x' = x - (BS.length bs `div` 2)
   mcduPrint x' y fg bs
 
-mcduPrintLskL :: Int -> ByteString -> MCDUDraw s ()
-mcduPrintLskL n "" =
-  mcduPrint 0 (mcduLskY $ LSKL n) white ""
-mcduPrintLskL n msg =
-  mcduPrint 0 (mcduLskY $ LSKL n) white ("<" <> msg)
+mcduPrintColored :: Int -> Int -> Colored ByteString -> MCDUDraw s ()
+mcduPrintColored _ _ (Colored []) =
+  return ()
+mcduPrintColored x y (Colored (f:fs)) = do
+  mcduPrint x y (cbfColor f) bs
+  mcduPrintColored (x + BS.length bs) y (Colored fs)
+  where
+    bs = cbfData f
 
-mcduPrintLskR :: Int -> ByteString -> MCDUDraw s ()
+mcduPrintColoredR :: Int -> Int -> Colored ByteString -> MCDUDraw s ()
+mcduPrintColoredR _ _ (Colored []) =
+  return ()
+mcduPrintColoredR x y c = do
+  mcduPrintColored (x - strLength c) y c
+
+mcduPrintLskL :: Int -> Colored ByteString -> MCDUDraw s ()
+mcduPrintLskL n "" =
+  mcduPrintColored 0 (mcduLskY $ LSKL n) ""
+mcduPrintLskL n msg =
+  mcduPrintColored 0 (mcduLskY $ LSKL n) ("<" <> msg)
+
+mcduPrintLskR :: Int -> Colored ByteString -> MCDUDraw s ()
 mcduPrintLskR n "" =
-  mcduPrintR screenW (mcduLskY $ LSKR n) white ""
+  mcduPrintColoredR screenW (mcduLskY $ LSKR n) ""
 mcduPrintLskR n msg =
-  mcduPrintR screenW (mcduLskY $ LSKR n) white (msg <> ">")
+  mcduPrintColoredR screenW (mcduLskY $ LSKR n) (msg <> ">")
 
 mcduLskSY :: LSK -> Int
 mcduLskSY = screenY . mcduLskY

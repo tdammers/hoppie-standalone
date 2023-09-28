@@ -31,6 +31,23 @@
         return globals.externalMCDU.refTable[refid].value;
     };
 
+    var printReftable = func {
+        var refTable = globals.externalMCDU.refTable;
+        foreach (var k; keys(refTable)) {
+            printf("%s %i", k, refTable[k].refcount);
+        }
+        return nil;
+    };
+
+    var release = func (ref) {
+        print("release(" ~ debug.string(ref) ~ ")");
+        if (typeof(ref) != 'ghost')
+            return nil;
+        var refid = id(ref);
+        releaseRef(refid);
+        printReftable();
+    }
+
     var grabRef = func (ident) {
         if (contains(globals.externalMCDU.refTable, ident)) {
             globals.externalMCDU.refTable[ident].refcount += 1;
@@ -165,6 +182,7 @@
     globals.externalMCDU.jsonEncode = jsonEncode;
     globals.externalMCDU.runScript = runScript;
     globals.externalMCDU.deref = deref;
+    globals.externalMCDU.release = release;
     if (!contains(globals.externalMCDU, 'refTable')) {
         globals.externalMCDU.refTable = {};
     }
@@ -172,4 +190,6 @@
         globals.externalMCDU.libs = {};
     }
     globals.externalMCDU.loadModule = loadModule;
+    globals.externalMCDU.refTable = {};
+    printReftable();
 })();

@@ -2,6 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE TypeApplications #-}
 
 module Web.Hoppie.TUI.MCDU.Views.FGFS
 where
@@ -27,6 +28,7 @@ import Data.Text.Encoding
 import Data.Maybe
 import Control.Exception
 import qualified Data.Map.Strict as Map
+import Data.IORef
 
 data FPLeg =
   FPLeg
@@ -180,11 +182,100 @@ navView :: MCDUView
 navView = defView
   { mcduViewTitle = "NAV MENU"
   , mcduViewLSKBindings = Map.fromList
-      [ (LSKL 0, ("DIRECT", scratchWarn "NOT IMPLEMENTED"))
+      [ (LSKL 0, ("DIRECT TO", loadDirectToView Nothing))
       , (LSKL 1, ("NAV INIT", scratchWarn "NOT IMPLEMENTED"))
       , (LSKL 5, ("MENU", loadViewByID MainMenuView))
       ]
   }
+
+data WaypointCandidate =
+  WaypointCandidate
+    { wpType :: Text
+    , wpName :: Text
+    , wpDistance :: Double
+    , wpBearing :: Double
+    , wpValue :: NasalValue
+    }
+    deriving (Show)
+
+releaseWaypointCandidate :: WaypointCandidate -> MCDU ()
+releaseWaypointCandidate candidate =
+  fgCallNasal "release" [wpValue candidate]
+
+instance FromNasal WaypointCandidate where
+  fromNasal nv =
+    WaypointCandidate
+      <$> fromNasalField "type" nv
+      <*> fromNasalField "name" nv
+      <*> fromNasalField "distance" nv
+      <*> fromNasalField "bearing" nv
+      <*> fromNasalField "wp" nv
+
+insertDirect :: WaypointCandidate -> MCDU ()
+insertDirect wp = do
+  let nasalFunc = case wpType wp of
+        "leg" -> "fms.insertDirectFP"
+        _ -> "fms.insertDirect"
+  void (fgCallNasal nasalFunc [wpValue wp] :: MCDU ())
+
+loadDirectToView :: Maybe ByteString -> MCDU ()
+loadDirectToView origTargetMay = do
+  targetVar <- liftIO $ newIORef origTargetMay
+  let setTarget target = do
+        liftIO $ writeIORef targetVar target
+        return True
+      getTarget =
+        liftIO $ readIORef targetVar
+      insert = do
+        targetMay <- liftIO $ readIORef targetVar
+        case targetMay of
+          Nothing -> do
+            scratchWarn "INVALID"
+            reloadView
+          Just targetName -> do
+            candidates :: [WaypointCandidate] <- fgCallNasal "fms.findWaypoint" [targetName]
+            case candidates of
+              [] -> do
+                scratchWarn "NO WPT"
+              [candidate] -> do
+                insertDirect candidate
+                releaseWaypointCandidate candidate
+                loadView fplView
+              _ -> do
+                loadView $ selectViewWith
+                  (SelectViewOptions True True)
+                  "SELECT WPT"
+                  [ (c, colorize color . BS8.pack $ printf "%s\n%s %s %03.0f°"
+                                    (Text.take (screenW - 2) (wpName c))
+                                    (Text.toUpper $ wpType c)
+                                    (formatDistance $ wpDistance c)
+                                    (wpBearing c)
+                    )
+                  | c <- candidates
+                  , let color = case wpType c of
+                                  "leg" -> green
+                                  _ -> white
+                  ]
+                  "FPL"
+                  (\candidateMay -> do
+                      forM_ candidateMay insertDirect
+                      mapM_ releaseWaypointCandidate candidates
+                      loadView fplView
+                  )
+
+  loadView defView
+    { mcduViewTitle = "DIRECT TO"
+    , mcduViewOnLoad = do
+        target <- liftIO $ readIORef targetVar
+        modifyView $ \v -> v
+          { mcduViewDraw = do
+              mcduPrint 1 2 green $ fromMaybe "----" target
+          , mcduViewLSKBindings = Map.fromList
+              [ (LSKL 0, ("", scratchInteract setTarget getTarget >> reloadView))
+              , (LSKR 5, ("INSERT", insert >> reloadView))
+              ]
+          }
+    }
 
 fplView :: MCDUView
 fplView = defView
@@ -245,12 +336,15 @@ fplViewLoad = withFGView $ \conn -> do
                   | legIsDiscontinuity leg = white
                   | legRole leg == Just "missed" = cyan
                   | otherwise = green
-            forM_ (legRemainingDist leg) $ \dist -> do
-              when (groundspeed > 40) $ do
-                let eta = utcMinutes + dist / groundspeed * 60
-                mcduPrint (screenW - 6) (n * 2 + 1) color (BS8.pack $ formatETA eta <> "z")
+            unless (legIsDiscontinuity leg) $ do
+              forM_ (legRemainingDist leg) $ \dist -> do
+                when (groundspeed > 40) $ do
+                  let eta = utcMinutes + dist / groundspeed * 60
+                  mcduPrint (screenW - 6) (n * 2 + 1) color (BS8.pack $ formatETA eta <> "z")
             if isPrevious then
               mcduPrint 0 (n * 2 + 2) color (encodeUtf8 $ legName leg)
+            else if legIsDiscontinuity leg then
+              mcduPrint 0 (n * 2 + 2) color "---- DISCONTINUITY ----"
             else if isCurrent then do
               mcduPrint 1 (n * 2 + 1) color (BS8.pack . maybe "---°" (printf "%03.0f°") $ legHeading leg)
               mcduPrint 9 (n * 2 + 1) color (BS8.pack . maybe "----NM" formatDistance $ legRemainingDist leg)
@@ -259,9 +353,10 @@ fplViewLoad = withFGView $ \conn -> do
               mcduPrint 1 (n * 2 + 1) color (BS8.pack . maybe "---°" (printf "%03.0f°") $ legHeading leg)
               mcduPrint 9 (n * 2 + 1) color (BS8.pack . maybe "----NM" formatDistance $ legDist leg)
               mcduPrint 0 (n * 2 + 2) color (encodeUtf8 $ legName leg)
-            mcduPrint (screenW - 11) (n * 2 + 2) color (BS8.pack $ formatSpeed (legSpeed leg) (legSpeedType leg))
-            mcduPrint (screenW - 7) (n * 2 + 2) color "/"
-            mcduPrint (screenW - 6) (n * 2 + 2) color (BS8.pack $ formatAltitude (legAlt leg) (legAltType leg))
+            unless (legIsDiscontinuity leg) $ do
+              mcduPrint (screenW - 11) (n * 2 + 2) color (BS8.pack $ formatSpeed (legSpeed leg) (legSpeedType leg))
+              mcduPrint (screenW - 7) (n * 2 + 2) color "/"
+              mcduPrint (screenW - 6) (n * 2 + 2) color (BS8.pack $ formatAltitude (legAlt leg) (legAltType leg))
 
           ) [0,1..] curLegs
     }
@@ -332,12 +427,64 @@ selectView title options returnLabel handleResult= defView
       let curOptions = take (2 * numLSKs) . drop (curPage * 2 * numLSKs) $ options
       modifyView $ \v -> v {
         mcduViewLSKBindings = Map.fromList
-          [ (n, (option, handleResult (Just option)))
+          [ (n, (colorize white option, handleResult (Just option)))
           | (n, option) <- zip [LSKL 0 .. LSKR 4] curOptions
           ]
       }
-      addLskBinding (LSKL 5) returnLabel (handleResult Nothing)
+      addLskBinding (LSKL 5) (colorize white returnLabel) (handleResult Nothing)
   }
+
+data SelectViewOptions =
+  SelectViewOptions
+    { selectViewSingleSided :: Bool
+    , selectViewBreakLines :: Bool
+    }
+
+
+selectViewWith :: SelectViewOptions -> ByteString -> [(a, Colored ByteString)] -> ByteString -> (Maybe a -> MCDU ()) -> MCDUView
+selectViewWith svo title options returnLabel handleResult = defView
+  { mcduViewTitle = title
+  , mcduViewNumPages =
+      (length options + itemsPerPage - 1) `div` itemsPerPage
+  , mcduViewLSKBindings = mempty
+  , mcduViewOnLoad = do
+      curPage <- gets (mcduViewPage . mcduView)
+      let curOptions = take itemsPerPage . drop (curPage * itemsPerPage) $ options
+      if (selectViewBreakLines svo) then
+        modifyView $ \v -> v
+          { mcduViewDraw = do
+              zipWithM_ (\n (_, optionLabel) -> do
+                    let y = n * 2 + 2
+                        lns = take 2 $ (lineWrap (screenW - 2) optionLabel) ++ repeat ""
+                    case lns of
+                      [ln1, ln2] -> do
+                        mcduPrint 0 y white "<"
+                        mcduPrintColored 1 y ln1
+                        mcduPrintColored 1 (y + 1) ln2
+                      _ -> do
+                        mcduPrint 0 y yellow "< WEIRDNESS"
+                  ) [0..4] curOptions
+          , mcduViewLSKBindings = Map.fromList
+            [ (n, ("", handleResult (Just optionValue)))
+            | (n, (optionValue, _)) <- zip lsks curOptions
+            ]
+          }
+      else
+        modifyView $ \v -> v {
+          mcduViewLSKBindings = Map.fromList
+            [ (n, (optionLabel, handleResult (Just optionValue)))
+            | (n, (optionValue, optionLabel)) <- zip lsks curOptions
+            ]
+        }
+      addLskBinding (LSKL 5) (colorize white returnLabel) (handleResult Nothing)
+  }
+  where
+    itemsPerPage = case selectViewSingleSided svo of
+      True -> numLSKs
+      False -> 2 * numLSKs
+    lsks = case selectViewSingleSided svo of
+      True -> map LSKL [0 .. 4]
+      False -> [LSKL 0 .. LSKR 4]
 
 departureView :: MCDUView
 departureView = defView

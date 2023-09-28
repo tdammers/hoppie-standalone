@@ -151,7 +151,7 @@ defMCDUState =
 data MCDUView =
   MCDUView
     { mcduViewTitle :: ByteString
-    , mcduViewLSKBindings :: Map LSK (ByteString, MCDU ())
+    , mcduViewLSKBindings :: Map LSK (Colored ByteString, MCDU ())
     , mcduViewDraw :: forall s. MCDUDraw s ()
     , mcduViewPage :: Int
     , mcduViewNumPages :: Int
@@ -179,15 +179,6 @@ defGoToPage n = do
   modifyView $ \v -> v { mcduViewPage = n' }
   reloadView
 
-mcduPrintColored :: Int -> Int -> Colored ByteString -> MCDUDraw s ()
-mcduPrintColored _ _ (Colored []) =
-  return ()
-mcduPrintColored x y (Colored (f:fs)) = do
-  mcduPrint x y (cbfColor f) bs
-  mcduPrintColored (x + BS.length bs) y (Colored fs)
-  where
-    bs = cbfData f
-
 rawPrintColored :: PutStr a => Colored a -> IO ()
 rawPrintColored (Colored []) = do
   resetFG
@@ -213,7 +204,7 @@ clearTelexBody =
   modify $ \s -> s
     { mcduTelexBody = Nothing }
 
-addLskBinding :: LSK -> ByteString -> MCDU () -> MCDU ()
+addLskBinding :: LSK -> Colored ByteString -> MCDU () -> MCDU ()
 addLskBinding lsk label action =
   modifyView $ \v -> v {
     mcduViewLSKBindings =

@@ -79,6 +79,65 @@ var getFlightplanLegs = func {
     return result;
 };
 
+var findWaypoint = func (needle) {
+    var fp = fms.getVisibleFlightplan();
+    var acpos = geo.aircraft_position();
+    var results = [];
+    for (var i = fp.current; i < fp.getPlanSize(); i += 1) {
+        var wp = fp.getWP(i);
+        if (wp.wp_name == needle)
+            append(results, { "type": "leg" , "name": wp.wp_name, "wp": wp });
+    }
+    if (size(needle) == 4) {
+        var airports = findAirportsByICAO(needle);
+        foreach (var airport; airports) {
+            append(results, { "type": "airport", "name": airport.name, "wp": airport });
+        }
+    }
+    else {
+        var fixes = findFixesByID(acpos, needle);
+        foreach (var fix; fixes) {
+            if (fix.id == needle)
+                append(results, { "type": "fix", "name": fix.id, "wp": fix });
+        }
+        var vors = findNavaidsByID(acpos, needle, 'vor');
+        foreach (var vor; vors) {
+            if (vor.id == needle)
+                append(results, { "type": vor.type, "name": vor.name, "wp": vor });
+        }
+        var ndbs = findNavaidsByID(acpos, needle, 'ndb');
+        foreach (var ndb; ndbs) {
+            if (ndb.id == needle)
+                append(results, { "type": ndb.type, "name": ndb.name, "wp": ndb });
+        }
+        var dmes = findNavaidsByID(acpos, needle, 'dme');
+        foreach (var dme; dmes) {
+            if (dme.id == needle)
+                append(results, { "type": dme.type, "name": dme.name, "wp": dme });
+        }
+    }
+    var acpos = geo.aircraft_position();
+    foreach (var result; results) {
+        var wpPos = geo.Coord.new();
+        wpPos.set_latlon(result.wp.lat, result.wp.lon);
+        result.distance = acpos.distance_to(wpPos) * M2NM;
+        result.bearing = acpos.course_to(wpPos);
+    }
+    var sortfunc = func (a, b) {
+        if (a.type == "leg" and b.type != "leg")
+            return -1;
+        elsif (b.type == "leg" and a.type != "leg")
+            return 1;
+        elsif (a.distance < b.distance - 0.1)
+            return -1;
+        elsif (a.distance > b.distance - 0.1)
+            return 1;
+        else
+            return 0;
+    };
+    return sort(results, sortfunc);
+};
+
 var getCurrentLeg = func {
     var fp = fms.getVisibleFlightplan();
     return fp.current;
@@ -99,6 +158,41 @@ var deleteWaypoint = func (i) {
         return 0;
     fp.deleteWP(i);
     return 1;
+};
+
+var insertDirect = func (wp) {
+    var fp = fms.getModifyableFlightplan();
+    var acpos = geo.aircraft_position();
+    var direct = createWP(acpos.lat(), acpos.lon(), "DIRECT");
+    fp.insertWP(direct, fp.current);
+    var newWP = createWP(wp.lat, wp.lon, wp.id);
+    fp.insertWP(newWP, fp.current);
+    fp.insertWP(createDiscontinuity(), fp.current);
+    fp.current -= 2;
+    return nil;
+};
+
+var insertDirectFP = func (wp) {
+    var fp = fms.getModifyableFlightplan();
+    var acpos = geo.aircraft_position();
+    var fpWP = nil;
+    var fpIndex = nil;
+    for (var i = fp.current; i < fp.getPlanSize(); i += 1) {
+        fpWP = fp.getWP(i);
+        if (fpWP.lat == wp.lat and fpWP.lon == wp.lon and fpWP.id == wp.id) {
+            fpIndex = i;
+            break;
+        }
+    }
+    if (fpIndex == nil) {
+        insertDirect(wp);
+    }
+    else {
+        var direct = createWP(acpos.lat(), acpos.lon(), "DIRECT");
+        fp.insertWP(direct, fpIndex);
+        fp.current = fpIndex + 1;
+    }
+    return nil;
 };
 
 var clearFlightplan = func {
@@ -473,6 +567,9 @@ return {
     'getWaypointName': getWaypointName,
     'deleteWaypoint': deleteWaypoint,
     'clearFlightplan': clearFlightplan,
+    'findWaypoint': findWaypoint,
+    'insertDirect': insertDirect,
+    'insertDirectFP': insertDirectFP,
 
     'getGroundspeed': getGroundspeed,
     'getUTCMinutes': getUTCMinutes,
