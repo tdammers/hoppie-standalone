@@ -157,6 +157,7 @@ data MCDUView =
     , mcduViewNumPages :: Int
     , mcduViewGoToPage :: Int -> MCDU ()
     , mcduViewOnLoad :: MCDU ()
+    , mcduViewOnUnload :: MCDU ()
     , mcduViewAutoReload :: Bool
     }
 
@@ -169,6 +170,7 @@ defView = MCDUView
   , mcduViewNumPages = 1
   , mcduViewGoToPage = defGoToPage
   , mcduViewOnLoad = return ()
+  , mcduViewOnUnload = return ()
   , mcduViewAutoReload = False
   }
 
@@ -581,6 +583,7 @@ resolveViewID viewID = do
 
 loadView :: MCDUView -> MCDU ()
 loadView view = do
+  join $ gets (mcduViewOnUnload . mcduView)
   modify $ \s -> s { mcduView = view }
   reloadView
 

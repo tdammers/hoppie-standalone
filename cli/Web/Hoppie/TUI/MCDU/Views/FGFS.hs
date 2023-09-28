@@ -202,6 +202,10 @@ releaseWaypointCandidate :: WaypointCandidate -> MCDU ()
 releaseWaypointCandidate candidate =
   fgCallNasal "release" [wpValue candidate]
 
+acquireWaypointCandidate :: WaypointCandidate -> MCDU ()
+acquireWaypointCandidate candidate =
+  fgCallNasal "acquire" [wpValue candidate]
+
 instance FromNasal WaypointCandidate where
   fromNasal nv =
     WaypointCandidate
@@ -234,16 +238,22 @@ loadDirectToView origTargetMay = do
             reloadView
           Just targetName -> do
             candidates :: [WaypointCandidate] <- fgCallNasal "fms.findWaypoint" [targetName]
+            modifyView $ \v -> v
+              { mcduViewOnUnload = mapM_ releaseWaypointCandidate candidates }
             case candidates of
               [] -> do
                 scratchWarn "NO WPT"
               [candidate] -> do
                 insertDirect candidate
-                releaseWaypointCandidate candidate
                 loadView fplView
               _ -> do
+                mapM_ acquireWaypointCandidate candidates
                 loadView $ selectViewWith
-                  (SelectViewOptions True True)
+                  SelectViewOptions
+                    { selectViewSingleSided = True
+                    , selectViewBreakLines = True
+                    , selectViewUnloadAction = mapM_ releaseWaypointCandidate candidates
+                    }
                   "SELECT WPT"
                   [ (c, colorize color . BS8.pack $ printf "%s\n%s %s %03.0f°"
                                     (Text.take (screenW - 2) (wpName c))
@@ -259,7 +269,6 @@ loadDirectToView origTargetMay = do
                   "FPL"
                   (\candidateMay -> do
                       forM_ candidateMay insertDirect
-                      mapM_ releaseWaypointCandidate candidates
                       loadView fplView
                   )
 
@@ -438,15 +447,22 @@ data SelectViewOptions =
   SelectViewOptions
     { selectViewSingleSided :: Bool
     , selectViewBreakLines :: Bool
+    , selectViewUnloadAction :: MCDU ()
     }
 
 
-selectViewWith :: SelectViewOptions -> ByteString -> [(a, Colored ByteString)] -> ByteString -> (Maybe a -> MCDU ()) -> MCDUView
+selectViewWith :: SelectViewOptions
+               -> ByteString
+               -> [(a, Colored ByteString)]
+               -> ByteString
+               -> (Maybe a -> MCDU ())
+               -> MCDUView
 selectViewWith svo title options returnLabel handleResult = defView
   { mcduViewTitle = title
   , mcduViewNumPages =
       (length options + itemsPerPage - 1) `div` itemsPerPage
   , mcduViewLSKBindings = mempty
+  , mcduViewOnUnload = selectViewUnloadAction svo
   , mcduViewOnLoad = do
       curPage <- gets (mcduViewPage . mcduView)
       let curOptions = take itemsPerPage . drop (curPage * itemsPerPage) $ options

@@ -20,6 +20,16 @@
         }
     };
 
+    var acquireRef = func (ident) {
+        if (contains(globals.externalMCDU.refTable, ident)) {
+            globals.externalMCDU.refTable[ident].refcount += 1;
+            return globals.externalMCDU.refTable[ident].value;
+        }
+        else
+            return nil;
+    };
+
+
     var deref = func (ref) {
         if (!contains(ref, '__reftype__'))
             return nil;
@@ -48,14 +58,15 @@
         printReftable();
     }
 
-    var grabRef = func (ident) {
-        if (contains(globals.externalMCDU.refTable, ident)) {
-            globals.externalMCDU.refTable[ident].refcount += 1;
-            return globals.externalMCDU.refTable[ident].value;
-        }
-        else
+    var acquire = func (ref) {
+        print("acquire(" ~ debug.string(ref) ~ ")");
+        if (typeof(ref) != 'ghost')
             return nil;
-    };
+        var refid = id(ref);
+        acquireRef(refid);
+        printReftable();
+    }
+
 
     var jsonEncode = func (val, register=1) {
         var ty = typeof(val);
@@ -182,6 +193,7 @@
     globals.externalMCDU.jsonEncode = jsonEncode;
     globals.externalMCDU.runScript = runScript;
     globals.externalMCDU.deref = deref;
+    globals.externalMCDU.acquire = acquire;
     globals.externalMCDU.release = release;
     if (!contains(globals.externalMCDU, 'refTable')) {
         globals.externalMCDU.refTable = {};

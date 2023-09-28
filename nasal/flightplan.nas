@@ -83,7 +83,7 @@ var findWaypoint = func (needle) {
     var fp = fms.getVisibleFlightplan();
     var acpos = geo.aircraft_position();
     var results = [];
-    for (var i = fp.current; i < fp.getPlanSize(); i += 1) {
+    for (var i = fp.current or 0; i < fp.getPlanSize(); i += 1) {
         var wp = fp.getWP(i);
         if (wp.wp_name == needle)
             append(results, { "type": "leg" , "name": wp.wp_name, "wp": wp });
