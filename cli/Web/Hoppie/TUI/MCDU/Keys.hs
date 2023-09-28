@@ -35,6 +35,7 @@ data FunctionKey
   | ATC
   | FPL
   | RTE
+  | NAV
   deriving (Show, Read, Eq, Ord, Enum, Bounded)
 
 data MCDUKey

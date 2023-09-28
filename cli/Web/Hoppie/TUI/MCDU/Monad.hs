@@ -744,6 +744,7 @@ handleKey key =
     MCDUFunction ATC -> loadViewByID ATCMenuView
     MCDUFunction FPL -> loadViewByID FPLView
     MCDUFunction RTE -> loadViewByID RTEView
+    MCDUFunction NAV -> loadViewByID NAVView
     MCDUFunction Menu -> loadViewByID MainMenuView
 
     MCDUFunction DEL ->

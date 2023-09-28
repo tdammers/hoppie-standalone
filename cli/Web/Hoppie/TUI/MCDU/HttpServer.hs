@@ -198,6 +198,7 @@ httpMain screenBufVar screenBufChan inputChan =
         go "ATC" = handleInput (MCDUFunction ATC) >> return True
         go "FPL" = handleInput (MCDUFunction FPL) >> return True
         go "RTE" = handleInput (MCDUFunction RTE) >> return True
+        go "NAV" = handleInput (MCDUFunction NAV) >> return True
         go _ = return False
 
     logRq :: Request -> Text -> IO ()

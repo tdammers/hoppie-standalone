@@ -10,5 +10,5 @@ data ViewID
   | ATCMenuView
   | FPLView
   | RTEView
-  | NavView
+  | NAVView
   deriving (Show, Eq, Ord)
