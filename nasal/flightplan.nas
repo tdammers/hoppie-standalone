@@ -30,6 +30,7 @@ var commitFlightplanEdits = func {
     fgcommand("activate-flightplan", props.Node.new({"activate": 1}));
     flightplan().current = current;
     mcdu.modifiedFlightplan = nil;
+    return nil;
 };
 
 var getGroundspeed = func {

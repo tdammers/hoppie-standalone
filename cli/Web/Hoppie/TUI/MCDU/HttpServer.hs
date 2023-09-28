@@ -69,6 +69,7 @@ httpMain screenBufVar screenBufChan inputChan =
     [ get "/" getIndex
     , get "/mcdu.js" $ getStaticFile "application/javascript" "mcdu.js"
     , get "/mcdu.css" $ getStaticFile "text/css" "mcdu.css"
+    , get "/mcdu.svg" $ getStaticFile "image/svg+xml" "mcdu.svg"
     , post "/key" postKey
     , get "/screen" getScreen
     , wsMain
@@ -146,7 +147,7 @@ httpMain screenBufVar screenBufChan inputChan =
       body <- liftIO $ LBS.fromStrict <$> BS.readFile path
       rq <- request
       liftIO $ logRq rq ("Send file: " <> Text.pack path)
-      send $ raw status200 [("Content-type", contentType)] body
+      send $ raw status200 [("Content-type", contentType), ("Content-disposition", "inline")] body
 
     getScreen :: ResponderM a
     getScreen = do

@@ -28,7 +28,7 @@ div.case hr {
     border-top: solid 0.1rem white;
     border-bottom: solid 0.1rem rgba(0,0,0,0.5);
     height: 0;
-    width: 1rem;
+    width: 0.5rem;
     display: inline-block;
     vertical-align: middle;
     margin-right: 0.1rem;
@@ -87,6 +87,7 @@ td {
     padding: 0.2rem;
     margin-left: 0.2rem;
     margin-right: 0.2rem;
+    width: 14.5rem;
 }
 
 
