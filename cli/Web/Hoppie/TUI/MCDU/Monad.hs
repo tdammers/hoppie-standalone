@@ -682,7 +682,7 @@ mcduConnectFlightgearAfter time = do
               (LogEvent $
                 "Connecting to FlightGear on " <>
                 Text.pack fghost <> ":" <> Text.pack (show fgport))
-          withFGFSConnection fghost fgport logger $ \fgconn -> forever $ do
+          withFGFSConnection (BS8.pack fghost) fgport logger $ \fgconn -> forever $ do
             putMVar connVar fgconn
             atomically $ writeTChan eventChan (FGFSConnectEvent fgconn)
         )

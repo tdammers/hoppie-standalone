@@ -19,6 +19,7 @@ import Data.Char
 import qualified Data.Map.Strict as Map
 import Data.Maybe
 import Text.Read (readMaybe)
+import System.IO
 
 configView :: MCDUView
 configView = defView
@@ -74,7 +75,15 @@ configView = defView
                 ]
                 ++
                 if serverEnabled then
-                  [ (LSKR 3, ("", modify (\s -> s { mcduHeadless = not (mcduHeadless s) }) >> flushAll >> reloadView)) ]
+                  [ (LSKR 3, ("", do
+                        modify (\s -> s
+                          { mcduHeadless = not (mcduHeadless s) })
+                        gets mcduHeadless >>= liftIO . hSetEcho stdin
+                        flushAll
+                        reloadView
+                      )
+                    )
+                  ]
                 else
                   [ (LSKR 3, ("", modify (\s -> s { mcduScratchMessage = Just "NOT ALLOWED" }) >> redrawScratch)) ]
             }

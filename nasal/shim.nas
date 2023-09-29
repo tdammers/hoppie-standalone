@@ -127,7 +127,6 @@
         else {
             ty = 'null';
         }
-        # debug.dump("--- JSON ENCODE ---", val, ty, encoded);
         return encoded;
     };
 
@@ -148,12 +147,9 @@
         return '"' ~ encoded ~ '"';
     };
 
-    # Uniquely identifies each individual call, so that the output property is
-    # guaranteed to change when we write to it, even if the output value itself
-    # is the same as the last one.
     var callCounter = 0;
 
-    var callFunction = func (outputPath, fn, args) {
+    var callFunction = func (fn, args) {
         var err = [];
         callCounter += 1;
 
@@ -180,10 +176,28 @@
                 result = { "value": value, "num": callCounter };
             }
         }
-        setprop(outputPath, jsonEncode(result));
+        return jsonEncode(result) ~ "\n";
     };
 
-    var runScript = func (outputPath, script) {
+    var scripts = {};
+
+    var beginScript = func (h) {
+        scripts[h] = "";
+        return "\n";
+    };
+
+    var pushScriptCode = func (h, src) {
+        scripts[h] ~= src;
+        return "\n";
+    };
+
+    var finishScript = func (h) {
+        var result = runScript(scripts[h]);
+        delete(scripts, h);
+        return result;
+    };
+
+    var runScript = func (script) {
         var err = [];
         callCounter += 1;
 
@@ -192,7 +206,7 @@
             result = { "error": err, "num": callCounter, "caller": caller() };
         }
         else {
-            var value = call(f, [], me, globals.externalMCDU, err);
+            var value = call(f, [], nil, globals.externalMCDU, err);
             if (size(err) > 0) {
                 result = { "error": err, "num": callCounter, "caller": caller() };
             }
@@ -200,7 +214,7 @@
                 result = { "value": value, "num": callCounter };
             }
         }
-        setprop(outputPath, jsonEncode(result));
+        return jsonEncode(result) ~ "\n";
     };
 
     var loadModule = func (moduleHash, moduleName, moduleLoader, force=0) {
@@ -222,6 +236,9 @@
     delete(globals.externalMCDU, 'flightplan');
     globals.externalMCDU.jsonEncode = jsonEncode;
     globals.externalMCDU.runScript = runScript;
+    globals.externalMCDU.beginScript = beginScript;
+    globals.externalMCDU.pushScriptCode = pushScriptCode;
+    globals.externalMCDU.finishScript = finishScript;
     globals.externalMCDU.callFunction = callFunction;
     globals.externalMCDU.deref = deref;
     globals.externalMCDU.acquire = acquire;
@@ -236,3 +253,4 @@
     globals.externalMCDU.refTable = {};
     printReftable();
 })();
+"\n";

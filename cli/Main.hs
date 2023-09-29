@@ -273,16 +273,16 @@ hoppieMainOptionsFromProgramOptions po =
       showLog = fromMaybe False $ poShowLog po
       httpPort = poHttpServerPort po
       httpHostname = poHttpServerHostname po
-      fgfsPort = poFlightgearPort po
-      fgfsHostname = poFlightgearHostname po
+      fgPort = poFlightgearPort po
+      fgHostname = poFlightgearHostname po
   in
     defHoppieMainOptions
       { hoppieMainShowLog = showLog
       , hoppieMainHeadless = headless
       , hoppieMainHttpHostname = httpHostname
       , hoppieMainHttpPort = httpPort
-      , hoppieMainFlightgearHostname = fgfsHostname
-      , hoppieMainFlightgearPort = fgfsPort
+      , hoppieMainFlightgearHostname = fgHostname
+      , hoppieMainFlightgearPort = fgPort
       , hoppieMainAircraftType = actype
       }
 

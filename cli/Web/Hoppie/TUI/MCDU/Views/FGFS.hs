@@ -146,8 +146,11 @@ withFGNasalDef defval action = do
                   | (fileMay, lineMay) <- stackTrace
                   ]
       , MCDUHandler $ \case
-          PropJSONDecodeError raw err -> do
-            handleError "JSON ERROR" . Just $ "JSON decoder error: " <> err <> "\n" <> raw
+          JSONDecodeError err -> do
+            handleError "JSON ERROR" . Just $ "JSON decoder error: " <> err
+      , MCDUHandler $ \case
+          FGFSEndOfStream ->
+            handleError "NETWORK ERROR" . Just $ "Unexpected end of stream"
       , MCDUHandler $ \(e :: SomeException) -> do
             handleError "ERROR" . Just $ "Error:\n" <> show e
       ]

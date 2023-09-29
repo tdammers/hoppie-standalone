@@ -13,9 +13,11 @@ import Control.Concurrent.STM
 import Control.Exception
 import Control.Monad
 import Control.Monad.IO.Class
-import Data.Aeson (ToJSON (..), FromJSON (..), (.=), (.:))
+import Data.Aeson (ToJSON (..), (.=))
 import qualified Data.Aeson as JSON
 import Data.ByteString (ByteString)
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Char8 as BS8
 import qualified Data.ByteString.Lazy as LBS
 import Data.Digest.Pure.SHA (showDigest, sha256)
 import qualified Data.Map.Strict as Map
@@ -25,11 +27,15 @@ import qualified Data.Text as Text
 import Data.Text.Encoding
 import qualified Data.Text.IO as Text
 import Data.Vector (Vector)
-import qualified Network.HTTP.Simple as HTTP
-import qualified Network.WebSockets as WS
 import System.Random
 import Data.Time
 import Text.Printf
+import System.Socket (Socket)
+import qualified System.Socket as Socket
+import System.Socket.Family.Inet as Socket
+import System.Socket.Type.Stream
+import System.Socket.Protocol.TCP
+import Data.Word
 
 import Web.Hoppie.FGFS.NasalValue
 
@@ -39,16 +45,16 @@ import Paths_hoppie_standalone
 
 data FGFSConnection =
   FGFSConnection
-    { fgfsBaseURL :: String
-    , fgfsOutputPropertyPath :: String
-    , fgfsWebsocketConn :: WS.Connection
-    , fgfsOutputChan :: TChan ByteString
+    { fgfsHostname :: ByteString
+    , fgfsPort :: Int
+    , fgfsSocket :: Socket Inet Stream TCP
+    , fgfsOutputChan :: TChan Word8
     , fgfsConnFailed :: TMVar ()
     , fgfsLogger :: String -> IO ()
     }
 
 instance Show FGFSConnection where
-  show conn = "FGFSConnection " ++ show (fgfsBaseURL conn) ++ " " ++ show (fgfsOutputPropertyPath conn)
+  show conn = printf "FGFSConnection %s:%i" (decodeUtf8 $ fgfsHostname conn) (fgfsPort conn)
 
 loadNasalLibrary :: MonadIO m => FGFSConnection -> Text -> FilePath -> m ()
 loadNasalLibrary conn moduleName filePath = liftIO $ do
@@ -62,63 +68,59 @@ loadNasalLibrary conn moduleName filePath = liftIO $ do
           "}, 0);"
   runNasal conn wrappedSrc
 
-withFGFSConnection :: String -> Int -> (String -> IO ()) -> (FGFSConnection -> IO ()) -> IO ()
-withFGFSConnection host0 port logger action = do
-  let host = if host0 == "localhost" then "127.0.0.1" else host0
-  let url = "http://" ++ host ++ ":" ++ show port
-  connID <- mkRandomID
-  let path = "/sim/connections/" ++ connID
-  outputChan <- newTChanIO
+withFGFSConnection :: ByteString -> Int -> (String -> IO ()) -> (FGFSConnection -> IO ()) -> IO ()
+withFGFSConnection host port logger action = do
   connFailedVar <- newEmptyTMVarIO
-  WS.runClient host port "/PropertyListener" (\wsConn -> do
-        let runSender = do
-                bracket
-                  (connect path url wsConn outputChan connFailedVar)
-                  disconnect
-                  (\conn -> do
-                     loadNasalLibrary conn "fms" "nasal/flightplan.nas"
-                     action conn
-                  )
-            runReader = forever $ do
-                value <- WS.receiveData wsConn
-                t <- getCurrentTime
-                logger $ (formatTime defaultTimeLocale "%FT%T%Q%z" t) ++ ": received value from WS"
-                atomically . writeTChan outputChan $ value
-        race_ runReader runSender) `finally` atomically (putTMVar connFailedVar ())
+  outputChan <- newTChanIO
+  connVar <- newEmptyTMVarIO
+
+  (do
+    let runSender = do
+            bracket
+              (connect outputChan connFailedVar)
+              disconnect
+              (\conn -> do
+                 atomically $ putTMVar connVar conn
+                 putStrLn "Load shim..."
+                 shimSrc <- Text.readFile =<< getDataFileName "nasal/shim.nas"
+                 void $ runNasalRaw conn shimSrc
+                 putStrLn "Loaded shim"
+                 loadNasalLibrary conn "fms" "nasal/flightplan.nas"
+                 putStrLn "Loaded FMS library"
+                 action conn
+              )
+        runReader = do
+            sock <- fgfsSocket <$> atomically (readTMVar connVar)
+            value <- Socket.receive sock 4096 Socket.msgNoSignal
+            case BS.unpack value of
+              [] -> do
+                putStrLn "End of input"
+                return ()
+              xs -> do
+                atomically $
+                  mapM_ (writeTChan outputChan) xs
+                runReader
+    race_ runReader runSender) `finally` atomically (putTMVar connFailedVar ())
   where
 
-    connect :: String -> String -> WS.Connection -> TChan ByteString -> TMVar () -> IO FGFSConnection
-    connect path url wsConn outputChan connFailedVar = do
-      let conn = FGFSConnection url path wsConn outputChan connFailedVar logger
-
-      -- Load our shim
-      shimSrc <- Text.readFile =<< getDataFileName "nasal/shim.nas"
-      runNasalVoid conn shimSrc
-
-      -- Create the output property we use to get Nasal values back out of FGFS
-      runNasalVoid conn $ "setprop(\"" <> Text.pack path <> "\", '');"
-      WS.sendBinaryData wsConn . JSON.encode $
-        JSON.object
-          [ "command" .= ("addListener" :: Text)
-          , "node" .= path
-          ]
+    connect :: TChan Word8 -> TMVar () -> IO FGFSConnection
+    connect outputChan connFailedVar = do
+      addrInfos :: [Socket.AddressInfo Inet Stream TCP] <-
+          Socket.getAddressInfo (Just host) (Just $ BS8.pack $ show port) mempty
+      addr <- case addrInfos of
+        [] -> error $ "DNS failure: host " ++ show host ++ " not found."
+        (x:_) -> return (Socket.socketAddress x)
+      print addr
+      sock <- Socket.socket
+      Socket.connect sock addr
+      let conn = FGFSConnection host port sock outputChan connFailedVar logger
+      _ <- Socket.send sock "data\r\n" Socket.msgNoSignal
+      putStrLn "connected"
       return conn
 
     disconnect :: FGFSConnection -> IO ()
     disconnect conn = do
-      let path = fgfsOutputPropertyPath conn
-      WS.sendBinaryData (fgfsWebsocketConn conn) . JSON.encode $
-        JSON.object
-          [ "command" .= ("removeListener" :: Text)
-          , "node" .= path
-          ]
-      -- -- This will crash FG:
-      -- runNasalVoid conn $
-      --     "(func () { " <>
-      --     "    var p = props.globals.getNode(\"" <> Text.pack path <> "\");" <>
-      --     "    if (p != nil) p.remove();" <>
-      --     "})();"
-      WS.sendClose (fgfsWebsocketConn conn) ("Bye!" :: Text)
+      Socket.close (fgfsSocket conn)
 
 mkRandomID :: IO String
 mkRandomID =
@@ -194,18 +196,45 @@ callNasalFunc conn funcname args = liftIO $ do
 callNasalOrError :: FGFSConnection -> Text -> Vector NasalValue -> IO NasalValueOrError
 callNasalOrError conn fun args = 
   logTime ("callNasalOrError " <> Text.unpack fun) conn $ \_ -> do
-    let script' =
-          "externalMCDU.callFunction('" <>
-            Text.pack (fgfsOutputPropertyPath conn) <> "', " <>
-            encodeNasal fun <>
-            "," <>
-            encodeNasal args  <> ");"
-    runNasalVoid conn script'
-    getFGOutput conn
+    let script' = "externalMCDU.callFunction(" <> encodeNasal fun <> "," <> encodeNasal args  <> ");"
+    json <- runNasalRaw conn script'
+    case JSON.eitherDecodeStrict json of
+      Left err ->
+        throw $ JSONDecodeError err
+      Right val ->
+        return val
 
-runNasalVoid :: FGFSConnection -> Text -> IO ()
-runNasalVoid conn script =
-  runFGCommand conn (nasalCommand script)
+getRawResponse :: FGFSConnection -> IO ByteString
+getRawResponse conn =
+  go ""
+  where
+    chan = fgfsOutputChan conn
+
+    go bs = do
+      b <- atomically $ readTChan chan
+      -- print b
+      let bs' = BS.snoc bs b
+      if b == 10 then do
+        return $ BS.snoc bs' b
+      else
+        go bs'
+
+data FGFSNetworkError
+  = FGFSEndOfStream
+  deriving (Show)
+
+instance Exception FGFSNetworkError where
+
+runNasalRaw :: FGFSConnection -> Text -> IO ByteString
+runNasalRaw conn script = do
+  send $ "nasal\r\n" <> encodeUtf8 script <> "\r\n##EOF##\r\n"
+  getRawResponse conn
+  where
+    send bs = do
+      sent <- Socket.send (fgfsSocket conn) (BS.take 1024 bs) Socket.msgNoSignal
+      when (sent == 0) (throw FGFSEndOfStream)
+      when (sent < BS.length bs) $ do
+        send (BS.drop sent bs)
 
 runNasal_ :: MonadIO m => FGFSConnection -> Text -> m ()
 runNasal_ conn script = do
@@ -224,107 +253,30 @@ runNasal conn script = liftIO $ do
         Right val ->
           return val
 
+{-# ANN runNasalOrError ("HLint: ignore Redundant <$>" :: String) #-}
+
 runNasalOrError :: FGFSConnection -> Text -> IO NasalValueOrError
-runNasalOrError conn script =
-  logTime ("runNasalOrError " <> (Text.unpack . Text.take 100 $ script)) conn $ \_ -> do
-  let script' =
-        "externalMCDU.runScript('" <>
-          Text.pack (fgfsOutputPropertyPath conn) <> "', " <> encodeNasal script <> ");"
-  runNasalVoid conn script'
-  getFGOutput conn
+runNasalOrError conn script = do
+  let hash = Text.pack . showDigest . sha256 . LBS.fromStrict . encodeUtf8 $ script
+      uniq = encodeNasal hash
+  let scriptChunks = Text.chunksOf 4096 script
 
-runFGCommandRaw :: String -> FGCommand -> IO ()
-runFGCommandRaw baseURL cmd = do
-  -- let encoded = JSON.encode (fgCommandArgs cmd)
-  httpRq <-
-        HTTP.setRequestQueryString
-          [ ("value", Just (fgCommand cmd))
-          ]
-        . HTTP.setRequestMethod "POST"
-        . HTTP.setRequestBodyJSON (fgCommandArgs cmd)
-        <$> HTTP.parseRequest (baseURL <> "/run.cgi")
-  -- BS8.putStrLn $ "HTTP REQUEST: " <> fgCommand cmd <> " " <> LBS.toStrict encoded
-  _rp <- HTTP.httpBS httpRq
-  -- print $ HTTP.getResponseBody rp
-  return ()
+  let script'begin = "externalMCDU.beginScript(" <> uniq <> ");"
+  void $ runNasalRaw conn script'begin
 
-runFGCommand :: FGFSConnection -> FGCommand -> IO ()
-runFGCommand conn cmd = do
-  let ws = fgfsWebsocketConn conn
-      encoded = JSON.encode $
-          JSON.object
-            [ "command" .= ("exec" :: Text)
-            , "fgcommand" .= decodeUtf8 (fgCommand cmd)
-            , "children" .= fgCommandArgsList (fgCommandArgs cmd)
-            ]
-  -- Text.putStrLn $ "WS REQUEST: " <> decodeUtf8 (LBS.toStrict encoded)
-  WS.sendBinaryData ws encoded
-  -- Text.putStrLn "WS REQUEST SENT"
+  forM_ scriptChunks $ \chunk -> do
+    let script'chunk = "externalMCDU.pushScriptCode(" <> uniq <> ", " <> encodeNasal chunk <> ");"
+    void $ runNasalRaw conn script'chunk
 
-data PropResponse a =
-  PropResponse
-    { propResponsePath :: Text
-    , propResponseName :: Text
-    , propResponseValue :: a
-    , propResponseType :: Text
-    , propResponseIndex :: Int
-    , propResponseNChildren :: Int
-    }
-    deriving (Show)
+  let script'finish = "externalMCDU.finishScript(" <> uniq <> ");"
+  (JSON.eitherDecodeStrict <$> runNasalRaw conn script'finish) >>= \case
+    Left err -> throw $ JSONDecodeError err
+    Right a -> return a
 
-instance FromJSON a => FromJSON (PropResponse a) where
-  parseJSON = JSON.withObject "PropResponse" $ \obj -> do
-    (strValue :: Text) <- obj .: "value"
-    value <- either fail return $ JSON.eitherDecodeStrict $ encodeUtf8 strValue
-    PropResponse
-      <$> obj .: "path"
-      <*> obj .: "name"
-      <*> parseJSON value
-      <*> obj .: "type"
-      <*> obj .: "index"
-      <*> obj .: "nChildren"
-
-data PropJSONError =
-  PropJSONDecodeError !String !String
+newtype JSONError = JSONDecodeError String
   deriving (Show)
 
-instance Exception PropJSONError where
-
-getFGProp :: forall a. FromJSON a => FGFSConnection -> Text -> IO a
-getFGProp conn path = logTime "getFGProp" conn $ \_ -> do
-  let rqURL = fgfsBaseURL conn <> "/json/" <> Text.unpack path;
-  httpRq <- HTTP.parseRequest rqURL
-  rp <- HTTP.httpBS httpRq
-  let raw = HTTP.getResponseBody rp
-  let parsed :: PropResponse a =
-        either
-          (throw . PropJSONDecodeError (Text.unpack $ decodeUtf8 raw))
-          id
-          (JSON.eitherDecodeStrict raw)
-  return $ propResponseValue parsed
-
-getFGOutput :: forall a. (Show a, FromJSON a) => FGFSConnection -> IO a
-getFGOutput conn = logTime "getFGOutput" conn $ \_ -> do
-  race catchFailed go >>= \case
-    Left () -> throw $ PropJSONDecodeError "<EOF>" "Connection closed"
-    Right x -> do
-      return x
-  where
-    catchFailed = do
-      atomically $ readTMVar (fgfsConnFailed conn)
-
-    go = do
-      rawResponse <- atomically $ readTChan $ fgfsOutputChan conn
-      let logger = fgfsLogger conn
-      t <- getCurrentTime
-      logger $ (formatTime defaultTimeLocale "%FT%T%Q%z" t) ++ ": received value from TChan"
-      case JSON.eitherDecodeStrict rawResponse of
-        Left err ->
-          throw $ PropJSONDecodeError
-            (Text.unpack (decodeUtf8 rawResponse))
-            err
-        Right r -> do
-          return $ propResponseValue r
+instance Exception JSONError where
 
 logTime :: String -> FGFSConnection -> (FGFSConnection -> IO a) -> IO a
 logTime label conn action = do

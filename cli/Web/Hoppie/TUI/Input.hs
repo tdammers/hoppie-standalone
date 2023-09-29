@@ -168,7 +168,6 @@ loadKeyCodes = do
 runInput :: TChan Word8 -> IO ()
 runInput chan = do
   hSetBuffering stdin NoBuffering
-  hSetEcho stdin False
   withSigwinchHandler sendFF go
   where
     go = getByte >>= maybe (return ()) sendAndGo

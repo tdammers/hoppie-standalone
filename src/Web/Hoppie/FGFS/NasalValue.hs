@@ -60,7 +60,7 @@ data NasalValue
 
 encodeNasalValue :: NasalValue -> Text
 encodeNasalValue NasalNil = "nil"
-encodeNasalValue (NasalString str) = Text.pack $ show str
+encodeNasalValue (NasalString str) = encodeNasalString str
 encodeNasalValue (NasalInt i) = Text.pack $ show i
 encodeNasalValue (NasalFloat f) = Text.pack $ printf "%1.12f" f
 encodeNasalValue (NasalVector v) =
@@ -76,6 +76,18 @@ encodeNasalValue (NasalFunctionRef ident) =
 
 encodeNasal :: ToNasal a => a -> Text
 encodeNasal = encodeNasalValue . toNasal
+
+encodeNasalString :: Text -> Text
+encodeNasalString txt = "\"" <> (mconcat . map encodeNasalStringChar . Text.unpack $ txt) <> "\""
+
+encodeNasalStringChar :: Char -> Text
+encodeNasalStringChar '"' = "\\\""
+encodeNasalStringChar '\n' = "\\n"
+encodeNasalStringChar '\r' = "\\r"
+encodeNasalStringChar '\t' = "\\t"
+encodeNasalStringChar '\0' = "\\0"
+encodeNasalStringChar '\\' = "\\\\"
+encodeNasalStringChar c = Text.singleton c
 
 instance FromJSON NasalValue where
   parseJSON JSON.Null = pure NasalNil

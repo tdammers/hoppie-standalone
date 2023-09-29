@@ -5,6 +5,7 @@ import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.State
 import Data.Maybe
+import System.IO
 
 import Web.Hoppie.TUI.MCDU.Monad
 import Web.Hoppie.TUI.MCDU.HttpServer
@@ -12,6 +13,7 @@ import Web.Hoppie.TUI.MCDU.Views
 
 mcduMain :: TChan MCDUEvent -> MCDU ()
 mcduMain eventChan = do
+  gets mcduHeadless >>= liftIO . hSetEcho stdin
   modify $ \s -> s
     { mcduResolveViewID = defResolveViewID
     , mcduEventChan = Just eventChan
