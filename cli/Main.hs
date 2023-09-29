@@ -351,7 +351,7 @@ mapInputCommand _ = Nothing
 runTickTimer :: TChan MCDUEvent -> IO ()
 runTickTimer eventChan = liftIO . forever $ do
   atomically . writeTChan eventChan $ TickEvent
-  threadDelay 1000000
+  threadDelay 10000000
 
 handleUplink :: TChan MCDUEvent -> WithMeta UplinkStatus TypedMessage -> Hoppie ()
 handleUplink eventChan = do
@@ -444,7 +444,7 @@ runInputTest = do
 
 runFGFSTest :: IO ()
 runFGFSTest = do
-  withFGFSConnection "localhost" 10000 $ \conn -> do
+  withFGFSConnection "localhost" 10000 putStrLn $ \conn -> do
     (flightplan :: NasalGhost "flightplan") <- runNasal conn "return flightplan();"
     print flightplan
     print (encodeNasal flightplan)

@@ -119,7 +119,6 @@ withFGNasalDef defval action = do
     Nothing ->
       handleError "NO CONNECTION" Nothing
     Just conn -> do
-      liftIO (loadNasalLibrary conn "fms" "nasal/flightplan.nas")
       action conn `mcduCatches` handlers
   where
 
@@ -163,7 +162,6 @@ fgCallNasalBool = fgCallNasalDef False
 fgCallNasalDef :: forall a r. (ToNasal a, FromNasal r) => r -> Text -> a -> MCDU r
 fgCallNasalDef defval func args =
   withFGNasalDef defval $ \conn -> do
-    loadNasalLibrary conn "fms" "nasal/flightplan.nas"
     callNasalFunc conn func args
 
 fgRunNasal :: forall r. (FromNasal r, Monoid r) => Text -> MCDU r
@@ -175,7 +173,6 @@ fgRunNasalBool = fgRunNasalDef False
 fgRunNasalDef :: forall a. FromNasal a => a -> Text -> MCDU a
 fgRunNasalDef defval script = do
   withFGNasalDef defval $ \conn -> do
-    loadNasalLibrary conn "fms" "nasal/flightplan.nas"
     runNasal conn script
 
 navView :: MCDUView
@@ -649,7 +646,6 @@ withFGView go = do
   case connMay of
     Nothing -> fgErrorView "NO CONNECTION"
     Just conn -> do
-      liftIO (loadNasalLibrary conn "fms" "nasal/flightplan.nas")
       go conn `mcduCatches` handlers
   where
     handlers :: [MCDUHandler ()]

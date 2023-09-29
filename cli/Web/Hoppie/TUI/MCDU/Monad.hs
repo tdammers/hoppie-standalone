@@ -434,17 +434,14 @@ unlessHeadless action = do
 
 flushAll :: MCDU ()
 flushAll = do
-  headless <- gets mcduHeadless
-  liftIO $ do
-    clearScreen
-    moveTo 0 0
-  if headless then do
-    liftIO $ putStrLn "HEADLESS MODE"
-  else do
+  unlessHeadless $ do
+    liftIO $ do
+      clearScreen
+      moveTo 0 0
     buf <- gets mcduScreenBuffer
     liftIO $ drawMCDU buf
-  redrawLog
-  sendScreenHttp
+    redrawLog
+    sendScreenHttp
 
 flushScreen :: MCDU ()
 flushScreen = do
@@ -673,6 +670,8 @@ mcduConnectFlightgearAfter time = do
   fgthread <- gets mcduFlightgearThread
   fghostMay <- gets mcduFlightgearHostname
   fgportMay <- gets mcduFlightgearPort
+  -- let logger = atomically . writeTChan eventChan . LogEvent . Text.pack
+  let logger = const $ return ()
   case (fgthread, fghostMay, fgportMay) of
     (Nothing, Just fghost, Just fgport) -> do
       connVar <- liftIO newEmptyMVar
@@ -683,7 +682,7 @@ mcduConnectFlightgearAfter time = do
               (LogEvent $
                 "Connecting to FlightGear on " <>
                 Text.pack fghost <> ":" <> Text.pack (show fgport))
-          withFGFSConnection fghost fgport $ \fgconn -> forever $ do
+          withFGFSConnection fghost fgport logger $ \fgconn -> forever $ do
             putMVar connVar fgconn
             atomically $ writeTChan eventChan (FGFSConnectEvent fgconn)
         )
@@ -727,7 +726,11 @@ debugPrint :: Colored Text -> MCDU ()
 debugPrint str = do
   modify $ \s -> s
     { mcduDebugLog = str : mcduDebugLog s }
-  redrawLog
+  headless <- gets mcduHeadless
+  if headless then
+    liftIO $ rawPrintColored (str <> "\n")
+  else
+    redrawLog
 
 handleKey :: MCDUKey -> MCDU ()
 handleKey key =

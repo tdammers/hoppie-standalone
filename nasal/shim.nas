@@ -157,7 +157,6 @@
         var err = [];
         callCounter += 1;
 
-        print("Calling: " ~ substr(fn, 0, 100));
         var f = call(func {
             var nameParts = split('.', fn);
             var resolved = globals.externalMCDU;
@@ -188,7 +187,6 @@
         var err = [];
         callCounter += 1;
 
-        print("Running: " ~ substr(script, 0, 100));
         var f = call(func { compile(script, 'websocket'); }, nil, nil, err);
         if (size(err) > 0) {
             result = { "error": err, "num": callCounter, "caller": caller() };
