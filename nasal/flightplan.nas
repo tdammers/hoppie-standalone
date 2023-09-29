@@ -299,7 +299,6 @@ var setSidTransition = func (transitionID) {
         var sid = fp.sid;
         if (sid == nil) return "NO SID";
         var transitions = sid.transitions;
-        debug.dump(transitions);
         if (!contains(transitions, transitionID)) return "INVALID";
         fp.sid_trans = sid.transition(transitionID);
         return nil;
@@ -323,7 +322,6 @@ var getSidTransition = func {
 }
 
 var setDeparture = func (icao) {
-    print('setDeparture(' ~ icao ~ ')');
     var fp = getModifyableFlightplan();
     if (icao == nil) {
         fp.departure = nil;
@@ -343,7 +341,6 @@ var getDeparture = func {
 }
 
 var setDestination = func (icao) {
-    print(icao);
     var fp = getModifyableFlightplan();
     if (icao == nil) {
         fp.destination = nil;
@@ -451,7 +448,6 @@ var setStarTransition = func (transitionID) {
         var star = fp.star;
         if (star == nil) return "NO STAR";
         var transitions = star.transitions;
-        debug.dump(transitions);
         if (!contains(transitions, transitionID)) return "INVALID";
         fp.star_trans = star.transition(transitionID);
         return nil;
@@ -533,7 +529,6 @@ var setApproachTransition = func (transitionID) {
         var approach = fp.approach;
         if (approach == nil) return "NO APPROACH";
         var transitions = approach.transitions;
-        debug.dump(transitions);
         if (!contains(transitions, transitionID)) return "INVALID";
         fp.approach_trans = approach.transition(transitionID);
         return nil;
@@ -542,13 +537,10 @@ var setApproachTransition = func (transitionID) {
 
 
 var listApproachTransitions = func {
-    print("listApproachTransitions");
     var fp = getVisibleFlightplan();
     var destination = fp.destination;
-    debug.dump(destination);
     if (destination == nil) return [];
     var approach = fp.approach;
-    debug.dump(approach);
     if (approach == nil)
         return [];
     else

@@ -670,8 +670,8 @@ mcduConnectFlightgearAfter time = do
   fgthread <- gets mcduFlightgearThread
   fghostMay <- gets mcduFlightgearHostname
   fgportMay <- gets mcduFlightgearPort
-  let logger = atomically . writeTChan eventChan . LogEvent . Text.pack
-  -- let logger = const $ return ()
+  -- let logger = atomically . writeTChan eventChan . LogEvent . Text.pack
+  let logger = const $ return ()
   case (fgthread, fghostMay, fgportMay) of
     (Nothing, Just fghost, Just fgport) -> do
       connVar <- liftIO newEmptyMVar

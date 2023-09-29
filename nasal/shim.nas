@@ -150,7 +150,6 @@
     var callCounter = 0;
 
     var callFunction = func (fn, args) {
-        print(fn);
         var err = [];
         var result = nil;
         callCounter += 1;
@@ -159,7 +158,6 @@
             var nameParts = split('.', fn);
             var resolved = globals.externalMCDU;
             foreach (var part; nameParts) {
-                print(part);
                 resolved = resolved[part];
                 if (resolved == nil)
                     die("Not found: " ~ part);
@@ -170,7 +168,6 @@
             result = { "error": err, "num": callCounter, "caller": caller() };
         }
         else {
-            debug.dump(fn, args);
             var value = call(f, args, nil, {}, err);
             if (size(err) > 0) {
                 result = { "error": err, "num": callCounter, "caller": caller() };
