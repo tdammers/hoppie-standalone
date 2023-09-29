@@ -150,25 +150,28 @@
     var callCounter = 0;
 
     var callFunction = func (fn, args) {
+        print(fn);
         var err = [];
+        var result = nil;
         callCounter += 1;
 
         var f = call(func {
             var nameParts = split('.', fn);
             var resolved = globals.externalMCDU;
-            var result = nil;
             foreach (var part; nameParts) {
+                print(part);
                 resolved = resolved[part];
                 if (resolved == nil)
                     die("Not found: " ~ part);
             }
             return resolved;
-        }, [], me, globals.externalMCDU, err);
+        }, [], nil, {}, err);
         if (size(err) > 0) {
             result = { "error": err, "num": callCounter, "caller": caller() };
         }
         else {
-            var value = call(f, args, me, globals.externalMCDU, err);
+            debug.dump(fn, args);
+            var value = call(f, args, nil, {}, err);
             if (size(err) > 0) {
                 result = { "error": err, "num": callCounter, "caller": caller() };
             }
@@ -176,7 +179,7 @@
                 result = { "value": value, "num": callCounter };
             }
         }
-        return jsonEncode(result) ~ "\n";
+        return jsonEncode(result) ~ "\r\n";
     };
 
     var scripts = {};
@@ -206,7 +209,7 @@
             result = { "error": err, "num": callCounter, "caller": caller() };
         }
         else {
-            var value = call(f, [], nil, globals.externalMCDU, err);
+            var value = call(f, [], nil, {}, err);
             if (size(err) > 0) {
                 result = { "error": err, "num": callCounter, "caller": caller() };
             }
@@ -214,7 +217,7 @@
                 result = { "value": value, "num": callCounter };
             }
         }
-        return jsonEncode(result) ~ "\n";
+        return jsonEncode(result) ~ "\r\n";
     };
 
     var loadModule = func (moduleHash, moduleName, moduleLoader, force=0) {

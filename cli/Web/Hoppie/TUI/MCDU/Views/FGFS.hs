@@ -149,8 +149,14 @@ withFGNasalDef defval action = do
           JSONDecodeError err -> do
             handleError "JSON ERROR" . Just $ "JSON decoder error: " <> err
       , MCDUHandler $ \case
+          FGFSConnectionClosed ->
+            handleError "CONNECTION CLOSED" . Just $ "FlightGear connection closed."
           FGFSEndOfStream ->
             handleError "NETWORK ERROR" . Just $ "Unexpected end of stream"
+          FGFSSocketError err ->
+            handleError "NETWORK ERROR" . Just $ show err
+          FGFSDNSError hostname ->
+            handleError "DNS ERROR" . Just $ "DNS lookup failure trying to resolve " ++ show hostname
       , MCDUHandler $ \(e :: SomeException) -> do
             handleError "ERROR" . Just $ "Error:\n" <> show e
       ]
@@ -710,7 +716,9 @@ warnOrSucceed (Just e) = do
   return False
 
 setDeparture :: Maybe ByteString -> MCDU Bool
-setDeparture icao = fgCallNasalBool "fms.setDeparture" [icao]
+setDeparture icao = do
+  debugPrint $ colorize 0 $ "setDeparture: " <> (Text.pack . show $ icao)
+  fgCallNasalBool "fms.setDeparture" [icao]
 
 getDeparture :: MCDU (Maybe ByteString)
 getDeparture = fgCallNasal "fms.getDeparture" ()

@@ -68,6 +68,15 @@ loadNasalLibrary conn moduleName filePath = liftIO $ do
           "}, 0);"
   runNasal conn wrappedSrc
 
+
+data FGFSNetworkError
+  = FGFSEndOfStream
+  | FGFSConnectionClosed
+  | FGFSSocketError Socket.SocketException
+  | FGFSDNSError String
+  deriving (Show)
+
+instance Exception FGFSNetworkError where
 withFGFSConnection :: ByteString -> Int -> (String -> IO ()) -> (FGFSConnection -> IO ()) -> IO ()
 withFGFSConnection host port logger action = do
   connFailedVar <- newEmptyTMVarIO
@@ -81,12 +90,12 @@ withFGFSConnection host port logger action = do
               disconnect
               (\conn -> do
                  atomically $ putTMVar connVar conn
-                 putStrLn "Load shim..."
+                 logger "FGFS: Loadin shim..."
                  shimSrc <- Text.readFile =<< getDataFileName "nasal/shim.nas"
                  void $ runNasalRaw conn shimSrc
-                 putStrLn "Loaded shim"
+                 logger "FGSF: Loaded shim"
                  loadNasalLibrary conn "fms" "nasal/flightplan.nas"
-                 putStrLn "Loaded FMS library"
+                 logger "FGFS: Loaded FMS library"
                  action conn
               )
         runReader = do
@@ -94,8 +103,7 @@ withFGFSConnection host port logger action = do
             value <- Socket.receive sock 4096 Socket.msgNoSignal
             case BS.unpack value of
               [] -> do
-                putStrLn "End of input"
-                return ()
+                throw FGFSConnectionClosed
               xs -> do
                 atomically $
                   mapM_ (writeTChan outputChan) xs
@@ -108,14 +116,17 @@ withFGFSConnection host port logger action = do
       addrInfos :: [Socket.AddressInfo Inet Stream TCP] <-
           Socket.getAddressInfo (Just host) (Just $ BS8.pack $ show port) mempty
       addr <- case addrInfos of
-        [] -> error $ "DNS failure: host " ++ show host ++ " not found."
+        [] -> throw $ FGFSDNSError (BS8.unpack host)
         (x:_) -> return (Socket.socketAddress x)
-      print addr
       sock <- Socket.socket
       Socket.connect sock addr
       let conn = FGFSConnection host port sock outputChan connFailedVar logger
       _ <- Socket.send sock "data\r\n" Socket.msgNoSignal
-      putStrLn "connected"
+      logger $
+          printf
+            "FGFS connected on %s:%i"
+            (BS8.unpack host)
+            (fromIntegral (Socket.inetPort addr) :: Int)
       return conn
 
     disconnect :: FGFSConnection -> IO ()
@@ -196,7 +207,9 @@ callNasalFunc conn funcname args = liftIO $ do
 callNasalOrError :: FGFSConnection -> Text -> Vector NasalValue -> IO NasalValueOrError
 callNasalOrError conn fun args = 
   logTime ("callNasalOrError " <> Text.unpack fun) conn $ \_ -> do
+    (fgfsLogger conn) (show args)
     let script' = "externalMCDU.callFunction(" <> encodeNasal fun <> "," <> encodeNasal args  <> ");"
+    (fgfsLogger conn) (show script')
     json <- runNasalRaw conn script'
     case JSON.eitherDecodeStrict json of
       Left err ->
@@ -218,12 +231,6 @@ getRawResponse conn =
         return $ BS.snoc bs' b
       else
         go bs'
-
-data FGFSNetworkError
-  = FGFSEndOfStream
-  deriving (Show)
-
-instance Exception FGFSNetworkError where
 
 runNasalRaw :: FGFSConnection -> Text -> IO ByteString
 runNasalRaw conn script = do

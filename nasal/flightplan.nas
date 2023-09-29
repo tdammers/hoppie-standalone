@@ -323,6 +323,7 @@ var getSidTransition = func {
 }
 
 var setDeparture = func (icao) {
+    print('setDeparture(' ~ icao ~ ')');
     var fp = getModifyableFlightplan();
     if (icao == nil) {
         fp.departure = nil;
@@ -342,6 +343,7 @@ var getDeparture = func {
 }
 
 var setDestination = func (icao) {
+    print(icao);
     var fp = getModifyableFlightplan();
     if (icao == nil) {
         fp.destination = nil;
