@@ -224,16 +224,24 @@ instance FromNasal WaypointCandidate where
       <*> fromNasalField "bearing" nv
       <*> fromNasalField "wp" nv
 
-insertDirect :: Maybe WaypointCandidate -> WaypointCandidate -> MCDU ()
+insertDirect :: Maybe WaypointCandidate -> WaypointCandidate -> MCDU Bool
 insertDirect fromWPMay toWP = do
   let nasalFunc = case wpType toWP of
         "leg" -> "fms.insertDirectFP"
         _ -> "fms.insertDirect"
-  void (fgCallNasal nasalFunc (wpValue toWP, wpValue <$> fromWPMay) :: MCDU ())
+  result <- (fgCallNasal nasalFunc (wpValue toWP, wpValue <$> fromWPMay) :: MCDU (Maybe ByteString))
+  forM_ result $ \err -> scratchWarn err
+  return $ isNothing result
 
 resolveLeg :: ByteString -> (Maybe WaypointCandidate -> MCDU ()) -> MCDU ()
 resolveLeg name cont = do
   candidate :: Maybe WaypointCandidate <- fgCallNasalDef Nothing "fms.getFPLegIndex" [name]
+  cont candidate
+  mapM_ releaseWaypointCandidate candidate
+
+getLeg :: Int -> (Maybe WaypointCandidate -> MCDU ()) -> MCDU ()
+getLeg index cont = do
+  candidate :: Maybe WaypointCandidate <- fgCallNasalDef Nothing "fms.getWaypoint" [index]
   cont candidate
   mapM_ releaseWaypointCandidate candidate
 
@@ -341,8 +349,11 @@ loadDirectToViewWith fromMayOrig toMayOrig = do
             scratchWarn "INVALID"
             reload
           Just toWP -> do
-            insertDirect fromMay toWP
-            loadView fplView
+            done <- insertDirect fromMay toWP
+            if done then
+              loadView fplView
+            else
+              reload
 
       directToView = defView
         { mcduViewTitle = "DIRECT TO"
@@ -413,8 +424,25 @@ fplViewLoad = withFGView $ \conn -> do
   let putWaypoint :: Int -> Maybe ByteString -> MCDU Bool
       putWaypoint n Nothing = do
         callNasalFunc conn "fms.deleteWaypoint" [n]
-      putWaypoint _ (Just _) = do
-        return False
+      putWaypoint n (Just targetWPName) = do
+        resolveLeg targetWPName $ \toWPMay -> do
+          getLeg n $ \fromWPMay -> do
+            toIndexMay <- fgCallNasalDef Nothing "fms.findFPWaypoint" ((), wpValue <$> toWPMay)
+            fromIndexMay <- fgCallNasalDef Nothing "fms.findFPWaypoint" ((), wpValue <$> fromWPMay)
+            case (toIndexMay :: Maybe Int, fromIndexMay :: Maybe Int) of
+              (Nothing, Nothing) -> do
+                scratchWarn "INVALID"
+                mapM_ releaseWaypointCandidate toWPMay
+                mapM_ releaseWaypointCandidate fromWPMay
+                reloadView
+              (Just toIndex, Just fromIndex) ->
+                if (toIndex < fromIndex) then
+                  loadDirectToViewWith toWPMay fromWPMay
+                else
+                  loadDirectToViewWith fromWPMay toWPMay
+              _ ->
+                loadDirectToViewWith fromWPMay toWPMay
+        return True
       getWaypoint n = do
         callNasalFunc conn "fms.getWaypointName" [n]
 

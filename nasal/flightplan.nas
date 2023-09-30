@@ -220,6 +220,8 @@ var deleteWaypoint = func (i) {
 };
 
 var findFPWaypoint = func (fp, wp) {
+    if (fp == nil)
+        fp = fms.getVisibleFlightplan();
     if (wp == nil)
         return nil;
     var fpWP = nil;
@@ -258,19 +260,23 @@ var insertDirect = func (wp, from) {
 };
 
 var insertDirectFP = func (toWP, fromWP) {
-    var fp = fms.getModifyableFlightplan();
+    var fp = fms.getVisibleFlightplan();
     var acpos = geo.aircraft_position();
     toIndex = findFPWaypoint(fp, toWP);
     fromIndex = findFPWaypoint(fp, fromWP);
     if (toIndex == nil) {
-        insertDirect(wp, fromIndex);
+        insertDirect(toWP, fromIndex);
     }
     elsif (fromIndex == nil) {
+        var fp = fms.getModifyableFlightplan();
         var direct = createWP(acpos.lat(), acpos.lon(), "DIRECT");
         fp.insertWP(direct, toIndex);
         fp.current = toIndex + 1;
     }
     else {
+        if (toIndex <= fromIndex)
+            return "INVALID SEQ";
+        var fp = fms.getModifyableFlightplan();
         var fpIndex = fp.current;
         if (fpIndex > fromIndex and fpIndex < toIndex) {
             fpIndex = fromIndex + 1;
@@ -651,6 +657,7 @@ var fms = {
     'deleteWaypoint': deleteWaypoint,
     'clearFlightplan': clearFlightplan,
     'findWaypoint': findWaypoint,
+    'findFPWaypoint': findFPWaypoint,
     'getFPLegIndex': getFPLegIndex,
     'getWaypoint': getWaypoint,
     'insertDirect': insertDirect,

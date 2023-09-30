@@ -50,7 +50,7 @@
     };
 
     var release = func (ref) {
-        print("release(" ~ debug.string(ref) ~ ")");
+        # print("release(" ~ debug.string(ref) ~ ")");
         if (typeof(ref) != 'ghost')
             return nil;
         var refid = id(ref);
@@ -60,7 +60,7 @@
     }
 
     var acquire = func (ref) {
-        print("acquire(" ~ debug.string(ref) ~ ")");
+        # print("acquire(" ~ debug.string(ref) ~ ")");
         if (typeof(ref) != 'ghost')
             return nil;
         var refid = id(ref);
