@@ -15,7 +15,6 @@ build-type:         Simple
 data-files: cli/static/*.html
           , cli/static/*.js
           , cli/static/*.css
-          , cli/static/*.svg
           , nasal/*.nas
 
 common warnings
