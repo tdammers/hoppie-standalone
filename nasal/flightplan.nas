@@ -67,7 +67,7 @@ var getFlightplanLegs = func (pageSize = nil, curPage = nil, offset = nil) {
             }
         }
     }
-    var end = first + length;
+    var end = math.min(fp.getPlanSize(), first + length);
 
     for (var i = 0; i < end; i += 1) {
         var wp = fp.getWP(i);
