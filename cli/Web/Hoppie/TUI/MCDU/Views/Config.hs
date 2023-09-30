@@ -52,40 +52,40 @@ configView = defView
 
           modifyView $ \v -> v
             { mcduViewDraw = do
-                mcduPrint 0 2 white "A/C TYPE"
-                mcduPrintR (screenW - 1) 2 green (fromMaybe "----" actype)
-                mcduPrint 0 4 white "CALLSIGN"
-                mcduPrintR (screenW - 1) 4 green callsign
-                mcduPrint 0 6 white "SHOW LOG"
-                mcduPrintR (screenW - 1) 6 green (if showLog then "ON" else "OFF")
-                mcduPrint 0 8 white "HEADLESS MODE"
+                mcduPrint 0 1 white "A/C TYPE"
+                mcduPrint 0 2 green (fromMaybe "----" actype)
+                mcduPrintR (screenW - 1) 1 white "CALLSIGN"
+                mcduPrintR (screenW - 1) 2 green callsign
+                mcduPrintR (screenW - 1) 3 white "SHOW LOG"
+                mcduPrintR (screenW - 1) 4 green (if showLog then "ON" else "OFF")
+                mcduPrintR (screenW - 1) 5 white "HEADLESS MODE"
                 if serverEnabled then do
-                  mcduPrintR (screenW - 1) 8 green (if headless then "ON" else "OFF")
+                  mcduPrintR (screenW - 1) 6 green (if headless then "ON" else "OFF")
                 else do
                   if headless then
-                    mcduPrintR (screenW - 1) 8 red "ON"
+                    mcduPrintR (screenW - 1) 6 red "ON"
                   else
-                    mcduPrintR (screenW - 1) 8 yellow "DISABLED"
-                  mcduPrint 1 9 white "(HTTP SERVER OFF)"
+                    mcduPrintR (screenW - 1) 6 yellow "DISABLED"
+                  mcduPrintR (screenW - 1) 7 white "(HTTP SERVER OFF)"
             , mcduViewLSKBindings = Map.fromList $ 
                 [ (LSKL 5, ("MAIN MENU", loadViewByID MainMenuView))
-                , (LSKR 0, ("", scratchInteract setACType getACType >> reloadView))
-                , (LSKR 1, ("", scratchInteract setMyCallsign getMyCallsign >> reloadView))
-                , (LSKR 2, ("", modify (\s -> s { mcduShowLog = not (mcduShowLog s) }) >> flushAll >> reloadView))
+                , (LSKL 0, ("", scratchInteract setACType getACType >> reloadView))
+                , (LSKR 0, ("", scratchInteract setMyCallsign getMyCallsign >> reloadView))
+                , (LSKR 1, ("", modify (\s -> s { mcduShowLog = not (mcduShowLog s) }) >> flushAll >> reloadView))
                 ]
                 ++
                 if serverEnabled then
-                  [ (LSKR 3, ("", do
+                  [ (LSKR 2, ("", do
                         modify (\s -> s
                           { mcduHeadless = not (mcduHeadless s) })
-                        gets mcduHeadless >>= liftIO . hSetEcho stdin
+                        -- gets mcduHeadless >>= liftIO . hSetEcho stdin
                         flushAll
                         reloadView
                       )
                     )
                   ]
                 else
-                  [ (LSKR 3, ("", modify (\s -> s { mcduScratchMessage = Just "NOT ALLOWED" }) >> redrawScratch)) ]
+                  [ (LSKR 2, ("", modify (\s -> s { mcduScratchMessage = Just "NOT ALLOWED" }) >> redrawScratch)) ]
             }
         1 -> do
           serverEnabled <- gets (isJust . mcduHttpServer)

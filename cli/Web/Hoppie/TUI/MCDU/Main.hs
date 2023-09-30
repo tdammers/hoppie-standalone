@@ -13,7 +13,7 @@ import Web.Hoppie.TUI.MCDU.Views
 
 mcduMain :: TChan MCDUEvent -> MCDU ()
 mcduMain eventChan = do
-  gets mcduHeadless >>= liftIO . hSetEcho stdin
+  -- gets mcduHeadless >>= liftIO . hSetEcho stdin
   modify $ \s -> s
     { mcduResolveViewID = defResolveViewID
     , mcduEventChan = Just eventChan
