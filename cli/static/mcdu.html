@@ -54,16 +54,27 @@
             <table>
                 <tr>
                     <td colspan=3>
-                        <button class="func" onclick="sendKey('PGUP');">PG↑</button>
+                        <button class="func principal" onclick="sendKey('PGUP');"><span>PG↑</span></button>
                     </td>
                     <td colspan=3>
-                        <button class="func" onclick="sendKey('MENU');">MENU</button>
+                        <button class="func" onclick="sendKey('NAV');">NAV</button>
+                    </td>
+                    <td colspan=3>
+                        <button class="func">PROG</button>
+                    </td>
+                    <td colspan=3>
+                        <button class="func">INIT</button>
                     </td>
                     <td colspan=3>
                         <button class="func" onclick="sendKey('DLK');">DLK</button>
                     </td>
                     <td colspan=3>
-                        <button class="func" onclick="sendKey('ATC');">ATC</button></td>
+                        <button class="func">RADIO</button>
+                    </td>
+                </tr>
+                <tr>
+                    <td colspan=3>
+                        <button class="func principal" onclick="sendKey('PGDN');"><span>PG↓</span></button>
                     </td>
                     <td colspan=3>
                         <button class="func" onclick="sendKey('FPL');">FPL</button></td>
@@ -71,21 +82,32 @@
                     <td colspan=3>
                         <button class="func" onclick="sendKey('RTE');">RTE</button></td>
                     </td>
-                </tr>
-                <tr>
-                    <td colspan=3><button class="func" onclick="sendKey('PGDN');">PG↓</button></td>
-                    <td colspan=4><button class="func" onclick="sendKey('NAV');">NAV</button></td>
-                    <td colspan=2><button class="alpha" onclick="sendKey('A');">A</button></td>
-                    <td colspan=2><button class="alpha" onclick="sendKey('B');">B</button></td>
-                    <td colspan=2><button class="alpha" onclick="sendKey('C');">C</button></td>
-                    <td colspan=2><button class="alpha" onclick="sendKey('D');">D</button></td>
-                    <td colspan=2><button class="alpha" onclick="sendKey('E');">E</button></td>
-                    <td colspan=2><button class="alpha" onclick="sendKey('F');">F</button></td>
+                    <td colspan=3>
+                        <button class="func"></button>
+                    </td>
+                    <td colspan=3>
+                        <button class="func small" onclick="sendKey('ATC');">ATC<br/>COMM</button></td>
+                    </td>
+                    <td colspan=3>
+                        <button class="func" onclick="sendKey('MENU');">MENU</button>
+                    </td>
                 </tr>
                 <tr>
                     <td colspan=2><button class="num" onclick="sendKey('7');">7</button></td>
                     <td colspan=2><button class="num" onclick="sendKey('8');">8</button></td>
                     <td colspan=2><button class="num" onclick="sendKey('9');">9</button></td>
+                    <td class="hspacer"></td>
+                    <td colspan=2><button class="alpha" onclick="sendKey('A');">A</button></td>
+                    <td colspan=2><button class="alpha" onclick="sendKey('B');">B</button></td>
+                    <td colspan=2><button class="alpha" onclick="sendKey('C');">C</button></td>
+                    <td colspan=2><button class="alpha" onclick="sendKey('D');">D</button></td>
+                    <td colspan=2><button class="alpha principal" onclick="sendKey('E');"><span>E</span></button></td>
+                    <td colspan=2><button class="alpha" onclick="sendKey('F');">F</button></td>
+                </tr>
+                <tr>
+                    <td colspan=2><button class="num" onclick="sendKey('4');">4</button></td>
+                    <td colspan=2><button class="num" onclick="sendKey('5');">5</button></td>
+                    <td colspan=2><button class="num" onclick="sendKey('6');">6</button></td>
                     <td class="hspacer"></td>
                     <td colspan=2><button class="alpha" onclick="sendKey('G');">G</button></td>
                     <td colspan=2><button class="alpha" onclick="sendKey('H');">H</button></td>
@@ -95,37 +117,36 @@
                     <td colspan=2><button class="alpha" onclick="sendKey('L');">L</button></td>
                 </tr>
                 <tr>
-                    <td colspan=2><button class="num" onclick="sendKey('4');">4</button></td>
-                    <td colspan=2><button class="num" onclick="sendKey('5');">5</button></td>
-                    <td colspan=2><button class="num" onclick="sendKey('6');">6</button></td>
+                    <td colspan=2><button class="num" onclick="sendKey('1');">1</button></td>
+                    <td colspan=2><button class="num" onclick="sendKey('2');">2</button></td>
+                    <td colspan=2><button class="num" onclick="sendKey('3');">3</button></td>
                     <td class="hspacer"></td>
                     <td colspan=2><button class="alpha" onclick="sendKey('M');">M</button></td>
-                    <td colspan=2><button class="alpha" onclick="sendKey('N');">N</button></td>
+                    <td colspan=2><button class="alpha principal" onclick="sendKey('N');"><span>N</span></button></td>
                     <td colspan=2><button class="alpha" onclick="sendKey('O');">O</button></td>
                     <td colspan=2><button class="alpha" onclick="sendKey('P');">P</button></td>
                     <td colspan=2><button class="alpha" onclick="sendKey('Q');">Q</button></td>
                     <td colspan=2><button class="alpha" onclick="sendKey('R');">R</button></td>
                 </tr>
                 <tr>
-                    <td colspan=2><button class="num" onclick="sendKey('1');">1</button></td>
-                    <td colspan=2><button class="num" onclick="sendKey('2');">2</button></td>
-                    <td colspan=2><button class="num" onclick="sendKey('3');">3</button></td>
-                    <td class="hspacer"></td>
-                    <td colspan=2><button class="alpha" onclick="sendKey('S');">S</button></td>
-                    <td colspan=2><button class="alpha" onclick="sendKey('T');">T</button></td>
-                    <td colspan=2><button class="alpha" onclick="sendKey('U');">U</button></td>
-                    <td colspan=2><button class="alpha" onclick="sendKey('V');">V</button></td>
-                    <td colspan=2><button class="alpha" onclick="sendKey('W');">W</button></td>
-                    <td colspan=2><button class="alpha" onclick="sendKey('X');">X</button></td>
-                </tr>
-                <tr>
                     <td colspan=2><button class="num" onclick="sendKey('-');">-</button></td>
                     <td colspan=2><button class="num" onclick="sendKey('0');">0</button></td>
                     <td colspan=2><button class="num" onclick="sendKey('.');">.</button></td>
                     <td class="hspacer"></td>
+                    <td colspan=2><button class="alpha principal" onclick="sendKey('S');"><span>S</span></button></td>
+                    <td colspan=2><button class="alpha" onclick="sendKey('T');">T</button></td>
+                    <td colspan=2><button class="alpha" onclick="sendKey('U');">U</button></td>
+                    <td colspan=2><button class="alpha" onclick="sendKey('V');">V</button></td>
+                    <td colspan=2><button class="alpha principal" onclick="sendKey('W');"><span>W</span></button></td>
+                    <td colspan=2><button class="alpha" onclick="sendKey('X');">X</button></td>
+                </tr>
+                <tr>
+                    <td colspan=4>&nbsp;</td>
+                    <td colspan=2><button class="num" onclick="sendKey('/');">/</button></td>
+                    <td class="hspacer"></td>
                     <td colspan=2><button class="alpha" onclick="sendKey('Y');">Y</button></td>
                     <td colspan=2><button class="alpha" onclick="sendKey('Z');">Z</button></td>
-                    <td colspan=2><button class="alpha" onclick="sendKey('/');">/</button></td>
+                    <td colspan=2><button class="alpha-small" onclick="sendKey('SP');">SP</button></td>
                     <td colspan=3><button class="func" onclick="sendKey('CLR');">CLR</button></td>
                     <td colspan=3><button class="func" onclick="sendKey('DEL');">DEL</button></td>
                 </tr>
