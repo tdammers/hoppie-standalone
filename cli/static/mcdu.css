@@ -1,9 +1,11 @@
 html {
     font-family: sans-serif;
-    font-size: min(2.82vh, 4.55vw);
+    font-size: max(6pt, min(2.74vh, 4.55vw));
     overflow: hidden;
     width: 100vw;
     height: 100vh;
+    min-width: 300px;
+    min-height: 400px;
     background: linear-gradient(#000, #001);
 }
 
@@ -13,7 +15,7 @@ body {
 }
 
 div.case {
-    background: linear-gradient(silver, gray);
+    background: linear-gradient(#AAA, #555);
     display: inline-block;
     padding: 0.3rem;
     margin: 0.3rem;
@@ -23,16 +25,18 @@ div.case {
     border-radius: 0.3rem;
 }
 
+
 div.case hr {
     border: none;
-    border-top: solid 0.1rem white;
-    border-bottom: solid 0.1rem rgba(0,0,0,0.5);
-    height: 0;
+    border-top: none;
+    border-bottom: solid 0.15rem white;
+    height: 0.7rem;
     width: 0.5rem;
     display: inline-block;
     vertical-align: middle;
     margin-right: 0.1rem;
     margin-left: -0.6rem;
+    position: absolute;
 }
 
 div.case button + hr {
@@ -75,14 +79,15 @@ td {
     vertical-align: middle;
     height: 2.0rem;
 }
+
 #mcduScreen {
     background-color: black;
-    color: #DDD;
+    color: #AAA;
     line-height: 1.2;
     font-family: monospace;
     margin: 0;
     border-style: inset;
-    border-width: 0.2rem 0.5rem;
+    border-width: 0.5rem 0.5rem;
     border-radius: 0.4rem;
     padding: 0.2rem;
     margin-left: 0.2rem;
@@ -138,6 +143,11 @@ button.lsk  {
     margin-bottom: 0.7rem;
     margin-left: 0;
     margin-right: 0;
+    font-size: 150%;
+    overflow: hidden;
+    vertical-align: top;
+    line-height: 0;
+    padding-top: 0;
 }
 
 button.num {
@@ -184,3 +194,32 @@ button.func {
 button.func.small {
     font-size: 70%;
 }
+
+@media (prefers-color-scheme: dark) {
+    div.case {
+        background: linear-gradient(#333, #111);
+        box-shadow: inset -0.125rem -0.125rem 0.1rem black
+                  , inset 0.125rem 0.125rem 0.03rem #444;
+    }
+
+    div.case hr {
+        border-bottom-color: #555;
+    }
+
+
+    #mcduScreen {
+        color: #111;
+    }
+
+    button {
+        color: #EDC;
+        background: linear-gradient(to right, #000, #111);
+        border-color: #333 black black #333;
+        border-width: 0.06rem;
+        border-style: solid;
+        outline: solid 0.05rem black;
+        box-shadow: 0.1rem 0.1rem 0.2rem black
+                  , -0.05rem -0.05rem 0.1rem black;
+    }
+
+
