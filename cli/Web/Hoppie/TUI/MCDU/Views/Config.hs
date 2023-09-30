@@ -9,6 +9,8 @@ import Web.Hoppie.System
 import Web.Hoppie.TUI.MCDU.Draw
 import Web.Hoppie.TUI.MCDU.Monad
 import Web.Hoppie.TUI.MCDU.Views.Enum
+import Web.Hoppie.TUI.Output
+import Web.Hoppie.TUI.StringUtil
 
 import Control.Monad
 import Control.Monad.Reader
@@ -79,6 +81,12 @@ configView = defView
                         modify (\s -> s
                           { mcduHeadless = not (mcduHeadless s) })
                         -- gets mcduHeadless >>= liftIO . hSetEcho stdin
+                        headless' <- gets mcduHeadless
+                        when headless' $ liftIO $ do
+                          clearScreen
+                          moveTo 0 0
+                          hFlush stdout
+                        debugPrint $ colorize blue $ "Headless mode " <> if headless' then "ON" else "OFF"
                         flushAll
                         reloadView
                       )
