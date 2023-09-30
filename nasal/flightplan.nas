@@ -1,3 +1,5 @@
+var fms = globals.externalMCDU.fms;
+
 if (!contains(mcdu, 'modifiedFlightplan'))
     mcdu.modifiedFlightplan = nil;
 
