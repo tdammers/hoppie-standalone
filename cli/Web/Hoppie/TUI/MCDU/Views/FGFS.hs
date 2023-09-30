@@ -9,7 +9,6 @@ where
 
 import Web.Hoppie.TUI.MCDU.Draw
 import Web.Hoppie.TUI.MCDU.Monad
-import Web.Hoppie.TUI.MCDU.Views.Common
 import Web.Hoppie.TUI.StringUtil
 import Web.Hoppie.TUI.MCDU.Views.Enum
 import Web.Hoppie.FGFS.Connection
@@ -50,17 +49,17 @@ instance FromNasal FPLeg where
   fromNasal n =
     FPLeg
       <$> fromNasalField "name" n
-      <*> fromNasalField "heading" n
-      <*> fromNasalField "leg_dist" n
-      <*> fromNasalField "route_dist" n
-      <*> fromNasalField "remaining_dist" n
-      <*> fromNasalField "speed" n
-      <*> fromNasalField "speed_type" n
-      <*> fromNasalField "alt" n
-      <*> fromNasalField "alt_type" n
-      <*> fromNasalField "parent" n
-      <*> fromNasalField "role" n
-      <*> (fromMaybe False <$> fromNasalField "discontinuity" n)
+      <*> fromNasalFieldMaybe "hdg" n
+      <*> fromNasalFieldMaybe "ldist" n
+      <*> fromNasalFieldMaybe "cdist" n
+      <*> fromNasalFieldMaybe "rdist" n
+      <*> fromNasalFieldMaybe "spd" n
+      <*> fromNasalFieldMaybe "spdty" n
+      <*> fromNasalFieldMaybe "alt" n
+      <*> fromNasalFieldMaybe "altty" n
+      <*> fromNasalFieldMaybe "p" n
+      <*> fromNasalFieldMaybe "role" n
+      <*> (fromMaybe False <$> fromNasalFieldMaybe "disc" n)
 
 formatDistance :: Double -> String
 formatDistance dist
@@ -189,14 +188,17 @@ navView = defView
   { mcduViewTitle = "NAV MENU"
   , mcduViewLSKBindings = Map.fromList
       [ (LSKL 0, ("DIRECT TO", loadDirectToView Nothing))
-      , (LSKL 1, ("NAV INIT", scratchWarn "NOT IMPLEMENTED"))
+      , (LSKL 3, ("NAV INIT", scratchWarn "NOT IMPLEMENTED"))
+      , (LSKL 4, ("DEPARTURE", loadView departureView))
+      , (LSKR 4, ("ARRIVAL", loadView arrivalView))
       , (LSKL 5, ("MENU", loadViewByID MainMenuView))
       ]
   }
 
 data WaypointCandidate =
   WaypointCandidate
-    { wpType :: Text
+    { wpID :: Text
+    , wpType :: Text
     , wpName :: Text
     , wpDistance :: Double
     , wpBearing :: Double
@@ -215,82 +217,175 @@ acquireWaypointCandidate candidate =
 instance FromNasal WaypointCandidate where
   fromNasal nv =
     WaypointCandidate
-      <$> fromNasalField "type" nv
+      <$> fromNasalField "id" nv
+      <*> fromNasalField "type" nv
       <*> fromNasalField "name" nv
       <*> fromNasalField "distance" nv
       <*> fromNasalField "bearing" nv
       <*> fromNasalField "wp" nv
 
-insertDirect :: WaypointCandidate -> MCDU ()
-insertDirect wp = do
-  let nasalFunc = case wpType wp of
+insertDirect :: Maybe WaypointCandidate -> WaypointCandidate -> MCDU ()
+insertDirect fromWPMay toWP = do
+  let nasalFunc = case wpType toWP of
         "leg" -> "fms.insertDirectFP"
         _ -> "fms.insertDirect"
-  void (fgCallNasal nasalFunc [wpValue wp] :: MCDU ())
+  void (fgCallNasal nasalFunc (wpValue toWP, wpValue <$> fromWPMay) :: MCDU ())
+
+resolveLeg :: ByteString -> (Maybe WaypointCandidate -> MCDU ()) -> MCDU ()
+resolveLeg name cont = do
+  candidate :: Maybe WaypointCandidate <- fgCallNasalDef Nothing "fms.getFPLegIndex" [name]
+  cont candidate
+  mapM_ releaseWaypointCandidate candidate
+
+resolveWaypoint :: ByteString -> ByteString -> (Maybe WaypointCandidate -> MCDU ()) -> MCDU ()
+resolveWaypoint returnTitle name cont = do
+  candidates :: [WaypointCandidate] <- fgCallNasal "fms.findWaypoint" [name]
+  case candidates of
+    [] -> do
+      scratchWarn "NO WPT"
+      cont Nothing
+    [candidate] -> do
+      cont (Just candidate)
+      releaseWaypointCandidate candidate
+    _ -> do
+      mapM_ acquireWaypointCandidate candidates
+      loadView $ selectViewWith
+        SelectViewOptions
+          { selectViewSingleSided = True
+          , selectViewBreakLines = True
+          , selectViewUnloadAction = mapM_ releaseWaypointCandidate candidates
+          }
+        "SELECT WPT"
+        [ (c, colorize color . BS8.pack $ printf "%s\n%s %s %03.0f°"
+                          (Text.take (screenW - 2) (wpName c))
+                          (Text.toUpper $ wpType c)
+                          (formatDistance $ wpDistance c)
+                          (wpBearing c)
+          )
+        | c <- candidates
+        , let color = case wpType c of
+                        "leg" -> green
+                        _ -> white
+        ]
+        returnTitle
+        (\candidateMay -> do
+            cont candidateMay
+        )
 
 loadDirectToView :: Maybe ByteString -> MCDU ()
-loadDirectToView origTargetMay = do
-  targetVar <- liftIO $ newIORef origTargetMay
-  let setTarget target = do
-        liftIO $ writeIORef targetVar target
+loadDirectToView Nothing = do
+  loadDirectToViewWith Nothing Nothing
+loadDirectToView (Just toName) = do
+  resolveWaypoint "NO WPT" toName (loadDirectToViewWith Nothing)
+
+loadDirectToViewWith :: Maybe WaypointCandidate -> Maybe WaypointCandidate -> MCDU ()
+loadDirectToViewWith fromMayOrig toMayOrig = do
+  fromVar :: IORef (Maybe WaypointCandidate) <- liftIO $ newIORef Nothing
+  toVar :: IORef (Maybe WaypointCandidate) <- liftIO $ newIORef Nothing
+
+  let release :: IORef (Maybe WaypointCandidate) -> MCDU ()
+      release var =
+        liftIO (readIORef var) >>= mapM_ releaseWaypointCandidate
+
+      acquire :: IORef (Maybe WaypointCandidate) -> MCDU ()
+      acquire var =
+        liftIO (readIORef var) >>= mapM_ acquireWaypointCandidate
+
+      erase :: IORef (Maybe WaypointCandidate) -> MCDU ()
+      erase var = do
+        release var
+        liftIO $ writeIORef var Nothing
+
+      store :: IORef (Maybe WaypointCandidate) -> Maybe WaypointCandidate -> MCDU ()
+      store var wpMay = do
+        release var
+        liftIO $ writeIORef var wpMay
+        acquire var
+
+      reload :: MCDU ()
+      reload = do
+        acquire toVar
+        acquire fromVar
+        loadView directToView
+
+      setTo Nothing = do
+        erase toVar
+        reload
         return True
-      getTarget =
-        liftIO $ readIORef targetVar
+      setTo (Just n) = do
+        resolveWaypoint "DIRECT TO" n $ \wpMay -> do
+          store toVar wpMay
+          reload
+        return True
+      getTo =
+        liftIO $ fmap (encodeUtf8 . wpID) <$> readIORef toVar
+
+      setFrom Nothing = do
+        erase fromVar
+        reload
+        return True
+      setFrom (Just n) = do
+        resolveLeg n $ \wpMay -> do
+          store fromVar wpMay
+          reload
+        return True
+      getFrom =
+        liftIO $ fmap (encodeUtf8 . wpID) <$> readIORef fromVar
+
       insert = do
-        targetMay <- liftIO $ readIORef targetVar
-        case targetMay of
+        fromMay <- liftIO $ readIORef fromVar
+        toMay <- liftIO $ readIORef toVar
+
+        case toMay of
           Nothing -> do
             scratchWarn "INVALID"
-            reloadView
-          Just targetName -> do
-            candidates :: [WaypointCandidate] <- fgCallNasal "fms.findWaypoint" [targetName]
-            modifyView $ \v -> v
-              { mcduViewOnUnload = mapM_ releaseWaypointCandidate candidates }
-            case candidates of
-              [] -> do
-                scratchWarn "NO WPT"
-              [candidate] -> do
-                insertDirect candidate
-                loadView fplView
-              _ -> do
-                mapM_ acquireWaypointCandidate candidates
-                loadView $ selectViewWith
-                  SelectViewOptions
-                    { selectViewSingleSided = True
-                    , selectViewBreakLines = True
-                    , selectViewUnloadAction = mapM_ releaseWaypointCandidate candidates
-                    }
-                  "SELECT WPT"
-                  [ (c, colorize color . BS8.pack $ printf "%s\n%s %s %03.0f°"
-                                    (Text.take (screenW - 2) (wpName c))
-                                    (Text.toUpper $ wpType c)
-                                    (formatDistance $ wpDistance c)
-                                    (wpBearing c)
-                    )
-                  | c <- candidates
-                  , let color = case wpType c of
-                                  "leg" -> green
-                                  _ -> white
-                  ]
-                  "FPL"
-                  (\candidateMay -> do
-                      forM_ candidateMay insertDirect
-                      loadView fplView
-                  )
+            reload
+          Just toWP -> do
+            insertDirect fromMay toWP
+            loadView fplView
 
-  loadView defView
-    { mcduViewTitle = "DIRECT TO"
-    , mcduViewOnLoad = do
-        target <- liftIO $ readIORef targetVar
-        modifyView $ \v -> v
-          { mcduViewDraw = do
-              mcduPrint 1 2 green $ fromMaybe "----" target
-          , mcduViewLSKBindings = Map.fromList
-              [ (LSKL 0, ("", scratchInteract setTarget getTarget >> reloadView))
-              , (LSKR 5, ("INSERT", insert >> reloadView))
-              ]
-          }
-    }
+      directToView = defView
+        { mcduViewTitle = "DIRECT TO"
+        , mcduViewOnLoad = do
+            to <- liftIO $ readIORef toVar
+            from <- liftIO $ readIORef fromVar
+            let wpColor w = case wpType <$> w of
+                  Nothing -> green
+                  Just "leg" -> green
+                  Just _ -> white
+                wpLabel = maybe "----" (\wp ->
+                    encodeUtf8 $ wpID wp <> " (" <> Text.toUpper (wpType wp) <> ")"
+                  )
+                wpDesc = maybe "" (encodeUtf8 . wpName)
+                wpInfo = maybe ""
+                          (\wp -> BS8.pack $ printf "%s %03.0f°"
+                            (formatDistance $ wpDistance wp)
+                            (wpBearing wp)
+                          )
+            -- from <- liftIO $ readIORef fromVar
+            modifyView $ \v -> v
+              { mcduViewDraw = do
+                  mcduPrint 1 1 white "TO"
+                  mcduPrint 1 2 (wpColor to) (wpLabel to)
+                  mcduPrint 1 3 (wpColor to) (wpDesc to)
+                  mcduPrint 1 4 (wpColor to) (wpInfo to)
+                  mcduPrint 1 5 white "FROM"
+                  mcduPrint 1 6 (wpColor from) (wpLabel from)
+                  mcduPrint 1 7 (wpColor from) (wpDesc from)
+                  mcduPrint 1 8 (wpColor from) (wpInfo from)
+              , mcduViewLSKBindings = Map.fromList
+                  [ (LSKL 0, ("", scratchInteract setTo getTo))
+                  , (LSKL 2, ("", scratchInteract setFrom getFrom))
+                  , (LSKR 5, ("INSERT", insert))
+                  ]
+              }
+        , mcduViewOnUnload = do
+            release fromVar
+            release toVar
+        }
+  store toVar toMayOrig
+  store fromVar fromMayOrig
+  loadView directToView
 
 fplView :: MCDUView
 fplView = defView
@@ -301,18 +396,19 @@ fplView = defView
 
 fplViewLoad :: MCDU ()
 fplViewLoad = withFGView $ \conn -> do
+  let legsPerPage = numLSKs - 1
+  curPage <- gets (mcduViewPage . mcduView)
+
   (groundspeed :: Double) <- max 100 <$> callNasalFunc conn "fms.getGroundspeed" ()
   (utcMinutes :: Double) <- callNasalFunc conn "fms.getUTCMinutes" ()
-  legs' <- callNasalFunc conn "fms.getFlightplanLegs" ()
+
+  planSize <- callNasalFunc conn "fms.getFlightplanSize" ()
   currentLeg <- callNasalFunc conn "fms.getCurrentLeg" ()
+
+  curLegs <- callNasalFunc conn "fms.getFlightplanLegs" (legsPerPage, curPage, fromMaybe 1 currentLeg - 1)
   flightplanModified <- callNasalFunc conn "fms.hasFlightplanModifications" ()
-  let legsPerPage = numLSKs - 1
-  let legs = case currentLeg of
-                Nothing -> legs'
-                Just i -> drop (i - 1) legs'
-  curPage <- gets (mcduViewPage . mcduView)
   let legsDropped = curPage * legsPerPage
-  let (numPages, curLegs) = paginate legsPerPage curPage legs
+  let numPages = (planSize - fromMaybe 0 currentLeg + legsPerPage) `div` legsPerPage
 
   let putWaypoint :: Int -> Maybe ByteString -> MCDU Bool
       putWaypoint n Nothing = do
@@ -339,7 +435,7 @@ fplViewLoad = withFGView $ \conn -> do
         ++
         [ (LSKR 5, ("CONFIRM", commitFlightplanEdits >> reloadView)) | flightplanModified ]
     , mcduViewDraw = do
-        when (null legs) $ do
+        when (planSize == 0) $ do
           mcduPrintC (screenW `div` 2) (screenH `div` 2) white "NO FPL"
         zipWithM_
           (\n leg -> do
@@ -358,7 +454,8 @@ fplViewLoad = withFGView $ \conn -> do
                   mcduPrint (screenW - 6) (n * 2 + 1) color (BS8.pack $ formatETA eta <> "z")
             if isPrevious then
               mcduPrint 0 (n * 2 + 2) color (encodeUtf8 $ legName leg)
-            else if legIsDiscontinuity leg then
+            else if legIsDiscontinuity leg then do
+              mcduPrint 9 (n * 2 + 1) color (BS8.pack . maybe "----NM" formatDistance $ legRemainingDist leg)
               mcduPrint 0 (n * 2 + 2) color "---- DISCONTINUITY ----"
             else if isCurrent then do
               mcduPrint 1 (n * 2 + 1) color (BS8.pack . maybe "---°" (printf "%03.0f°") $ legHeading leg)

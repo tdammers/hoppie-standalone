@@ -55,7 +55,8 @@
             return nil;
         var refid = id(ref);
         releaseRef(refid);
-        printReftable();
+        # printReftable();
+        return nil;
     }
 
     var acquire = func (ref) {
@@ -64,7 +65,8 @@
             return nil;
         var refid = id(ref);
         acquireRef(refid);
-        printReftable();
+        # printReftable();
+        return nil;
     }
 
 
@@ -120,7 +122,7 @@
             foreach (var k; keys(val)) {
                 append(
                     encodedPairs,
-                    jsonEncodeString(k) ~ ": " ~ jsonEncode(val[k]));
+                    jsonEncodeString(k) ~ ":" ~ jsonEncode(val[k]));
             }
             encoded = '{' ~ string.join(',', encodedPairs) ~ '}';
         }
@@ -165,15 +167,15 @@
             return resolved;
         }, [], nil, {}, err);
         if (size(err) > 0) {
-            result = { "error": err, "num": callCounter, "caller": caller() };
+            result = { "e": err, "n": callCounter, "caller": caller() };
         }
         else {
             var value = call(f, args, nil, {}, err);
             if (size(err) > 0) {
-                result = { "error": err, "num": callCounter, "caller": caller() };
+                result = { "e": err, "n": callCounter, "caller": caller() };
             }
             else {
-                result = { "value": value, "num": callCounter };
+                result = { "v": value, "n": callCounter };
             }
         }
         return jsonEncode(result) ~ "\r\n";
@@ -203,15 +205,15 @@
 
         var f = call(func { compile(script, 'websocket'); }, nil, nil, err);
         if (size(err) > 0) {
-            result = { "error": err, "num": callCounter, "caller": caller() };
+            result = { "e": err, "n": callCounter, "caller": caller() };
         }
         else {
             var value = call(f, [], nil, {}, err);
             if (size(err) > 0) {
-                result = { "error": err, "num": callCounter, "caller": caller() };
+                result = { "e": err, "n": callCounter, "caller": caller() };
             }
             else {
-                result = { "value": value, "num": callCounter };
+                result = { "v": value, "n": callCounter };
             }
         }
         return jsonEncode(result) ~ "\r\n";
@@ -243,7 +245,7 @@
     globals.externalMCDU.deref = deref;
     globals.externalMCDU.acquire = acquire;
     globals.externalMCDU.release = release;
-    if (!contains(globals.externalMCDU, 'refTable')) {
+    if (1 or !contains(globals.externalMCDU, 'refTable')) {
         globals.externalMCDU.refTable = {};
     }
     if (!contains(globals.externalMCDU, 'libs')) {
@@ -251,6 +253,7 @@
     }
     globals.externalMCDU.loadModule = loadModule;
     globals.externalMCDU.refTable = {};
-    printReftable();
+    # printReftable();
+    return nil;
 })();
 "\n";

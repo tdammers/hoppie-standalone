@@ -70,9 +70,9 @@ encodeNasalValue (NasalHash m) =
   (Text.intercalate "," [ Text.pack (show k) <> ": " <> encodeNasalValue v | (k, v) <- Map.toList m ]) <>
   "}"
 encodeNasalValue (NasalGhostRef _ ident) =
-  "deref({'__reftype__': 'ghost', '__refid__': " <> Text.pack (show ident) <> "})"
+  "globals.externalMCDU.deref({'__reftype__': 'ghost', '__refid__': " <> Text.pack (show ident) <> "})"
 encodeNasalValue (NasalFunctionRef ident) =
-  "deref({'__reftype__': 'func', '__refid__': " <> Text.pack (show ident) <> "})"
+  "globals.externalMCDU.deref({'__reftype__': 'func', '__refid__': " <> Text.pack (show ident) <> "})"
 
 encodeNasal :: ToNasal a => a -> Text
 encodeNasal = encodeNasalValue . toNasal
@@ -166,12 +166,12 @@ instance FromJSON NasalError where
 
 instance FromJSON NasalValueOrError where
   parseJSON = JSON.withObject "NasalValueOrError" $ \obj -> do
-    errMay <- fmap NasalError <$> obj .:? "error"
+    errMay <- fmap NasalError <$> obj .:? "e"
     case errMay of
       Just err ->
         return err
       Nothing -> do
-        NasalValue <$> (parseJSON =<< obj .: "value")
+        NasalValue <$> (parseJSON =<< obj .: "v")
 
 class ToNasal a where
   toNasal :: a -> NasalValue
@@ -185,6 +185,13 @@ fromNasalField key (NasalHash m) =
     Nothing -> Left $ NasalMissingKey (Text.unpack key)
     Just n -> fromNasal n
 fromNasalField _ n = Left $ NasalUnexpected "hash" (show n)
+
+fromNasalFieldMaybe :: FromNasal a => Text -> NasalValue -> Either NasalDecodeError (Maybe a)
+fromNasalFieldMaybe key (NasalHash m) =
+  case Map.lookup key m of
+    Nothing -> return Nothing
+    Just n -> fromNasal n
+fromNasalFieldMaybe _ n = Left $ NasalUnexpected "hash" (show n)
 
 instance ToNasal NasalValue where
   toNasal = id

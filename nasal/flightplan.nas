@@ -1,5 +1,3 @@
-var fms = globals.externalMCDU.fms;
-
 if (!contains(mcdu, 'modifiedFlightplan'))
     mcdu.modifiedFlightplan = nil;
 
@@ -46,14 +44,32 @@ var getUTCMinutes = func {
     return (hour * 60 + minute + second / 60);
 };
 
-var getFlightplanLegs = func {
+var getFlightplanSize = func {
+    var fp = fms.getVisibleFlightplan();
+    return fp.getPlanSize();
+};
+
+var getFlightplanLegs = func (pageSize = nil, curPage = nil, offset = nil) {
     var acpos = geo.aircraft_position();
     var fp = fms.getVisibleFlightplan();
     var result = [];
     var distanceToCurrent = getprop('/autopilot/route-manager/wp/dist');
     var totalDistanceRemaining = getprop('/autopilot/route-manager/distance-remaining-nm');
     var distanceRemaining = 0;
-    for (var i = 0; i < fp.getPlanSize(); i += 1) {
+    var first = 0;
+    var length = fp.getPlanSize();
+    if (pageSize != nil) {
+        length = pageSize;
+        if (curPage != nil) {
+            first = curPage * pageSize;
+            if (offset != nil) {
+                first += offset;
+            }
+        }
+    }
+    var end = first + length;
+
+    for (var i = 0; i < end; i += 1) {
         var wp = fp.getWP(i);
         var parent_id = nil;
         if (wp.wp_parent != nil)
@@ -64,22 +80,52 @@ var getFlightplanLegs = func {
         elsif (i > fp.current) {
             distanceRemaining += wp.leg_distance;
         }
-        append(result,
-                { "name": wp.wp_name
-                , "heading": wp.leg_bearing
-                , "leg_dist": wp.leg_distance
-                , "route_dist": wp.distance_along_route
-                , "remaining_dist": distanceRemaining
-                , "speed": wp.speed_cstr
-                , "speed_type": wp.speed_cstr_type
-                , "alt": wp.alt_cstr
-                , "alt_type": wp.alt_cstr_type
-                , "parent": parent_id
-                , "role": wp.wp_role
-                , "discontinuity": (wp.wp_type == "discontinuity" or wp.wp_type == "vectors")
-                });
+        if (i >= first) {
+            append(result,
+                    removeNilFields(
+                        { "name": wp.wp_name
+                        , "hdg": math.round(wp.leg_bearing)
+                        , "ldist": wp.leg_distance
+                        , "cdist": wp.distance_along_route
+                        , "rdist": distanceRemaining
+                        , "spd": wp.speed_cstr
+                        , "spdty": wp.speed_cstr_type
+                        , "alt": wp.alt_cstr
+                        , "altty": wp.alt_cstr_type
+                        , "p": parent_id
+                        , "role": wp.wp_role
+                        , "disc": (wp.wp_type == "discontinuity" or wp.wp_type == "vectors")
+                        }));
+        }
     }
     return result;
+};
+
+var removeNilFields = func (h) {
+    foreach (var k; keys(h)) {
+        if (h[k] == nil)
+            delete(h, k);
+    }
+    return h;
+};
+
+var getWaypoint = func (index) {
+    var fp = fms.getVisibleFlightplan();
+    var wp = fp.getWP(index);
+    if (wp == nil)
+        return nil;
+    else
+        return completeWaypoint({ "type": "leg" , "id": wp.id, "name": wp.wp_name, "wp": wp });
+};
+
+var getFPLegIndex = func (needle) {
+    var fp = fms.getVisibleFlightplan();
+    for (var i = fp.current or 0; i < fp.getPlanSize(); i += 1) {
+        var wp = fp.getWP(i);
+        if (wp.wp_name == needle)
+            return completeWaypoint({ "type": "leg" , "id": wp.id, "name": wp.wp_name, "wp": wp });
+    }
+    return nil;
 };
 
 var findWaypoint = func (needle) {
@@ -89,42 +135,41 @@ var findWaypoint = func (needle) {
     for (var i = fp.current or 0; i < fp.getPlanSize(); i += 1) {
         var wp = fp.getWP(i);
         if (wp.wp_name == needle)
-            append(results, { "type": "leg" , "name": wp.wp_name, "wp": wp });
+            append(results,
+                completeWaypoint({ "type": "leg" , "id": wp.id, "name": wp.wp_name, "wp": wp }, acpos));
     }
     if (size(needle) == 4) {
         var airports = findAirportsByICAO(needle);
         foreach (var airport; airports) {
-            append(results, { "type": "airport", "name": airport.name, "wp": airport });
+            append(results,
+                completeWaypoint({ "type": "airport", "id": wp.id, "name": airport.name, "wp": airport }, acpos));
         }
     }
     else {
         var fixes = findFixesByID(acpos, needle);
         foreach (var fix; fixes) {
             if (fix.id == needle)
-                append(results, { "type": "fix", "name": fix.id, "wp": fix });
+                append(results,
+                    completeWaypoint({ "type": "fix", "id": fix.id, "name": fix.id, "wp": fix }, acpos));
         }
         var vors = findNavaidsByID(acpos, needle, 'vor');
         foreach (var vor; vors) {
             if (vor.id == needle)
-                append(results, { "type": vor.type, "name": vor.name, "wp": vor });
+                append(results,
+                    completeWaypoint({ "type": vor.type, "id": vor.id, "name": vor.name, "wp": vor }, acpos));
         }
         var ndbs = findNavaidsByID(acpos, needle, 'ndb');
         foreach (var ndb; ndbs) {
             if (ndb.id == needle)
-                append(results, { "type": ndb.type, "name": ndb.name, "wp": ndb });
+                append(results,
+                    completeWaypoint({ "type": ndb.type, "id": ndb.id, "name": ndb.name, "wp": ndb }, acpos));
         }
         var dmes = findNavaidsByID(acpos, needle, 'dme');
         foreach (var dme; dmes) {
             if (dme.id == needle)
-                append(results, { "type": dme.type, "name": dme.name, "wp": dme });
+                append(results,
+                    completeWaypoint({ "type": dme.type, "id": dme.id, "name": dme.name, "wp": dme }, acpos));
         }
-    }
-    var acpos = geo.aircraft_position();
-    foreach (var result; results) {
-        var wpPos = geo.Coord.new();
-        wpPos.set_latlon(result.wp.lat, result.wp.lon);
-        result.distance = acpos.distance_to(wpPos) * M2NM;
-        result.bearing = acpos.course_to(wpPos);
     }
     var sortfunc = func (a, b) {
         if (a.type == "leg" and b.type != "leg")
@@ -139,6 +184,17 @@ var findWaypoint = func (needle) {
             return 0;
     };
     return sort(results, sortfunc);
+};
+
+var completeWaypoint = func (wp, acpos = nil) {
+    if (acpos == nil) {
+        acpos = geo.aircraft_position();
+    }
+    var wpPos = geo.Coord.new();
+    wpPos.set_latlon(wp.wp.lat, wp.wp.lon);
+    wp.distance = acpos.distance_to(wpPos) * M2NM;
+    wp.bearing = acpos.course_to(wpPos);
+    return wp;
 };
 
 var getCurrentLeg = func {
@@ -163,21 +219,9 @@ var deleteWaypoint = func (i) {
     return 1;
 };
 
-var insertDirect = func (wp) {
-    var fp = fms.getModifyableFlightplan();
-    var acpos = geo.aircraft_position();
-    var direct = createWP(acpos.lat(), acpos.lon(), "DIRECT");
-    fp.insertWP(direct, fp.current);
-    var newWP = createWP(wp.lat, wp.lon, wp.id);
-    fp.insertWP(newWP, fp.current);
-    fp.insertWP(createDiscontinuity(), fp.current);
-    fp.current -= 2;
-    return nil;
-};
-
-var insertDirectFP = func (wp) {
-    var fp = fms.getModifyableFlightplan();
-    var acpos = geo.aircraft_position();
+var findFPWaypoint = func (fp, wp) {
+    if (wp == nil)
+        return nil;
     var fpWP = nil;
     var fpIndex = nil;
     for (var i = fp.current; i < fp.getPlanSize(); i += 1) {
@@ -187,13 +231,55 @@ var insertDirectFP = func (wp) {
             break;
         }
     }
-    if (fpIndex == nil) {
-        insertDirect(wp);
+    return fpIndex;
+};
+
+var insertDirect = func (wp, from) {
+    var fp = fms.getModifyableFlightplan();
+    var acpos = geo.aircraft_position();
+    if (typeof(from) == 'ghost') {
+        print("from is ghost, finding in flightplan");
+        from = findFPWaypoint(fp, from);
+    }
+    if (from == nil) {
+        var direct = createWP(acpos.lat(), acpos.lon(), "DIRECT");
+        fp.insertWP(direct, fp.current);
+        var newWP = createWP(wp.lat, wp.lon, wp.id);
+        fp.insertWP(newWP, fp.current);
+        fp.insertWP(createDiscontinuity(), fp.current);
+        fp.current -= 2;
     }
     else {
+        var newWP = createWP(wp.lat, wp.lon, wp.id);
+        fp.insertWP(newWP, from + 1);
+        fp.insertWP(createDiscontinuity(), from + 2);
+    }
+    return nil;
+};
+
+var insertDirectFP = func (toWP, fromWP) {
+    var fp = fms.getModifyableFlightplan();
+    var acpos = geo.aircraft_position();
+    toIndex = findFPWaypoint(fp, toWP);
+    fromIndex = findFPWaypoint(fp, fromWP);
+    if (toIndex == nil) {
+        insertDirect(wp, fromIndex);
+    }
+    elsif (fromIndex == nil) {
         var direct = createWP(acpos.lat(), acpos.lon(), "DIRECT");
-        fp.insertWP(direct, fpIndex);
-        fp.current = fpIndex + 1;
+        fp.insertWP(direct, toIndex);
+        fp.current = toIndex + 1;
+    }
+    else {
+        var fpIndex = fp.current;
+        if (fpIndex > fromIndex and fpIndex < toIndex) {
+            fpIndex = fromIndex + 1;
+        }
+        for (var i = fromIndex + 1; i < toIndex; i += 1) {
+            fp.deleteWP(fromIndex + 1);
+        }
+        fp.insertWP(createDiscontinuity(), fromIndex + 1);
+        fp.current = fpIndex;
     }
     return nil;
 };
@@ -554,7 +640,7 @@ var getApproachTransition = func {
     return ((fp.approach_trans == nil) ? nil : fp.approach_trans.id);
 }
 
-return {
+var fms = {
     'hasFlightplanModifications': hasFlightplanModifications,
     'getModifyableFlightplan': getModifyableFlightplan,
     'getVisibleFlightplan': getVisibleFlightplan,
@@ -565,12 +651,15 @@ return {
     'deleteWaypoint': deleteWaypoint,
     'clearFlightplan': clearFlightplan,
     'findWaypoint': findWaypoint,
+    'getFPLegIndex': getFPLegIndex,
+    'getWaypoint': getWaypoint,
     'insertDirect': insertDirect,
     'insertDirectFP': insertDirectFP,
 
     'getGroundspeed': getGroundspeed,
     'getUTCMinutes': getUTCMinutes,
     'getFlightplanLegs': getFlightplanLegs,
+    'getFlightplanSize': getFlightplanSize,
     'getCurrentLeg': getCurrentLeg,
 
     'setDeparture': setDeparture,
@@ -611,3 +700,5 @@ return {
     'listApproachTransitions': listApproachTransitions,
     'getApproachTransition': getApproachTransition,
 };
+
+return fms;

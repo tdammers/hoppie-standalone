@@ -36,6 +36,7 @@ import System.Socket.Family.Inet as Socket
 import System.Socket.Type.Stream
 import System.Socket.Protocol.TCP
 import Data.Word
+-- import System.IO
 
 import Web.Hoppie.FGFS.NasalValue
 
@@ -101,6 +102,7 @@ withFGFSConnection host port logger action = do
         runReader = do
             sock <- fgfsSocket <$> atomically (readTMVar connVar)
             value <- Socket.receive sock 4096 Socket.msgNoSignal
+            -- printf "recv %i\n" (BS.length value)
             case BS.unpack value of
               [] -> do
                 throw FGFSConnectionClosed
@@ -225,10 +227,14 @@ getRawResponse conn =
 
     go bs = do
       b <- atomically $ readTChan chan
-      -- print b
+      -- BS8.putStr $ BS.singleton b
+      -- hFlush stdout
       let bs' = BS.snoc bs b
       if b == 10 then do
-        return $ BS.snoc bs' b
+        let bs'' = BS.snoc bs' b
+        -- printf "Recv %i\n" (BS.length bs'')
+        -- BS8.putStrLn bs''
+        return bs''
       else
         go bs'
 
@@ -238,7 +244,7 @@ runNasalRaw conn script = do
   getRawResponse conn
   where
     send bs = do
-      sent <- Socket.send (fgfsSocket conn) (BS.take 1024 bs) Socket.msgNoSignal
+      sent <- Socket.send (fgfsSocket conn) (BS.take 2048 bs) Socket.msgNoSignal
       when (sent == 0) (throw FGFSEndOfStream)
       when (sent < BS.length bs) $ do
         send (BS.drop sent bs)
