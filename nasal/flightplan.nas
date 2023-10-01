@@ -25,7 +25,11 @@ var cancelFlightplanEdits = func {
 };
 
 var commitFlightplanEdits = func {
-    var current = mcdu.modifiedFlightplan.current;
+    var current = math.max(1, mcdu.modifiedFlightplan.current);
+    # TODO: if modifiedFlightplan.current < 0, then that means we have
+    # deleted the previously-current waypoint from the flightplan.
+    # Right now, the "solution" we pick is to just rewind the flightplan to the
+    # start of the route, but of course that is not the correct way.
     mcdu.modifiedFlightplan.activate();
     fgcommand("activate-flightplan", props.Node.new({"activate": 1}));
     flightplan().current = current;
