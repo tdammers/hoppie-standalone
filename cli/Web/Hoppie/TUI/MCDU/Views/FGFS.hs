@@ -225,7 +225,7 @@ resolveWaypoint returnTitle name cont = do
         | c <- candidates
         , let color = case wpType c of
                         "leg" -> green
-                        _ -> white
+                        _ -> cyan
         ]
         returnTitle
         (\candidateMay -> do
@@ -313,9 +313,9 @@ loadDirectToViewWith fromMayOrig toMayOrig = do
             to <- liftIO $ readIORef toVar
             from <- liftIO $ readIORef fromVar
             let wpColor w = case wpType <$> w of
-                  Nothing -> green
+                  Nothing -> blue
                   Just "leg" -> green
-                  Just _ -> white
+                  Just _ -> cyan
                 wpLabel = maybe "----" (\wp ->
                     encodeUtf8 $ wpID wp <> " (" <> Text.toUpper (wpType wp) <> ")"
                   )
@@ -426,7 +426,7 @@ fplViewLoad = withFGView $ \conn -> do
       putWaypoint n Nothing = do
         callNasalFunc conn "fms.deleteWaypoint" [n]
       putWaypoint n (Just targetWPName) = do
-        resolveLeg targetWPName $ \toWPMay -> do
+        resolveWaypoint "FPL" targetWPName $ \toWPMay -> do
           getLeg n $ \fromWPMay -> do
             toIndexMay <- fgCallNasalDef Nothing "fms.findFPWaypoint" ((), wpValue <$> toWPMay)
             fromIndexMay <- fgCallNasalDef Nothing "fms.findFPWaypoint" ((), wpValue <$> fromWPMay)
