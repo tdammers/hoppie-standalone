@@ -50,7 +50,8 @@ import Control.Exception
 mcduGetCallsign :: MCDU ByteString
 mcduGetCallsign = do
   fgsync <- gets mcduFlightgearSyncCallsign
-  when fgsync $ do
+  fgAvail <- gets (isJust . mcduFlightgearConnection)
+  when (fgsync && fgAvail) $ do
     fgCallsign <- fgCallNasalDef Nothing "fms.getFGCallsign" ()
     mapM_ (lift . setCallsign) fgCallsign
   lift getCallsign
@@ -59,7 +60,8 @@ mcduSetCallsign :: ByteString -> MCDU ()
 mcduSetCallsign cs = do
   lift $ setCallsign cs
   fgsync <- gets mcduFlightgearSyncCallsign
-  when fgsync $ do
+  fgAvail <- gets (isJust . mcduFlightgearConnection)
+  when (fgsync && fgAvail) $ do
     fgCallNasal "fms.setFGCallsign" [cs]
 
 addLskBinding :: LSK -> Colored ByteString -> MCDU () -> MCDU ()
