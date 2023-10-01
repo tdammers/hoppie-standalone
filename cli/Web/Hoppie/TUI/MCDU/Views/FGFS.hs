@@ -426,23 +426,26 @@ fplViewLoad = withFGView $ \conn -> do
       putWaypoint n Nothing = do
         callNasalFunc conn "fms.deleteWaypoint" [n]
       putWaypoint n (Just targetWPName) = do
-        resolveWaypoint "FPL" targetWPName $ \toWPMay -> do
-          getLeg n $ \fromWPMay -> do
-            toIndexMay <- fgCallNasalDef Nothing "fms.findFPWaypoint" ((), wpValue <$> toWPMay)
-            fromIndexMay <- fgCallNasalDef Nothing "fms.findFPWaypoint" ((), wpValue <$> fromWPMay)
-            case (toIndexMay :: Maybe Int, fromIndexMay :: Maybe Int) of
-              (Nothing, Nothing) -> do
-                scratchWarn "INVALID"
-                mapM_ releaseWaypointCandidate toWPMay
-                mapM_ releaseWaypointCandidate fromWPMay
-                reloadView
-              (Just toIndex, Just fromIndex) ->
-                if (toIndex < fromIndex) then
-                  loadDirectToViewWith toWPMay fromWPMay
-                else
-                  loadDirectToViewWith fromWPMay toWPMay
-              _ ->
-                loadDirectToViewWith fromWPMay toWPMay
+        resolveWaypoint "FPL" targetWPName $ \case
+          Nothing -> do
+            loadView fplView
+          Just toWP -> do
+            getLeg n $ \fromWPMay -> do
+              toIndexMay <- fgCallNasalDef Nothing "fms.findFPWaypoint" ((), Just $ wpValue toWP)
+              fromIndexMay <- fgCallNasalDef Nothing "fms.findFPWaypoint" ((), wpValue <$> fromWPMay)
+              case (toIndexMay :: Maybe Int, fromIndexMay :: Maybe Int) of
+                (Nothing, Nothing) -> do
+                  scratchWarn "INVALID"
+                  releaseWaypointCandidate toWP
+                  mapM_ releaseWaypointCandidate fromWPMay
+                  reloadView
+                (Just toIndex, Just fromIndex) ->
+                  if toIndex < fromIndex then
+                    loadDirectToViewWith (Just toWP) fromWPMay
+                  else
+                    loadDirectToViewWith fromWPMay (Just toWP)
+                _ ->
+                  loadDirectToViewWith fromWPMay (Just toWP)
         return True
       getWaypoint n = do
         callNasalFunc conn "fms.getWaypointName" [n]
