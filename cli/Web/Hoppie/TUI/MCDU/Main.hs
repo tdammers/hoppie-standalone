@@ -23,7 +23,8 @@ mcduMain eventChan = do
   when (isJust portMay) mcduStartHttpServer
   fgfsHostMay <- gets mcduFlightgearHostname
   fgfsPortMay <- gets mcduFlightgearPort
-  when (isJust fgfsHostMay && isJust fgfsPortMay) mcduConnectFlightgear
+  fgfsConnect <- gets mcduFlightgearConnect
+  when (fgfsConnect && isJust fgfsHostMay && isJust fgfsPortMay) mcduConnectFlightgear
   loadView mainMenuView
   flushAll
   forever $ do

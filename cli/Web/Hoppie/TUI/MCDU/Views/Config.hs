@@ -5,10 +5,12 @@
 module Web.Hoppie.TUI.MCDU.Views.Config
 where
 
+import Web.Hoppie.System
 import Web.Hoppie.TUI.MCDU.Draw
 import Web.Hoppie.TUI.MCDU.Monad
 import Web.Hoppie.TUI.MCDU.Operations
 import Web.Hoppie.TUI.MCDU.Views.Enum
+import Web.Hoppie.TUI.MCDU.FGNasal
 import Web.Hoppie.TUI.Output
 import Web.Hoppie.TUI.StringUtil
 
@@ -26,9 +28,17 @@ import System.IO
 configView :: MCDUView
 configView = defView
   { mcduViewTitle = "CONFIG"
-  , mcduViewNumPages = 2
+  , mcduViewNumPages = 3
   , mcduViewOnLoad = do
       page <- gets (mcduViewPage . mcduView)
+
+      let setMyCallsign (Just c) = do
+            mcduSetCallsign c
+            return True
+          setMyCallsign Nothing =
+            return False
+          getMyCallsign =
+            Just <$> mcduGetCallsign
 
       case page of 
         0 -> do
@@ -44,16 +54,10 @@ configView = defView
               getACType =
                 gets mcduAircraftType
 
-              setMyCallsign (Just c) = do
-                mcduSetCallsign c
-                return True
-              setMyCallsign Nothing =
-                return False
-              getMyCallsign =
-                Just <$> mcduGetCallsign
-
           modifyView $ \v -> v
-            { mcduViewDraw = do
+            { mcduViewTitle = "CONFIG"
+            , mcduViewAutoReload = False
+            , mcduViewDraw = do
                 mcduPrint 0 1 white "A/C TYPE"
                 mcduPrint 0 2 green (fromMaybe "----" actype)
                 mcduPrintR (screenW - 1) 1 white "CALLSIGN"
@@ -130,9 +134,10 @@ configView = defView
           port <- gets mcduHttpPort
           hostname <- gets mcduHttpHostname
           modifyView $ \v -> v
-            { mcduViewDraw = do
-                mcduPrintC (screenW `div` 2) 2 white "HTTP SERVER"
-                mcduPrint 1 3 white "ENABLE"
+            { mcduViewTitle = "HTTP CONFIG"
+            , mcduViewAutoReload = False
+            , mcduViewDraw = do
+                mcduPrint 1 3 white "HTTP SERVER ENABLE"
                 mcduPrint 1 5 white "HOSTNAME"
                 mcduPrint 1 6 green (maybe "----" BS8.pack hostname)
                 mcduPrintR (screenW - 1) 5 white "PORT"
@@ -168,6 +173,93 @@ configView = defView
                 )
                 ++
                 [ (LSKR 3, ("QR", mcduPrintHttpServerQR)) | serverEnabled ]
+            }
+        2 -> do
+          fgConnected <- gets (isJust . mcduFlightgearConnection)
+          let setPort :: Maybe ByteString -> MCDU Bool
+              setPort portMay =
+                case portMay of
+                  Nothing ->
+                    True <$ modify (\s -> s { mcduFlightgearPort = Nothing })
+                  Just portStr ->
+                    case readMaybe . BS8.unpack $ portStr of
+                      Nothing -> return False
+                      Just port -> do
+                        when fgConnected mcduDisconnectFlightgear
+                        modify (\s -> s { mcduFlightgearPort = Just port })
+                        when fgConnected mcduConnectFlightgear
+                        return True
+              getPort :: MCDU (Maybe ByteString)
+              getPort =
+                gets (fmap (BS8.pack . show) . mcduFlightgearPort)
+
+          let setHostname :: Maybe ByteString -> MCDU Bool
+              setHostname hostnameMay =
+                case hostnameMay of
+                  Nothing ->
+                    True <$ modify (\s -> s { mcduFlightgearHostname = Nothing })
+                  Just hostname -> do
+                    when fgConnected mcduDisconnectFlightgear
+                    modify (\s -> s { mcduFlightgearHostname = Just (map toLower $ BS8.unpack hostname) })
+                    when fgConnected mcduConnectFlightgear
+                    return True
+              getHostname :: MCDU (Maybe ByteString)
+              getHostname =
+                gets (fmap BS8.pack . mcduFlightgearHostname)
+
+          port <- gets mcduFlightgearPort
+          hostname <- gets mcduFlightgearHostname
+          connect <- gets mcduFlightgearConnect
+          syncCallsign <- gets mcduFlightgearSyncCallsign
+          callsignLocal <- lift getCallsign
+          callsignFG <- if fgConnected then
+                          fgCallNasalDef Nothing "fms.getFGCallsign" ()
+                        else
+                          return Nothing
+
+          modifyView $ \v -> v
+            { mcduViewTitle = "FGFS CONFIG"
+            , mcduViewAutoReload = True
+            , mcduViewDraw = do
+                mcduPrint 1 1 white "FGFS TELNET CONNECTION"
+                if connect then
+                  mcduPrintColored 1 2 (if fgConnected then colorize green "ON" else colorize yellow "CONNECTING")
+                else
+                  mcduPrintColored 1 2 (if fgConnected then colorize cyan "DISCONNECTING" else colorize white "OFF")
+                mcduPrint 1 3 white "HOSTNAME"
+                mcduPrintR (screenW - 1) 3 white "PORT"
+                mcduPrint 1 4 green (maybe "----" BS8.pack hostname)
+                mcduPrintR (screenW - 1) 4 green (maybe "----" (BS8.pack . show) port)
+                mcduPrint 1 5 white "SYNC CALLSIGN"
+                mcduPrint 1 6 green (if syncCallsign then "ON" else "OFF")
+                mcduPrint 1 7 white "FG:"
+                mcduPrint 1 8 (if syncCallsign then cyan else blue) (fromMaybe "----" callsignFG)
+                mcduPrintR (screenW - 1) 7 white "MCDU:"
+                mcduPrintR (screenW - 1) 8 green callsignLocal
+            , mcduViewLSKBindings = Map.fromList $
+                [ (LSKL 5, ("MAIN MENU", loadViewByID MainMenuView))
+                , (LSKL 0, ( ""
+                           , do
+                               if fgConnected then do
+                                 modify $ \s -> s { mcduFlightgearConnect = False }
+                                 mcduDisconnectFlightgear
+                               else do
+                                 modify $ \s -> s { mcduFlightgearConnect = True }
+                                 mcduConnectFlightgear
+                               reloadView
+                           )
+                  )
+                , (LSKL 1, ("", scratchInteract setHostname getHostname >> reloadView))
+                , (LSKR 1, ("", scratchInteract setPort getPort >> reloadView))
+                , (LSKL 2, ("", do
+                             modify $ \s -> s { mcduFlightgearSyncCallsign = not syncCallsign }
+                             -- trigger re-sync
+                             void mcduGetCallsign
+                             reloadView
+                           )
+                  )
+                , (LSKR 3, ("", scratchInteract setMyCallsign getMyCallsign >> reloadView))
+                ]
             }
         _ -> modifyView $ \v -> v
               { mcduViewDraw = do

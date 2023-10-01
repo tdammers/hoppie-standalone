@@ -420,6 +420,9 @@ applyHoppieMainOptions hmo m =
     , mcduFlightgearHostname = hoppieMainFlightgearHostname hmo
     , mcduFlightgearPort = hoppieMainFlightgearPort hmo
     , mcduFlightgearSyncCallsign = fromMaybe False $ hoppieMainFlightgearSyncCallsign hmo
+    , mcduFlightgearConnect =
+        isJust (hoppieMainFlightgearHostname hmo) &&
+        isJust (hoppieMainFlightgearPort hmo)
     , mcduHeadless = hoppieMainHeadless hmo
     }
 

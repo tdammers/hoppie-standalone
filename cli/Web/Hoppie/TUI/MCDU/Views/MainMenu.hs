@@ -18,7 +18,7 @@ import Data.Maybe
 mainMenuView :: MCDUView
 mainMenuView = defView
   { mcduViewTitle = "MCDU MENU"
-  , mcduViewNumPages = 2
+  , mcduViewNumPages = 1
   , mcduViewOnLoad = do
       curPage <- gets (mcduViewPage . mcduView)
       fgfsEnabled <- gets (isJust . mcduFlightgearConnection)
@@ -30,10 +30,8 @@ mainMenuView = defView
               [ (LSKL 2, ("RTE", loadViewByID RTEView )) | fgfsEnabled ] ++
               [ (LSKR 0, ("DLK", loadViewByID DLKMenuView))
               , (LSKR 1, ("ATC", loadViewByID ATCMenuView))
-              ]
-            1 ->
-              [ (LSKL 0, ("CONFIG", loadViewByID ConfigView))
-              , (LSKL 1, ("STATUS", loadViewByID StatusView))
+              , (LSKL 4, ("STATUS", loadViewByID StatusView))
+              , (LSKR 4, ("CONFIG", loadViewByID ConfigView))
               ]
             _ ->
               []

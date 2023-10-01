@@ -287,39 +287,41 @@ mcduConnectFlightgear = mcduConnectFlightgearAfter 0
 
 mcduConnectFlightgearAfter :: Int -> MCDU ()
 mcduConnectFlightgearAfter time = do
-  eventChan <- gets $ fromMaybe (error "Event chan not set up") . mcduEventChan
-  fgthread <- gets mcduFlightgearThread
-  fghostMay <- gets mcduFlightgearHostname
-  fgportMay <- gets mcduFlightgearPort
-  -- let logger = atomically . writeTChan eventChan . LogEvent . Text.pack
-  let logger = const $ return ()
-  case (fgthread, fghostMay, fgportMay) of
-    (Nothing, Just fghost, Just fgport) -> do
-      connVar <- liftIO newEmptyMVar
-      fgfsThread <- liftIO . async $
-        (do
-          threadDelay $ time * 1000000
-          atomically $ writeTChan eventChan
-              (LogEvent $
-                "Connecting to FlightGear on " <>
-                Text.pack fghost <> ":" <> Text.pack (show fgport))
-          withFGFSConnection (BS8.pack fghost) fgport logger $ \fgconn -> forever $ do
-            putMVar connVar fgconn
-            atomically $ writeTChan eventChan (FGFSConnectEvent fgconn)
-        )
-        `catch`
-        (\(e :: SomeException) -> atomically $ do
-            writeTChan eventChan FGFSDisconnectEvent
-            writeTChan eventChan (LogEvent $ "FGFS disconnected: " <> Text.pack (show e))
-        )
+  fgConnect <- gets mcduFlightgearConnect
+  when fgConnect $ do
+    eventChan <- gets $ fromMaybe (error "Event chan not set up") . mcduEventChan
+    fgthread <- gets mcduFlightgearThread
+    fghostMay <- gets mcduFlightgearHostname
+    fgportMay <- gets mcduFlightgearPort
+    -- let logger = atomically . writeTChan eventChan . LogEvent . Text.pack
+    let logger = const $ return ()
+    case (fgthread, fghostMay, fgportMay) of
+      (Nothing, Just fghost, Just fgport) -> do
+        connVar <- liftIO newEmptyMVar
+        fgfsThread <- liftIO . async $
+          (do
+            threadDelay $ time * 1000000
+            atomically $ writeTChan eventChan
+                (LogEvent $
+                  "Connecting to FlightGear on " <>
+                  Text.pack fghost <> ":" <> Text.pack (show fgport))
+            withFGFSConnection (BS8.pack fghost) fgport logger $ \fgconn -> forever $ do
+              putMVar connVar fgconn
+              atomically $ writeTChan eventChan (FGFSConnectEvent fgconn)
+          )
+          `catch`
+          (\(e :: SomeException) -> atomically $ do
+              writeTChan eventChan FGFSDisconnectEvent
+              writeTChan eventChan (LogEvent $ "FGFS disconnected: " <> Text.pack (show e))
+          )
 
-      modify $ \s -> s
-        { mcduFlightgearThread = Just fgfsThread
-        }
-    (Just _, _, _) -> do
-      debugPrint . colorize blue $ "FlightGear already connected"
-    _ -> do
-      debugPrint . colorize blue $ "FlightGear not configured"
+        modify $ \s -> s
+          { mcduFlightgearThread = Just fgfsThread
+          }
+      (Just _, _, _) -> do
+        debugPrint . colorize blue $ "FlightGear already connected"
+      _ -> do
+        debugPrint . colorize blue $ "FlightGear not configured"
 
 mcduDisconnectFlightgear :: MCDU ()
 mcduDisconnectFlightgear = do

@@ -92,6 +92,7 @@ data MCDUState =
     , mcduHttpPort :: Maybe Int
     , mcduHttpServer :: Maybe MCDUHttpServer
 
+    , mcduFlightgearConnect :: Bool
     , mcduFlightgearConnection :: Maybe FGFSConnection
     , mcduFlightgearThread :: Maybe (Async ())
     , mcduFlightgearHostname :: Maybe String
@@ -133,6 +134,7 @@ defMCDUState =
     , mcduHttpPort = Nothing
     , mcduHttpServer = Nothing
 
+    , mcduFlightgearConnect = False
     , mcduFlightgearConnection = Nothing
     , mcduFlightgearThread = Nothing
     , mcduFlightgearHostname = Nothing
