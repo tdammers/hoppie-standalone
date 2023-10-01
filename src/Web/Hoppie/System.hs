@@ -1,5 +1,3 @@
-{-# LANGUAGE NamedFieldPuns #-}
-
 module Web.Hoppie.System
 ( module Web.Hoppie.System
 , module Web.Hoppie.Trans
@@ -31,7 +29,7 @@ runSystem callsign config hooks runUI = do
       retval <- action
       ns' <- asks hoppieNetworkStatus >>= lift . readMVar
       da' <- asks hoppieCpdlcDataAuthorities >>= lift . readMVar
-      when (ns /= ns') (onNetworkStatus hooks $ ns')
+      when (ns /= ns') (onNetworkStatus hooks ns')
       when (da /= da') (onCpdlcLogon hooks $ currentDataAuthority da')
       return retval
 
