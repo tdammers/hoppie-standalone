@@ -5,9 +5,9 @@
 module Web.Hoppie.TUI.MCDU.Views.Config
 where
 
-import Web.Hoppie.System
 import Web.Hoppie.TUI.MCDU.Draw
 import Web.Hoppie.TUI.MCDU.Monad
+import Web.Hoppie.TUI.MCDU.Operations
 import Web.Hoppie.TUI.MCDU.Views.Enum
 import Web.Hoppie.TUI.Output
 import Web.Hoppie.TUI.StringUtil
@@ -35,7 +35,7 @@ configView = defView
           actype <- gets mcduAircraftType
           showLog <- gets mcduShowLog
           headless <- gets mcduHeadless
-          callsign <- lift getCallsign
+          callsign <- mcduGetCallsign
           serverEnabled <- gets (isJust . mcduHttpServer)
           let setACType :: Maybe ByteString -> MCDU Bool
               setACType actypeMay =
@@ -45,12 +45,12 @@ configView = defView
                 gets mcduAircraftType
 
               setMyCallsign (Just c) = do
-                lift $ setCallsign c
+                mcduSetCallsign c
                 return True
               setMyCallsign Nothing =
                 return False
               getMyCallsign =
-                lift $ Just <$> getCallsign
+                Just <$> mcduGetCallsign
 
           modifyView $ \v -> v
             { mcduViewDraw = do

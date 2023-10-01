@@ -56,6 +56,7 @@ data ProgramOptions =
     , poHeadless :: Maybe Bool
     , poFlightgearHostname :: Maybe String
     , poFlightgearPort :: Maybe Int
+    , poFlightgearSyncCallsign :: Maybe Bool
     }
     deriving (Show)
 
@@ -74,6 +75,7 @@ emptyProgramOptions =
     , poHeadless = Nothing
     , poFlightgearHostname = Nothing
     , poFlightgearPort = Nothing
+    , poFlightgearSyncCallsign = Nothing
     }
 
 defaultProgramOptions :: ProgramOptions
@@ -91,11 +93,12 @@ defaultProgramOptions =
     , poHeadless = Just False
     , poFlightgearHostname = Nothing
     , poFlightgearPort = Nothing
+    , poFlightgearSyncCallsign = Nothing
     }
 
 instance Semigroup ProgramOptions where
-  ProgramOptions l1 c1 ty1 fp1 sp1 url1 sl1 httph1 http1 hl1 fgh1 fgp1 <>
-    ProgramOptions l2 c2 ty2 fp2 sp2 url2 sl2 httph2 http2 hl2 fgh2 fgp2 =
+  ProgramOptions l1 c1 ty1 fp1 sp1 url1 sl1 httph1 http1 hl1 fgh1 fgp1 fgsc1 <>
+    ProgramOptions l2 c2 ty2 fp2 sp2 url2 sl2 httph2 http2 hl2 fgh2 fgp2 fgsc2 =
       ProgramOptions
         (l1 <|> l2)
         (c1 <|> c2)
@@ -109,6 +112,7 @@ instance Semigroup ProgramOptions where
         (hl1 <|> hl2)
         (fgh1 <|> fgh2)
         (fgp1 <|> fgp2)
+        (fgsc1 <|> fgsc2)
 
 $(deriveJSON
     JSON.defaultOptions
@@ -190,16 +194,25 @@ optionsP = ProgramOptions
         <> help "Headless mode (no terminal UI, only HTTP)"
         )
   <*> option (Just <$> str)
-        ( long "fgfs-hostname"
+        (  long "flightgear-hostname"
+        <> long "fgfs-hostname"
         <> metavar "HOSTNAME"
-        <> help "Where to find a FlightGear HTTP server"
+        <> help "Where to find a FlightGear telnet server"
         <> value Nothing
         )
   <*> option (Just <$> auto)
-        ( long "fgfs-port"
+        (  long "flightgear-port"
+        <> long "fgfs-port"
         <> metavar "PORT"
-        <> help "Where to find a FlightGear HTTP server"
+        <> help "Where to find a FlightGear telnet server"
         <> value Nothing
+        )
+  <*> flag
+        Nothing
+        (Just True)
+        (  long "flightgear-sync-callsign"
+        <> long "fgfs-sync-callsign"
+        <> help "Sync callsign with FlightGear (requires fgfs-hostname and fgfs-port)"
         )
 
 optionsFromArgs :: IO ProgramOptions
@@ -275,6 +288,7 @@ hoppieMainOptionsFromProgramOptions po =
       httpHostname = poHttpServerHostname po
       fgPort = poFlightgearPort po
       fgHostname = poFlightgearHostname po
+      fgSyncCallsign = poFlightgearSyncCallsign po
   in
     defHoppieMainOptions
       { hoppieMainShowLog = showLog
@@ -283,6 +297,7 @@ hoppieMainOptionsFromProgramOptions po =
       , hoppieMainHttpPort = httpPort
       , hoppieMainFlightgearHostname = fgHostname
       , hoppieMainFlightgearPort = fgPort
+      , hoppieMainFlightgearSyncCallsign = fgSyncCallsign
       , hoppieMainAircraftType = actype
       }
 
@@ -377,6 +392,7 @@ data HoppieMainOptions =
     , hoppieMainHttpPort :: Maybe Int
     , hoppieMainFlightgearHostname :: Maybe String
     , hoppieMainFlightgearPort :: Maybe Int
+    , hoppieMainFlightgearSyncCallsign :: Maybe Bool
     , hoppieMainAircraftType :: Maybe ByteString
     }
     deriving (Show)
@@ -390,6 +406,7 @@ defHoppieMainOptions =
     , hoppieMainHttpPort = Nothing
     , hoppieMainFlightgearHostname = Nothing
     , hoppieMainFlightgearPort = Nothing
+    , hoppieMainFlightgearSyncCallsign = Nothing
     , hoppieMainAircraftType = Nothing
     }
 
@@ -402,6 +419,7 @@ applyHoppieMainOptions hmo m =
     , mcduHttpPort = hoppieMainHttpPort hmo
     , mcduFlightgearHostname = hoppieMainFlightgearHostname hmo
     , mcduFlightgearPort = hoppieMainFlightgearPort hmo
+    , mcduFlightgearSyncCallsign = fromMaybe False $ hoppieMainFlightgearSyncCallsign hmo
     , mcduHeadless = hoppieMainHeadless hmo
     }
 

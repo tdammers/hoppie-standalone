@@ -668,12 +668,24 @@ var getApproachTransition = func {
     return ((fp.approach_trans == nil) ? nil : fp.approach_trans.id);
 }
 
+var getFGCallsign = func {
+    return getprop('/sim/multiplay/callsign');
+}
+
+var setFGCallsign = func (callsign) {
+    setprop('/sim/multiplay/callsign', callsign);
+    return nil;
+}
+
 var fms = {
     'hasFlightplanModifications': hasFlightplanModifications,
     'getModifyableFlightplan': getModifyableFlightplan,
     'getVisibleFlightplan': getVisibleFlightplan,
     'cancelFlightplanEdits': cancelFlightplanEdits,
     'commitFlightplanEdits': commitFlightplanEdits,
+
+    'getFGCallsign': getFGCallsign,
+    'setFGCallsign': setFGCallsign,
 
     'getWaypointName': getWaypointName,
     'deleteWaypoint': deleteWaypoint,

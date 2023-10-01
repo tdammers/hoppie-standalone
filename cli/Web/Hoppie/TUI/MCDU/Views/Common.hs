@@ -7,6 +7,7 @@ where
 
 import Web.Hoppie.TUI.MCDU.Views.Enum
 import Web.Hoppie.TUI.MCDU.Monad
+import Web.Hoppie.TUI.MCDU.Operations
 
 import Control.Monad.State
 

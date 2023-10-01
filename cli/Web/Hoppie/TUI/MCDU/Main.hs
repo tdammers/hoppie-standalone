@@ -5,11 +5,12 @@ import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.State
 import Data.Maybe
-import System.IO
+-- import System.IO
 
 import Web.Hoppie.TUI.MCDU.Monad
 import Web.Hoppie.TUI.MCDU.HttpServer
 import Web.Hoppie.TUI.MCDU.Views
+import Web.Hoppie.TUI.MCDU.Operations
 
 mcduMain :: TChan MCDUEvent -> MCDU ()
 mcduMain eventChan = do

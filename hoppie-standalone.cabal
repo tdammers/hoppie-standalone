@@ -70,6 +70,8 @@ executable hoppie-mcdu
                  , Web.Hoppie.TUI.MCDU
                  , Web.Hoppie.TUI.MCDU.Draw
                  , Web.Hoppie.TUI.MCDU.Monad
+                 , Web.Hoppie.TUI.MCDU.Operations
+                 , Web.Hoppie.TUI.MCDU.FGNasal
                  , Web.Hoppie.TUI.MCDU.Views
                  , Web.Hoppie.TUI.MCDU.Views.Enum
                  , Web.Hoppie.TUI.MCDU.Views.Common

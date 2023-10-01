@@ -11,6 +11,7 @@ import qualified Web.Hoppie.CPDLC.MessageTypes as CPDLC
 import Web.Hoppie.System
 import Web.Hoppie.TUI.MCDU.Draw
 import Web.Hoppie.TUI.MCDU.Monad
+import Web.Hoppie.TUI.MCDU.Operations
 import Web.Hoppie.TUI.MCDU.Views.Enum
 import Web.Hoppie.TUI.MCDU.Views.Common
 import Web.Hoppie.TUI.StringUtil

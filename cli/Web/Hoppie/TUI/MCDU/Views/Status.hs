@@ -6,7 +6,7 @@ where
 
 import Web.Hoppie.System
 import Web.Hoppie.TUI.MCDU.Draw
-import Web.Hoppie.TUI.MCDU.Monad
+import Web.Hoppie.TUI.MCDU.Operations
 import Web.Hoppie.TUI.StringUtil
 import Web.Hoppie.TUI.MCDU.Views.Enum
 
