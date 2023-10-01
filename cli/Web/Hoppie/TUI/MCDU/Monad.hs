@@ -59,6 +59,11 @@ data ScratchVal
   | ScratchDel
   deriving (Show, Read, Eq, Ord)
 
+data MassUnit
+  = Kilograms
+  | Pounds
+  deriving (Show, Read, Eq, Ord, Enum, Bounded)
+
 data MCDUState =
   MCDUState
     { mcduScratchpad :: ScratchVal
@@ -73,6 +78,7 @@ data MCDUState =
     , mcduUnreadCPDLC :: Maybe Word
 
     , mcduAircraftType :: Maybe ByteString
+    , mcduMassUnit :: MassUnit
     , mcduReferenceAirport :: Maybe ByteString
     , mcduTelexRecipient :: Maybe ByteString
     , mcduTelexBody :: Maybe ByteString
@@ -115,6 +121,7 @@ defMCDUState =
     , mcduUnreadCPDLC = Nothing
 
     , mcduAircraftType = Nothing
+    , mcduMassUnit = Kilograms
     , mcduReferenceAirport = Nothing
     , mcduTelexRecipient = Nothing
     , mcduTelexBody = Nothing

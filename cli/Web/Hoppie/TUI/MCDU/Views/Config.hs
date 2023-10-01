@@ -46,6 +46,7 @@ configView = defView
           showLog <- gets mcduShowLog
           headless <- gets mcduHeadless
           callsign <- mcduGetCallsign
+          units <- gets mcduMassUnit
           serverEnabled <- gets (isJust . mcduHttpServer)
           let setACType :: Maybe ByteString -> MCDU Bool
               setACType actypeMay =
@@ -60,11 +61,15 @@ configView = defView
             , mcduViewDraw = do
                 mcduPrint 0 1 white "A/C TYPE"
                 mcduPrint 0 2 green (fromMaybe "----" actype)
-                mcduPrintR (screenW - 1) 1 white "CALLSIGN"
-                mcduPrintR (screenW - 1) 2 green callsign
-                mcduPrintR (screenW - 1) 3 white "SHOW LOG"
-                mcduPrintR (screenW - 1) 4 green (if showLog then "ON" else "OFF")
-                mcduPrintR (screenW - 1) 5 white "HEADLESS MODE"
+                mcduPrintR screenW 1 white "CALLSIGN"
+                mcduPrintR screenW 2 green callsign
+
+                mcduPrint 0 3 white "UNITS"
+                mcduPrint 0 4 green (case units of { Kilograms -> "KG"; Pounds -> "LBS" })
+
+                mcduPrint 0 5 white "LOG"
+                mcduPrint 0 6 green (if showLog then "ON" else "OFF")
+                mcduPrintR screenW 5 white "HEADLESS"
                 if serverEnabled then do
                   mcduPrintR (screenW - 1) 6 green (if headless then "ON" else "OFF")
                 else do
@@ -77,7 +82,16 @@ configView = defView
                 [ (LSKL 5, ("MAIN MENU", loadViewByID MainMenuView))
                 , (LSKL 0, ("", scratchInteract setACType getACType >> reloadView))
                 , (LSKR 0, ("", scratchInteract setMyCallsign getMyCallsign >> reloadView))
-                , (LSKR 1, ("", modify (\s -> s { mcduShowLog = not (mcduShowLog s) }) >> flushAll >> reloadView))
+                , (LSKL 1, ("", do
+                             modify (\s -> s
+                               { mcduMassUnit = case units of
+                                   Kilograms -> Pounds
+                                   Pounds -> Kilograms
+                               })
+                             reloadView
+                           )
+                  )
+                , (LSKL 2, ("", modify (\s -> s { mcduShowLog = not (mcduShowLog s) }) >> flushAll >> reloadView))
                 ]
                 ++
                 if serverEnabled then

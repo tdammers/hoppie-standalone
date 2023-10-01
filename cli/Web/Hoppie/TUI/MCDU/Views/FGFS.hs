@@ -33,6 +33,10 @@ import Data.IORef
 import Control.Monad.Except (Except, runExcept, throwError)
 import Data.Char (isDigit)
 import Text.Read (readMaybe)
+import Data.Word
+
+lbs2kg :: Double
+lbs2kg = 0.45359237
 
 data FPLeg =
   FPLeg
@@ -48,6 +52,7 @@ data FPLeg =
     , legParent :: Maybe Text
     , legRole :: Maybe Text
     , legIsDiscontinuity :: Bool
+    , legEFOB :: Maybe Double
     }
 
 instance FromNasal FPLeg where
@@ -65,6 +70,7 @@ instance FromNasal FPLeg where
       <*> fromNasalFieldMaybe "p" n
       <*> fromNasalFieldMaybe "role" n
       <*> (fromMaybe False <$> fromNasalFieldMaybe "disc" n)
+      <*> fromNasalFieldMaybe "efob" n
 
 formatDistance :: Double -> String
 formatDistance dist
@@ -100,6 +106,13 @@ formatSpeed (Just speed) (Just cstr) =
       "at" -> " "
       _ -> " "
 formatSpeed _ _ = "---"
+
+formatEFOB :: Word8 -> Maybe Double -> Colored ByteString
+formatEFOB _ Nothing = ""
+formatEFOB defcolor (Just efob) =
+  colorize color . BS8.pack $ printf "%6.1f" (efob / 1000)
+  where
+    color = if efob <= 0 then red else defcolor
 
 formatAltitudeCompact :: Maybe Double -> Maybe Text -> String
 formatAltitudeCompact (Just alt) (Just cstr) =
@@ -421,6 +434,10 @@ fplViewLoad = withFGView $ \conn -> do
   flightplanModified <- callNasalFunc conn "fms.hasFlightplanModifications" ()
   let legsDropped = curPage * legsPerPage
   let numPages = (planSize - fromMaybe 0 currentLeg + legsPerPage) `div` legsPerPage
+  massUnit <- gets mcduMassUnit
+  let fuelFactor = case massUnit of
+                      Kilograms -> 1
+                      Pounds -> 1 / lbs2kg
 
   let putWaypoint :: Int -> Maybe ByteString -> MCDU Bool
       putWaypoint n Nothing = do
@@ -551,13 +568,10 @@ fplViewLoad = withFGView $ \conn -> do
             else if legIsDiscontinuity leg then do
               mcduPrint 6 (n * 2 + 1) color (BS8.pack . maybe "----NM" formatDistance $ legRemainingDist leg)
               mcduPrint 0 (n * 2 + 2) color "---- DISCONTINUITY ----"
-            else if isCurrent then do
-              mcduPrint 1 (n * 2 + 1) color (BS8.pack . maybe "---°" (printf "%03.0f°") $ legHeading leg)
-              mcduPrint 6 (n * 2 + 1) color (BS8.pack . maybe "----NM" formatDistance $ legRemainingDist leg)
-              mcduPrint 0 (n * 2 + 2) color (encodeUtf8 $ legName leg)
             else do
               mcduPrint 1 (n * 2 + 1) color (BS8.pack . maybe "---°" (printf "%03.0f°") $ legHeading leg)
               mcduPrint 6 (n * 2 + 1) color (BS8.pack . maybe "----NM" formatDistance $ legDist leg)
+              mcduPrintColored 12 (n * 2 + 1) (formatEFOB color . fmap (* fuelFactor) $ legEFOB leg)
               mcduPrint 0 (n * 2 + 2) color (encodeUtf8 $ legName leg)
             unless (legIsDiscontinuity leg) $ do
               mcduPrint (screenW - 11) (n * 2 + 2) color (BS8.pack $ formatSpeed (legSpeed leg) (legSpeedType leg))

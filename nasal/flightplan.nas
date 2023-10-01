@@ -1,6 +1,39 @@
 if (!contains(mcdu, 'modifiedFlightplan'))
     mcdu.modifiedFlightplan = nil;
 
+if (!contains(mcdu, 'fuelSampler')) {
+    mcdu.fuelSampler = maketimer(10, func { mcdu.fms._updateFuelSampler(); });
+    mcdu.fuelSampler.simulatedTime = 1;
+}
+
+var fuelSamplerVars = {
+    deltat: 10,
+    lastKG: nil,
+    currentKG: nil,
+    ffKG: nil,
+    propKG: props.globals.getNode('/consumables/fuel/total-fuel-kg'),
+};
+
+mcdu.fuelSampler.restart(fuelSamplerVars.deltat);
+
+var updateFuelSampler = func {
+    fuelSamplerVars.lastKG = fuelSamplerVars.currentKG;
+    fuelSamplerVars.currentKG = fuelSamplerVars.propKG.getValue();
+    if (fuelSamplerVars.lastKG != nil) {
+        fuelSamplerVars.ffKG =
+            (fuelSamplerVars.currentKG - fuelSamplerVars.lastKG) /
+            fuelSamplerVars.deltat;
+    }
+};
+
+var getFuelFlow = func {
+    return fuelSamplerVars.ffKG;
+};
+
+var getFuelOnBoard = func {
+    return fuelSamplerVars.currentKG;
+};
+
 var hasFlightplanModifications = func {
     return (mcdu.modifiedFlightplan != nil);
 };
@@ -57,9 +90,13 @@ var getFlightplanLegs = func (pageSize = nil, curPage = nil, offset = nil) {
     var acpos = geo.aircraft_position();
     var fp = fms.getVisibleFlightplan();
     var result = [];
+    var groundspeed = getprop('/velocities/groundspeed-kt');
+    var fuelGS = math.max(40, groundspeed);
     var distanceToCurrent = getprop('/autopilot/route-manager/wp/dist');
     var totalDistanceRemaining = getprop('/autopilot/route-manager/distance-remaining-nm');
     var distanceRemaining = 0;
+    var fuelRemaining = fuelSamplerVars.currentKG;
+    var fuelFlow = fuelSamplerVars.ffKG;
     var first = 0;
     var length = fp.getPlanSize();
     if (pageSize != nil) {
@@ -80,9 +117,15 @@ var getFlightplanLegs = func (pageSize = nil, curPage = nil, offset = nil) {
             parent_id = wp.wp_parent.id;
         if (i == fp.current) {
             distanceRemaining = distanceToCurrent;
+            if (fuelFlow != nil and fuelRemaining != nil) {
+                fuelRemaining += fuelFlow * distanceToCurrent / fuelGS * 3600;
+            }
         }
         elsif (i > fp.current) {
             distanceRemaining += wp.leg_distance;
+            if (fuelFlow != nil and fuelRemaining != nil) {
+                fuelRemaining += fuelFlow * wp.leg_distance / fuelGS * 3600;
+            }
         }
         if (i >= first) {
             append(result,
@@ -98,6 +141,7 @@ var getFlightplanLegs = func (pageSize = nil, curPage = nil, offset = nil) {
                         , "altty": wp.alt_cstr_type
                         , "p": parent_id
                         , "role": wp.wp_role
+                        , "efob": fuelRemaining
                         , "disc": (wp.wp_type == "discontinuity" or wp.wp_type == "vectors")
                         }));
         }
@@ -678,6 +722,8 @@ var setFGCallsign = func (callsign) {
 }
 
 var fms = {
+    '_updateFuelSampler': updateFuelSampler,
+
     'hasFlightplanModifications': hasFlightplanModifications,
     'getModifyableFlightplan': getModifyableFlightplan,
     'getVisibleFlightplan': getVisibleFlightplan,
@@ -700,6 +746,8 @@ var fms = {
     'setLegSpeed': setLegSpeed,
 
     'getGroundspeed': getGroundspeed,
+    'getFuelFlow': getFuelFlow,
+    'getFuel': getFuelFlow,
     'getUTCMinutes': getUTCMinutes,
     'getFlightplanLegs': getFlightplanLegs,
     'getFlightplanSize': getFlightplanSize,
