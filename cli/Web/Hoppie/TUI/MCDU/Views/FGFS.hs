@@ -28,6 +28,9 @@ import Data.Maybe
 import Control.Exception
 import qualified Data.Map.Strict as Map
 import Data.IORef
+import Control.Monad.Except (Except, runExcept, throwError)
+import Data.Char (isDigit)
+import Text.Read (readMaybe)
 
 data FPLeg =
   FPLeg
@@ -95,6 +98,34 @@ formatSpeed (Just speed) (Just cstr) =
       "at" -> " "
       _ -> " "
 formatSpeed _ _ = "---"
+
+formatAltitudeCompact :: Maybe Double -> Maybe Text -> String
+formatAltitudeCompact (Just alt) (Just cstr) =
+  altStr ++ conStr
+  where
+    altStr = case () of
+      () | alt <= 18000
+         -> printf "%1.0f" alt
+      () | otherwise
+         -> printf "FL%1.0f" (alt / 100)
+    conStr = case cstr of
+      "above" -> "A"
+      "below" -> "B"
+      "at" -> ""
+      _ -> ""
+formatAltitudeCompact _ _ = "-"
+
+formatSpeedCompact :: Maybe Double -> Maybe Text -> String
+formatSpeedCompact (Just speed) (Just cstr) =
+  speedStr ++ conStr
+  where
+    speedStr = printf "%1.0f" speed
+    conStr = case cstr of
+      "above" -> "A"
+      "below" -> "B"
+      "at" -> ""
+      _ -> ""
+formatSpeedCompact _ _ = "-"
 
 formatETA :: Double -> String
 formatETA eta =
@@ -405,6 +436,55 @@ fplView = defView
   , mcduViewOnLoad = fplViewLoad
   }
 
+parseRestrictions :: ByteString -> Either ByteString (Maybe Int, ByteString, Maybe Int, ByteString)
+parseRestrictions rbs = runExcept $ do
+  let rstr = decodeUtf8 rbs
+  (spdStr, altStr) <- case Text.splitOn "/" rstr of
+    [lhs, rhs] -> return (Text.strip lhs, Text.strip rhs)
+    _ -> throwError "INVALID"
+  (speedMay, speedType) <- parseSpeedRestriction spdStr
+  (altMay, altType) <- parseAltitudeRestriction altStr
+  return (speedMay, speedType, altMay, altType)
+
+parseSpeedRestriction :: Text -> Except ByteString (Maybe Int, ByteString)
+parseSpeedRestriction str
+  | Text.null str
+  = return (Nothing, "keep")
+  | Text.all (== '-') str
+  = return (Nothing, "at")
+  | otherwise
+  = do
+      let (valStr, restrictionStr) = Text.span isDigit str
+      val <- maybe (throwError "INVALID") return $ readMaybe (Text.unpack valStr)
+      restriction <- case restrictionStr of
+        "" -> return "at"
+        "A" -> return "above"
+        "B" -> return "below"
+        _ -> throwError "INVALID"
+      return (Just val, restriction)
+
+parseAltitudeRestriction :: Text -> Except ByteString (Maybe Int, ByteString)
+parseAltitudeRestriction str
+  | Text.null str
+  = return (Nothing, "keep")
+  | Text.all (== '-') str
+  = return (Nothing, "at")
+  | "FL" `Text.isPrefixOf` str
+  = do
+      (valMay, restriction) <- parseAltitudeRestriction (Text.drop 2 str)
+      return ((* 100) <$> valMay, restriction)
+  | otherwise
+  = do
+      let (valStr, restrictionStr) = Text.span isDigit str
+      val <- maybe (throwError "INVALID") return $ readMaybe (Text.unpack valStr)
+      restriction <- case restrictionStr of
+        "" -> return "at"
+        "A" -> return "above"
+        "B" -> return "below"
+        _ -> throwError "INVALID"
+      return (Just val, restriction)
+
+
 fplViewLoad :: MCDU ()
 fplViewLoad = withFGView $ \conn -> do
   let legsPerPage = numLSKs - 1
@@ -446,6 +526,59 @@ fplViewLoad = withFGView $ \conn -> do
       getWaypoint n = do
         callNasalFunc conn "fms.getWaypointName" [n]
 
+      putRestrictions :: Int -> Maybe ByteString -> MCDU Bool
+      putRestrictions n Nothing = do
+        err1 <- fgCallNasalDef Nothing "fms.setLegSpeed" (n, (), "" :: Text)
+        case err1 of
+          Just e -> do
+            scratchWarn e
+            return False
+          Nothing -> do
+            err2 <- fgCallNasalDef Nothing "fms.setLegAltitude" (n, (), "" :: Text)
+            case err2 of
+              Just e -> do
+                scratchWarn e
+                return False
+              Nothing ->
+                return True
+      putRestrictions n (Just rbs) = do
+        let parseResult = parseRestrictions rbs
+        case parseResult of
+          Left e -> do
+            scratchWarn e
+            return False
+          Right (speedMay, speedType, altMay, altType) -> do
+            err1 <- if speedType == "keep" then
+                      return Nothing
+                    else
+                      fgCallNasalDef Nothing "fms.setLegSpeed" (n, speedMay, speedType)
+            case err1 of
+              Just e -> do
+                scratchWarn e
+                return False
+              Nothing -> do
+                err2 <- if altType == "keep" then
+                          return Nothing
+                        else
+                          fgCallNasalDef Nothing "fms.setLegAltitude" (n, altMay, altType)
+                case err2 of
+                  Just e -> do
+                    scratchWarn e
+                    return False
+                  Nothing ->
+                    return True
+      getRestrictions n = do
+        let n' = n - legsDropped + 1 - fromMaybe 0 currentLeg
+        case drop n' curLegs of
+          (leg:_) -> do
+            let spdStr = BS8.pack $ formatSpeedCompact (legSpeed leg) (legSpeedType leg)
+                altStr = BS8.pack $ formatAltitudeCompact (legAlt leg) (legAltType leg)
+            return . Just $ spdStr <> "/" <> altStr
+          _ -> do
+            scratchWarn "NO WPT"
+            return Nothing
+            
+
   modifyView $ \v -> v
     { mcduViewNumPages = numPages
     , mcduViewTitle = if flightplanModified then "MOD FPL" else "ACT FPL"
@@ -454,6 +587,15 @@ fplViewLoad = withFGView $ \conn -> do
               scratchInteract
                 (putWaypoint (n + legsDropped - 1 + fromMaybe 0 currentLeg))
                 (getWaypoint (n + legsDropped - 1 + fromMaybe 0 currentLeg))
+              reloadView
+          ))
+        | n <- [0 .. legsPerPage ]
+        ]
+        ++
+        [ (LSKR n, ("", do
+              scratchInteract
+                (putRestrictions (n + legsDropped - 1 + fromMaybe 0 currentLeg))
+                (getRestrictions (n + legsDropped - 1 + fromMaybe 0 currentLeg))
               reloadView
           ))
         | n <- [0 .. legsPerPage ]
@@ -479,19 +621,19 @@ fplViewLoad = withFGView $ \conn -> do
               forM_ (legRemainingDist leg) $ \dist -> do
                 when (groundspeed > 40) $ do
                   let eta = utcMinutes + dist / groundspeed * 60
-                  mcduPrint (screenW - 6) (n * 2 + 1) color (BS8.pack $ formatETA eta <> "z")
+                  mcduPrint (screenW - 5) (n * 2 + 1) color (BS8.pack $ formatETA eta <> "z")
             if isPrevious then
               mcduPrint 0 (n * 2 + 2) color (encodeUtf8 $ legName leg)
             else if legIsDiscontinuity leg then do
-              mcduPrint 9 (n * 2 + 1) color (BS8.pack . maybe "----NM" formatDistance $ legRemainingDist leg)
+              mcduPrint 6 (n * 2 + 1) color (BS8.pack . maybe "----NM" formatDistance $ legRemainingDist leg)
               mcduPrint 0 (n * 2 + 2) color "---- DISCONTINUITY ----"
             else if isCurrent then do
               mcduPrint 1 (n * 2 + 1) color (BS8.pack . maybe "---°" (printf "%03.0f°") $ legHeading leg)
-              mcduPrint 9 (n * 2 + 1) color (BS8.pack . maybe "----NM" formatDistance $ legRemainingDist leg)
+              mcduPrint 6 (n * 2 + 1) color (BS8.pack . maybe "----NM" formatDistance $ legRemainingDist leg)
               mcduPrint 0 (n * 2 + 2) color (encodeUtf8 $ legName leg)
             else do
               mcduPrint 1 (n * 2 + 1) color (BS8.pack . maybe "---°" (printf "%03.0f°") $ legHeading leg)
-              mcduPrint 9 (n * 2 + 1) color (BS8.pack . maybe "----NM" formatDistance $ legDist leg)
+              mcduPrint 6 (n * 2 + 1) color (BS8.pack . maybe "----NM" formatDistance $ legDist leg)
               mcduPrint 0 (n * 2 + 2) color (encodeUtf8 $ legName leg)
             unless (legIsDiscontinuity leg) $ do
               mcduPrint (screenW - 11) (n * 2 + 2) color (BS8.pack $ formatSpeed (legSpeed leg) (legSpeedType leg))

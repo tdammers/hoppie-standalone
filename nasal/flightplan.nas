@@ -105,6 +105,24 @@ var getFlightplanLegs = func (pageSize = nil, curPage = nil, offset = nil) {
     return result;
 };
 
+var setLegAltitude = func (n, alt, altType) {
+    var wp = fms.getVisibleFlightplan().getWP(n);
+    if (wp == nil)
+        return "NO WPT";
+    wp = fms.getModifyableFlightplan().getWP(n);
+    wp.setAltitude(alt, altType);
+    return nil;
+};
+
+var setLegSpeed = func (n, speed, speedType) {
+    var wp = fms.getVisibleFlightplan().getWP(n);
+    if (wp == nil)
+        return "NO WPT";
+    wp = fms.getModifyableFlightplan().getWP(n);
+    wp.setSpeed(speed, speedType);
+    return nil;
+};
+
 var removeNilFields = func (h) {
     foreach (var k; keys(h)) {
         if (h[k] == nil)
@@ -666,6 +684,8 @@ var fms = {
     'getWaypoint': getWaypoint,
     'insertDirect': insertDirect,
     'insertDirectFP': insertDirectFP,
+    'setLegAltitude': setLegAltitude,
+    'setLegSpeed': setLegSpeed,
 
     'getGroundspeed': getGroundspeed,
     'getUTCMinutes': getUTCMinutes,
