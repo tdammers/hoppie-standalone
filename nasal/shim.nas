@@ -1,10 +1,11 @@
 (func {
     var registerRef = func (val) {
-        if (contains(globals.externalMCDU.refTable, id(val))) {
-            globals.externalMCDU.refTable[id(val)].refcount += 1;
+        var ident = globals.id(val);
+        if (contains(globals.externalMCDU.refTable, ident)) {
+            globals.externalMCDU.refTable[ident].refcount += 1;
         }
         else {
-            globals.externalMCDU.refTable[id(val)] =
+            globals.externalMCDU.refTable[ident] =
                 { value: val
                 , refcount: 1
                 }
@@ -53,7 +54,7 @@
         # print("release(" ~ debug.string(ref) ~ ")");
         if (typeof(ref) != 'ghost')
             return nil;
-        var refid = id(ref);
+        var refid = globals.id(ref);
         releaseRef(refid);
         # printReftable();
         return nil;
@@ -63,7 +64,7 @@
         # print("acquire(" ~ debug.string(ref) ~ ")");
         if (typeof(ref) != 'ghost')
             return nil;
-        var refid = id(ref);
+        var refid = globals.id(ref);
         acquireRef(refid);
         # printReftable();
         return nil;
@@ -77,7 +78,7 @@
             if (register) registerRef(val);
             encoded = jsonEncode({
                             '__reftype__': 'ghost',
-                            '__refid__': id(val),
+                            '__refid__': globals.id(val),
                             '__ghosttype__': ghosttype(val)
                         });
         }
@@ -85,7 +86,7 @@
             if (register) registerRef(val);
             encoded = jsonEncode({
                             '__reftype__': 'func',
-                            '__refid__': id(val),
+                            '__refid__': globals.id(val),
                         });
         }
         elsif (ty == 'scalar') {

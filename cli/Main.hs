@@ -3,6 +3,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE LambdaCase #-}
 
 module Main where
 
@@ -28,6 +29,7 @@ import qualified Data.Aeson as JSON
 import Data.Aeson.TH (deriveJSON)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as BS8
+import qualified Data.Text as Text
 import Data.List
 import qualified Data.Map.Strict as Map
 import Data.Maybe
@@ -41,6 +43,7 @@ import System.FilePath
 import Text.Casing
 import Text.Printf
 import Text.Read (readMaybe)
+import System.IO.Error
 
 data ProgramOptions =
   ProgramOptions
@@ -57,6 +60,7 @@ data ProgramOptions =
     , poFlightgearHostname :: Maybe String
     , poFlightgearPort :: Maybe Int
     , poFlightgearSyncCallsign :: Maybe Bool
+    , poSessionFilename :: Maybe FilePath
     }
     deriving (Show)
 
@@ -76,6 +80,7 @@ emptyProgramOptions =
     , poFlightgearHostname = Nothing
     , poFlightgearPort = Nothing
     , poFlightgearSyncCallsign = Nothing
+    , poSessionFilename = Nothing
     }
 
 defaultProgramOptions :: ProgramOptions
@@ -94,11 +99,12 @@ defaultProgramOptions =
     , poFlightgearHostname = Nothing
     , poFlightgearPort = Nothing
     , poFlightgearSyncCallsign = Nothing
+    , poSessionFilename = Nothing
     }
 
 instance Semigroup ProgramOptions where
-  ProgramOptions l1 c1 ty1 fp1 sp1 url1 sl1 httph1 http1 hl1 fgh1 fgp1 fgsc1 <>
-    ProgramOptions l2 c2 ty2 fp2 sp2 url2 sl2 httph2 http2 hl2 fgh2 fgp2 fgsc2 =
+  ProgramOptions l1 c1 ty1 fp1 sp1 url1 sl1 httph1 http1 hl1 fgh1 fgp1 fgsc1 sfn1 <>
+    ProgramOptions l2 c2 ty2 fp2 sp2 url2 sl2 httph2 http2 hl2 fgh2 fgp2 fgsc2 sfn2 =
       ProgramOptions
         (l1 <|> l2)
         (c1 <|> c2)
@@ -113,6 +119,7 @@ instance Semigroup ProgramOptions where
         (fgh1 <|> fgh2)
         (fgp1 <|> fgp2)
         (fgsc1 <|> fgsc2)
+        (sfn1 <|> sfn2)
 
 $(deriveJSON
     JSON.defaultOptions
@@ -214,6 +221,13 @@ optionsP = ProgramOptions
         <> long "fgfs-sync-callsign"
         <> help "Sync callsign with FlightGear (requires fgfs-hostname and fgfs-port)"
         )
+  <*> option (Just <$> str)
+        (  long "session-file"
+        <> long "session-filename"
+        <> metavar "FILE"
+        <> help "Where to store session"
+        <> value Nothing
+        )
 
 optionsFromArgs :: IO ProgramOptions
 optionsFromArgs =
@@ -289,6 +303,7 @@ hoppieMainOptionsFromProgramOptions po =
       fgPort = poFlightgearPort po
       fgHostname = poFlightgearHostname po
       fgSyncCallsign = poFlightgearSyncCallsign po
+      pfile = poSessionFilename po
   in
     defHoppieMainOptions
       { hoppieMainShowLog = showLog
@@ -299,6 +314,7 @@ hoppieMainOptionsFromProgramOptions po =
       , hoppieMainFlightgearPort = fgPort
       , hoppieMainFlightgearSyncCallsign = fgSyncCallsign
       , hoppieMainAircraftType = actype
+      , hoppieMainPersistenceFile = pfile
       }
 
 main :: IO ()
@@ -311,13 +327,14 @@ main = do
   let po = poFromArgs <> poFromEnv <> poFromConfigFile <> defaultProgramOptions
   config <- either error return $ optionsToConfig po
   callsign <- maybe (error "No callsign configured") return $ poCallsign po
+  let hmo = hoppieMainOptionsFromProgramOptions po
   let hooks = HoppieHooks
                 { onUplink = handleUplink eventChan
                 , onDownlink = handleDownlink eventChan
                 , onNetworkStatus = handleNetworkStatus eventChan
                 , onCpdlcLogon = handleCurrentDataAuthority eventChan
+                , onDataUpdated = handleDataUpdated (hoppieMainPersistenceFile hmo)
                 }
-      hmo = hoppieMainOptionsFromProgramOptions po
   runInput inputChan
     `race_`
     runInputPusher inputChan eventChan
@@ -384,6 +401,12 @@ handleCurrentDataAuthority :: TChan MCDUEvent -> Maybe ByteString -> Hoppie ()
 handleCurrentDataAuthority eventChan = do
   liftIO . atomically . writeTChan eventChan . CurrentDataAuthorityEvent
 
+handleDataUpdated :: Maybe FilePath -> Hoppie ()
+handleDataUpdated Nothing = return ()
+handleDataUpdated (Just ppath) = do
+  pdata <- getPersistentData
+  liftIO $ JSON.encodeFile ppath pdata
+
 data HoppieMainOptions =
   HoppieMainOptions
     { hoppieMainShowLog :: Bool
@@ -394,6 +417,7 @@ data HoppieMainOptions =
     , hoppieMainFlightgearPort :: Maybe Int
     , hoppieMainFlightgearSyncCallsign :: Maybe Bool
     , hoppieMainAircraftType :: Maybe ByteString
+    , hoppieMainPersistenceFile :: Maybe FilePath
     }
     deriving (Show)
 
@@ -408,12 +432,13 @@ defHoppieMainOptions =
     , hoppieMainFlightgearPort = Nothing
     , hoppieMainFlightgearSyncCallsign = Nothing
     , hoppieMainAircraftType = Nothing
+    , hoppieMainPersistenceFile = Nothing
     }
 
 applyHoppieMainOptions :: HoppieMainOptions -> MCDUState -> MCDUState
 applyHoppieMainOptions hmo m =
   m
-    { mcduAircraftType = hoppieMainAircraftType hmo
+    { mcduAircraftType = hoppieMainAircraftType hmo <|> mcduAircraftType m
     , mcduShowLog = hoppieMainShowLog hmo
     , mcduHttpHostname = hoppieMainHttpHostname hmo
     , mcduHttpPort = hoppieMainHttpPort hmo
@@ -431,6 +456,24 @@ hoppieMain :: HoppieMainOptions
            -> TChan MCDUEvent
            -> (TypedMessage -> Hoppie ()) -> Hoppie ()
 hoppieMain hmo eventChan rawSend = do
+  forM_ (hoppieMainPersistenceFile hmo) $ \ppath -> do
+    sessionMay <- liftIO $ do
+        (JSON.eitherDecodeFileStrict' ppath >>= \case
+            Left e -> do
+              atomically $ writeTChan eventChan $ LogEvent ("Failed to load session: " <> Text.pack e)
+              return Nothing
+            Right session -> do
+              atomically $ writeTChan eventChan $ LogEvent "Session loaded"
+              return (Just session)
+          ) `catch` (\e -> do
+            if isDoesNotExistError e then do
+              atomically $ writeTChan eventChan $ LogEvent ("Session file does not exist: " <> Text.pack ppath)
+              return Nothing
+            else do
+              atomically $ writeTChan eventChan $ LogEvent ("Error reading session file " <> Text.pack ppath <> ": " <> Text.pack (show e))
+              return Nothing
+          )
+    forM_ sessionMay restorePersistentData
   runMCDU rawSend $ do
     modify (applyHoppieMainOptions hmo)
     mcduMain eventChan

@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 module Web.Hoppie.Trans
 ( module Web.Hoppie.Trans
@@ -15,6 +16,7 @@ module Web.Hoppie.Trans
 )
 where
 
+import Web.Hoppie.StringUtil
 import qualified Web.Hoppie.Network as Network
 import Web.Hoppie.CPDLC.Message (CPDLCMessage (..), CPDLCPart (..))
 import Web.Hoppie.CPDLC.MessageTypes (ReplyOpts (..), allMessageTypes)
@@ -36,10 +38,15 @@ import Control.Monad.Reader
 import Data.ByteString (ByteString)
 import Data.Time (UTCTime)
 import Data.Time.Clock (getCurrentTime)
+import Data.Text (Text)
 import Data.Map (Map)
 import qualified Data.Map.Strict as Map
 import Control.Concurrent.MVar
 import Data.List
+import Data.Aeson.TH (deriveJSON)
+import qualified Data.Aeson.TH as JSON
+import Data.Text.Encoding (encodeUtf8, decodeUtf8)
+import qualified Data.Text as Text
 
 type HoppieT m = ReaderT (HoppieEnv m) m
 
@@ -69,6 +76,7 @@ data HoppieHooks m =
     , onDownlink :: WithMeta DownlinkStatus TypedMessage -> HoppieT m ()
     , onNetworkStatus :: NetworkStatus -> HoppieT m ()
     , onCpdlcLogon :: Maybe ByteString -> HoppieT m ()
+    , onDataUpdated :: HoppieT m ()
     }
 
 data DataAuthorities =
@@ -150,6 +158,42 @@ data HoppieMessage
   = UplinkMessage (WithMeta UplinkStatus TypedMessage)
   | DownlinkMessage (WithMeta DownlinkStatus TypedMessage)
 
+
+data PersistentHoppieData =
+  PersistentHoppieData
+    { phdCallsign :: Text
+    , phdUplinks :: [WithMeta UplinkStatus TypedMessage]
+    , phdDownlinks :: [WithMeta DownlinkStatus TypedMessage]
+    , phdNextMIN :: Word
+    , phdNextUID :: Word
+    }
+    deriving (Show, Eq)
+
+$(deriveJSON JSON.defaultOptions { JSON.constructorTagModifier = Text.unpack . Text.dropEnd 6 . Text.pack } ''UplinkStatus)
+$(deriveJSON JSON.defaultOptions { JSON.constructorTagModifier = Text.unpack . Text.dropEnd 8 . Text.pack } ''DownlinkStatus)
+$(deriveJSON JSON.defaultOptions ''WithMeta)
+$(deriveJSON JSON.defaultOptions { JSON.fieldLabelModifier = lcfirst . drop 3 } ''PersistentHoppieData)
+
+getPersistentData :: MonadIO m => HoppieT m PersistentHoppieData
+getPersistentData =
+  PersistentHoppieData
+    <$> (decodeUtf8 <$> getCallsign)
+    <*> (Map.elems <$> (asks hoppieUplinks >>= liftIO . readMVar))
+    <*> (Map.elems <$> (asks hoppieDownlinks >>= liftIO . readMVar))
+    <*> (asks hoppieCpdlcNextMIN >>= liftIO . readMVar)
+    <*> (asks hoppieNextUID >>= liftIO . readMVar)
+
+restorePersistentData :: MonadIO m => PersistentHoppieData -> HoppieT m ()
+restorePersistentData phd = do
+  asks hoppieCallsign >>= \var ->
+    liftIO $ modifyMVar_ var (const . return . encodeUtf8 $ phdCallsign phd)
+  forM_ (phdUplinks phd) saveUplink
+  forM_ (phdDownlinks phd) saveDownlink
+  asks hoppieCpdlcNextMIN >>= \var ->
+    liftIO $ modifyMVar_ var (const . return $ phdNextMIN phd)
+  asks hoppieNextUID >>= \var ->
+    liftIO $ modifyMVar_ var (const . return $ phdNextUID phd)
+
 isCPDLC :: TypedMessage -> Bool
 isCPDLC tm = case typedMessagePayload tm of
   CPDLCPayload {} -> True
@@ -187,13 +231,13 @@ getUplinkMessages :: MonadIO m => HoppieT m [HoppieMessage]
 getUplinkMessages = do
   uplinks <- fmap (map UplinkMessage . Map.elems) $
               asks hoppieUplinks >>= liftIO . readMVar
-  return $ sortOn messageUID $ uplinks
+  return $ sortOn messageUID uplinks
 
 getDownlinkMessages :: MonadIO m => HoppieT m [HoppieMessage]
 getDownlinkMessages = do
   downlinks <- fmap (map DownlinkMessage . Map.elems) $
               asks hoppieDownlinks >>= liftIO . readMVar
-  return $ sortOn messageUID $ downlinks
+  return $ sortOn messageUID downlinks
 
 getAllMessages :: MonadIO m => HoppieT m [HoppieMessage]
 getAllMessages = do
@@ -253,8 +297,9 @@ getCallsign :: MonadIO m => HoppieT m ByteString
 getCallsign = asks hoppieCallsign >>= liftIO . readMVar
 
 setCallsign :: MonadIO m => ByteString -> HoppieT m ()
-setCallsign callsign =
+setCallsign callsign = do
   asks hoppieCallsign >>= liftIO . flip modifyMVar_ (const . return $ callsign)
+  join $ asks (onDataUpdated . hoppieHooks)
 
 cpdlcSendLL :: MonadIO m => ByteString -> Maybe Word -> ByteString -> [ByteString] -> HoppieT m ()
 cpdlcSendLL recipient mrnMay tyID args = do
@@ -509,10 +554,12 @@ makeErrorResponse tyM body err = do
       (TypedMessage (Just uid) "SYSTEM" (ErrorPayload tyM body err))
   return [uid]
 
+{-# ANN processResponse ("HLint: ignore Avoid lambda using `infix`" :: String) #-}
+
 processResponse :: MonadIO m => Maybe Word -> ByteString -> HoppieT m [Word]
 processResponse uidMay rawResponse = do
   ts <- liftIO getCurrentTime
-  case parseResponse rawResponse of
+  uids <- case parseResponse rawResponse of
     Left err ->
       makeErrorResponse Nothing "PARSER ERROR" err
     Right (ErrorResponse err) ->
@@ -522,15 +569,15 @@ processResponse uidMay rawResponse = do
     Right (Response messages) -> do
       forM messages $ \msg -> do
         uid <- makeUID
-        maybe
-          (return ())
-          (\parentUID -> setDownlinkStatus parentUID SentDownlink)
-          uidMay
+        forM_ uidMay $ \parentUID -> 
+          setDownlinkStatus parentUID SentDownlink
         let uplink = WithMeta uid NewUplink ts $ toTypedUplink msg
         saveUplink uplink
         recvdHook <- asks (onUplink . hoppieHooks)
         recvdHook uplink
         return uid
+  join $ asks (onDataUpdated . hoppieHooks)
+  return uids
 
 poll :: MonadIO m => HoppieT m [Word]
 poll = do

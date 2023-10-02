@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Web.Hoppie.Response
 ( Response (..)
@@ -28,6 +29,15 @@ import qualified Text.Megaparsec.Byte.Lexer as P (decimal)
 import Data.Void (Void)
 import Data.Char
 import Data.Bifunctor
+import Data.Aeson (ToJSON (..), FromJSON (..), (.=), (.:))
+import qualified Data.Aeson as JSON
+import Data.Text.Encoding (encodeUtf8, decodeUtf8)
+import Data.Text (Text)
+import Text.Read (readMaybe)
+
+ucfirst :: String -> String
+ucfirst [] = []
+ucfirst (x:xs) = toUpper x : xs
 
 parseResponse :: ByteString -> Either String Response
 parseResponse src =
@@ -43,6 +53,12 @@ data MessageType
   | Data
   | Info
   deriving (Show, Read, Eq, Ord, Enum, Bounded)
+
+instance ToJSON MessageType where
+  toJSON = toJSON . map toLower . show
+
+instance FromJSON MessageType where
+  parseJSON j = maybe (fail "MessageType") return . readMaybe . ucfirst =<< parseJSON j
 
 messageTypeCode :: MessageType -> ByteString
 messageTypeCode = BS8.pack . map toLower . show
@@ -60,6 +76,21 @@ data TypedMessage =
     }
     deriving (Show, Eq)
 
+instance ToJSON TypedMessage where
+  toJSON m =
+    JSON.object
+      [ "id" .= typedMessageID m
+      , "callsign" .= decodeUtf8 (typedMessageCallsign m)
+      , "payload" .= typedMessagePayload m
+      ]
+
+instance FromJSON TypedMessage where
+  parseJSON = JSON.withObject "TypedMessage" $ \obj ->
+    TypedMessage
+      <$> obj .: "id"
+      <*> (encodeUtf8 <$> obj .: "callsign")
+      <*> obj .: "payload"
+
 typedPayloadTypeBS :: TypedPayload -> ByteString
 typedPayloadTypeBS (TelexPayload {}) = "TELEX"
 typedPayloadTypeBS (InfoPayload {}) = "INFO"
@@ -74,6 +105,52 @@ data TypedPayload
   | UnsupportedPayload !MessageType !ByteString
   | ErrorPayload !(Maybe MessageType) !ByteString !String
   deriving (Show, Eq)
+
+instance ToJSON TypedPayload where
+  toJSON (TelexPayload txt) =
+    JSON.object
+      [ "type" .= ("telex" :: Text)
+      , "data" .= decodeUtf8 txt
+      ]
+  toJSON (InfoPayload txt) =
+    JSON.object
+      [ "type" .= ("info" :: Text)
+      , "data" .= decodeUtf8 txt
+      ]
+  toJSON (CPDLCPayload cpdlc) =
+    JSON.object
+      [ "type" .= ("cpdlc" :: Text)
+      , "data" .= cpdlc
+      ]
+  toJSON (UnsupportedPayload ty txt) =
+    JSON.object
+      [ "type" .= ("unsupported" :: Text)
+      , "msg-type" .= ty
+      , "data" .= decodeUtf8 txt
+      ]
+  toJSON (ErrorPayload tyMay msg err) =
+    JSON.object
+      [ "type" .= ("error" :: Text)
+      , "msg-type" .= tyMay
+      , "data" .= decodeUtf8 msg
+      , "err" .= err
+      ]
+
+instance FromJSON TypedPayload where
+  parseJSON = JSON.withObject "TypedPayload" $ \obj -> do
+    ty :: Text <- obj .: "type"
+    case ty of
+      "telex" -> TelexPayload <$> (encodeUtf8 <$> obj .: "data")
+      "info" -> InfoPayload <$> (encodeUtf8 <$> obj .: "data")
+      "cpdlc" -> CPDLCPayload <$> obj .: "data"
+      "unsupported" -> UnsupportedPayload
+                        <$> obj .: "msg-type"
+                        <*> (encodeUtf8 <$> obj .: "data")
+      "error" -> ErrorPayload
+                        <$> obj .: "msg-type"
+                        <*> (encodeUtf8 <$> obj .: "data")
+                        <*> obj .: "err"
+      _ -> fail "TypedPayload type"
 
 toTypedResponse :: Response -> [TypedMessage]
 toTypedResponse (Response msgs) = map toTypedUplink msgs

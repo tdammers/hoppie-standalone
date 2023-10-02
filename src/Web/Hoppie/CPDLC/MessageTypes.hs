@@ -25,6 +25,8 @@ import qualified Text.Megaparsec.Byte.Lexer as P (decimal)
 import Data.List
 import Data.Maybe
 import Data.Char
+import Data.Aeson (ToJSON (..), FromJSON (..))
+import Text.Read (readMaybe)
 
 data ArgTy
   = ArgFlAlt
@@ -258,6 +260,13 @@ data ReplyOpts
   | ReplyWU
   | ReplyR
   deriving (Show, Read, Eq, Ord, Enum, Bounded)
+
+instance ToJSON ReplyOpts where
+  toJSON = toJSON . drop 5 . show
+
+instance FromJSON ReplyOpts where
+  parseJSON j =
+    maybe (fail "ReplyOpts") return . readMaybe . ("Reply" ++) =<< parseJSON j
 
 newtype MessagePattern a =
   MessagePattern

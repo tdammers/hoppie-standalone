@@ -25,6 +25,9 @@ import qualified Text.Megaparsec.Byte.Lexer as P (decimal)
 import Data.Bifunctor
 import Data.Void
 import Data.Maybe
+import Data.Aeson (ToJSON (..), FromJSON (..), (.=), (.:))
+import qualified Data.Aeson as JSON
+import Data.Text.Encoding (encodeUtf8, decodeUtf8)
 
 data CPDLCMessage =
   CPDLCMessage
@@ -35,12 +38,42 @@ data CPDLCMessage =
     }
     deriving (Show, Read, Eq)
 
+instance ToJSON CPDLCMessage where
+  toJSON cpdlc =
+    JSON.object
+      [ "min" .= cpdlcMIN cpdlc
+      , "mrn" .= cpdlcMRN cpdlc
+      , "ra" .= cpdlcReplyOpts cpdlc
+      , "parts" .= cpdlcParts cpdlc
+      ]
+
+instance FromJSON CPDLCMessage where
+  parseJSON = JSON.withObject "CPDLCMessage" $ \obj -> do
+    CPDLCMessage
+      <$> obj .: "min"
+      <*> obj .: "mrn"
+      <*> obj .: "ra"
+      <*> obj .: "parts"
+
 data CPDLCPart =
   CPDLCPart
     { cpdlcType :: MessageTypeID
     , cpdlcArgs :: [ByteString]
     }
     deriving (Show, Read, Eq)
+
+instance ToJSON CPDLCPart where
+  toJSON (CPDLCPart msgTy args) =
+    JSON.object
+      [ "type" .= decodeUtf8 msgTy
+      , "args" .= map decodeUtf8 args
+      ]
+
+instance FromJSON CPDLCPart where
+  parseJSON = JSON.withObject "CPDLCPart" $ \obj -> do
+    CPDLCPart
+      <$> (encodeUtf8 <$> obj .: "type")
+      <*> (map encodeUtf8 <$> obj .: "args")
 
 parseCPDLCUplink :: ByteString -> Either String CPDLCMessage
 parseCPDLCUplink src =
