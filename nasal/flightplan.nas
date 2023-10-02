@@ -86,6 +86,38 @@ var getFlightplanSize = func {
     return fp.getPlanSize();
 };
 
+var makeLegInfo = func (wp, totalDistance, totalDistanceRemaining, fuelOnBoard, groundspeed, fuelFlow) {
+    var parent_id = nil;
+    if (wp.wp_parent != nil)
+        parent_id = wp.wp_parent.id;
+    var distanceRemaining = totalDistance - wp.distance_along_route;
+    var distanceToWP = totalDistanceRemaining - distanceRemaining;
+    var fuelRemaining = nil;
+    var fuelGS = math.max(40, groundspeed);
+    if (fuelFlow != nil and fuelOnBoard != nil) {
+        fuelRemaining = fuelOnBoard + fuelFlow * (distanceToWP + wp.leg_distance) / fuelGS * 3600;
+    }
+    var timeRemaining = nil;
+    # if (groundspeed > 40)
+        timeRemaining = (distanceToWP + wp.leg_distance) * 60 / fuelGS;
+    return removeNilFields(
+        { "name": wp.wp_name
+        , "hdg": math.round(wp.leg_bearing)
+        , "ldist": wp.leg_distance
+        , "cdist": wp.distance_along_route
+        , "rdist": distanceToWP
+        , "spd": wp.speed_cstr
+        , "spdty": wp.speed_cstr_type
+        , "alt": wp.alt_cstr
+        , "altty": wp.alt_cstr_type
+        , "p": parent_id
+        , "role": wp.wp_role
+        , "efob": fuelRemaining
+        , "ete": timeRemaining
+        , "disc": (wp.wp_type == "discontinuity" or wp.wp_type == "vectors")
+        });
+};
+
 var getFlightplanLegs = func (pageSize = nil, curPage = nil, offset = nil) {
     var acpos = geo.aircraft_position();
     var fp = fms.getVisibleFlightplan();
@@ -148,6 +180,45 @@ var getFlightplanLegs = func (pageSize = nil, curPage = nil, offset = nil) {
     }
     return result;
 };
+
+var getProgressInfo = func () {
+    var fp = fms.getVisibleFlightplan();
+    var groundspeed = getprop('/velocities/groundspeed-kt');
+    var fuelGS = math.max(40, groundspeed);
+    var totalDistanceRemaining = getprop('/autopilot/route-manager/distance-remaining-nm');
+    var totalDistance = getprop('/autopilot/route-manager/total-distance');
+    var fuelOnBoard = fuelSamplerVars.currentKG;
+    var fuelFlow = fuelSamplerVars.ffKG;
+    var first = 0;
+    var length = fp.getPlanSize();
+
+    var wpCurrent = fp.getWP(fp.current);
+    var wpNext = fp.getWP(fp.current + 1);
+    var wpDest = nil;
+    for (var i = fp.current; i < fp.getPlanSize(); i += 1) {
+        var wp = fp.getWP(i);
+        if (wp != nil) {
+            print(wp.wp_name);
+            print(wp.wp_type);
+            print(wp.wp_role);
+        
+            if (wp.wp_type == 'runway') {
+                wpDest = wp;
+                break;
+            }
+        }
+    }
+
+    var info = {};
+    if (wpCurrent != nil)
+        info.current = makeLegInfo(wpCurrent, totalDistance, totalDistanceRemaining, fuelOnBoard, fuelGS, fuelFlow);
+    if (wpNext != nil)
+        info.next = makeLegInfo(wpNext, totalDistance, totalDistanceRemaining, fuelOnBoard, fuelGS, fuelFlow);
+    if (wpDest != nil)
+        info.destination = makeLegInfo(wpDest, totalDistance, totalDistanceRemaining, fuelOnBoard, fuelGS, fuelFlow);
+    return info;
+};
+
 
 var setLegAltitude = func (n, alt, altType) {
     var wp = fms.getVisibleFlightplan().getWP(n);
@@ -721,6 +792,26 @@ var setFGCallsign = func (callsign) {
     return nil;
 }
 
+var isValidSID = func () {
+    var fp = getVisibleFlightplan();
+    if (fp.departure == nil) return 1;
+    if (fp.sid == nil) return 1;
+    if (fp.departure_runway == nil) return 1;
+    var runways = fp.sid.runways;
+    var runway = fp.departure_runway.id;
+    return contains(runways, runway);
+}
+
+var isValidSTAR = func () {
+    var fp = getVisibleFlightplan();
+    if (fp.destination == nil) return 1;
+    if (fp.star == nil) return 1;
+    if (fp.destination_runway == nil) return 1;
+    var runways = fp.star.runways;
+    var runway = fp.destination_runway.id;
+    return contains(runways, runway);
+}
+
 var fms = {
     '_updateFuelSampler': updateFuelSampler,
 
@@ -752,6 +843,7 @@ var fms = {
     'getFlightplanLegs': getFlightplanLegs,
     'getFlightplanSize': getFlightplanSize,
     'getCurrentLeg': getCurrentLeg,
+    'getProgressInfo': getProgressInfo,
 
     'setDeparture': setDeparture,
     'getDeparture': getDeparture,
@@ -763,6 +855,9 @@ var fms = {
     'setSID': setSID,
     'listSIDs': listSIDs,
     'getSID': getSID,
+
+    'isValidSID': isValidSID,
+    'isValidSTAR': isValidSTAR,
 
     'setSidTransition': setSidTransition,
     'listSidTransitions': listSidTransitions,

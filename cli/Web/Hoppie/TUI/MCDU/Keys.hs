@@ -36,6 +36,7 @@ data FunctionKey
   | FPL
   | RTE
   | NAV
+  | PROG
   deriving (Show, Read, Eq, Ord, Enum, Bounded)
 
 data MCDUKey

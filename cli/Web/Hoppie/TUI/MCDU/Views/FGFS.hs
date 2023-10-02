@@ -10,16 +10,14 @@ where
 import Web.Hoppie.TUI.MCDU.Draw
 import Web.Hoppie.TUI.MCDU.Monad
 import Web.Hoppie.TUI.MCDU.Operations
-import Web.Hoppie.TUI.MCDU.FGNasal
 import Web.Hoppie.TUI.StringUtil
 import Web.Hoppie.TUI.MCDU.Views.Enum
-import Web.Hoppie.FGFS.Connection
 import Web.Hoppie.FGFS.NasalValue
+import Web.Hoppie.FGFS.FMS as FMS
 import Web.Hoppie.Trans
 
 import Data.Text (Text)
 import qualified Data.Text as Text
-import Data.String.QQ (s)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as BS8
 import Control.Monad.State
@@ -35,42 +33,14 @@ import Data.Char (isDigit)
 import Text.Read (readMaybe)
 import Data.Word
 
-lbs2kg :: Double
-lbs2kg = 0.45359237
-
-data FPLeg =
-  FPLeg
-    { legName :: Text
-    , legHeading :: Maybe Double
-    , legDist :: Maybe Double
-    , legRouteDist :: Maybe Double
-    , legRemainingDist :: Maybe Double
-    , legSpeed :: Maybe Double
-    , legSpeedType :: Maybe Text
-    , legAlt :: Maybe Double
-    , legAltType :: Maybe Text
-    , legParent :: Maybe Text
-    , legRole :: Maybe Text
-    , legIsDiscontinuity :: Bool
-    , legEFOB :: Maybe Double
-    }
-
-instance FromNasal FPLeg where
-  fromNasal n =
-    FPLeg
-      <$> fromNasalField "name" n
-      <*> fromNasalFieldMaybe "hdg" n
-      <*> fromNasalFieldMaybe "ldist" n
-      <*> fromNasalFieldMaybe "cdist" n
-      <*> fromNasalFieldMaybe "rdist" n
-      <*> fromNasalFieldMaybe "spd" n
-      <*> fromNasalFieldMaybe "spdty" n
-      <*> fromNasalFieldMaybe "alt" n
-      <*> fromNasalFieldMaybe "altty" n
-      <*> fromNasalFieldMaybe "p" n
-      <*> fromNasalFieldMaybe "role" n
-      <*> (fromMaybe False <$> fromNasalFieldMaybe "disc" n)
-      <*> fromNasalFieldMaybe "efob" n
+formatETE :: Double -> String
+formatETE minutesRaw =
+  let (hours, minutes) = floor minutesRaw `divMod` 60 :: (Int, Int)
+  in
+    if hours >= 24 then
+      "+++++"
+    else
+      printf "%02i+%02i" hours minutes
 
 formatDistance :: Double -> String
 formatDistance dist
@@ -78,6 +48,13 @@ formatDistance dist
   = printf "%4.1fNM" dist
   | otherwise
   = printf "%4.0fNM" dist
+
+formatDistanceCompact :: Double -> String
+formatDistanceCompact dist
+  | dist < 10
+  = printf "%4.1f" dist
+  | otherwise
+  = printf "%4.0f" dist
 
 formatAltitude :: Maybe Double -> Maybe Text -> String
 formatAltitude (Just alt) (Just cstr) =
@@ -110,7 +87,7 @@ formatSpeed _ _ = "---"
 formatEFOB :: Word8 -> Maybe Double -> Colored ByteString
 formatEFOB _ Nothing = ""
 formatEFOB defcolor (Just efob) =
-  colorize color . BS8.pack $ printf "%6.1f" (efob / 1000)
+  colorize color . BS8.pack $ printf "%5.1f" (abs efob / 1000)
   where
     color = if efob <= 0 then red else defcolor
 
@@ -160,96 +137,43 @@ navView = defView
       ]
   }
 
-data WaypointCandidate =
-  WaypointCandidate
-    { wpID :: Text
-    , wpType :: Text
-    , wpName :: Text
-    , wpDistance :: Double
-    , wpBearing :: Double
-    , wpValue :: NasalValue
-    }
-    deriving (Show)
+loadWaypointSelect :: ByteString
+                   -> [WaypointCandidate]
+                   -> (Maybe WaypointCandidate -> MCDU ())
+                   -> MCDU ()
+loadWaypointSelect returnTitle candidates cont = do
+  loadView $ selectViewWith
+    SelectViewOptions
+      { selectViewSingleSided = True
+      , selectViewBreakLines = True
+      , selectViewUnloadAction = mapM_ releaseWaypointCandidate candidates
+      }
+    "SELECT WPT"
+    [ (c, colorize color . BS8.pack $ printf "%s\n%s %s %03.0f°"
+                      (Text.take (screenW - 2) (wpName c))
+                      (Text.toUpper $ wpType c)
+                      (formatDistance $ wpDistance c)
+                      (wpBearing c)
+      )
+    | c <- candidates
+    , let color = case wpType c of
+                    "leg" -> green
+                    _ -> cyan
+    ]
+    returnTitle
+    (\candidateMay -> do
+        cont candidateMay
+    )
 
-releaseWaypointCandidate :: WaypointCandidate -> MCDU ()
-releaseWaypointCandidate candidate =
-  fgCallNasal "release" [wpValue candidate]
-
-acquireWaypointCandidate :: WaypointCandidate -> MCDU ()
-acquireWaypointCandidate candidate =
-  fgCallNasal "acquire" [wpValue candidate]
-
-instance FromNasal WaypointCandidate where
-  fromNasal nv =
-    WaypointCandidate
-      <$> fromNasalField "id" nv
-      <*> fromNasalField "type" nv
-      <*> fromNasalField "name" nv
-      <*> fromNasalField "distance" nv
-      <*> fromNasalField "bearing" nv
-      <*> fromNasalField "wp" nv
-
-insertDirect :: Maybe WaypointCandidate -> WaypointCandidate -> MCDU Bool
-insertDirect fromWPMay toWP = do
-  let nasalFunc = case wpType toWP of
-        "leg" -> "fms.insertDirectFP"
-        _ -> "fms.insertDirect"
-  result <- (fgCallNasal nasalFunc (wpValue toWP, wpValue <$> fromWPMay) :: MCDU (Maybe ByteString))
-  forM_ result $ \err -> scratchWarn err
-  return $ isNothing result
-
-resolveLeg :: ByteString -> (Maybe WaypointCandidate -> MCDU ()) -> MCDU ()
-resolveLeg name cont = do
-  candidate :: Maybe WaypointCandidate <- fgCallNasalDef Nothing "fms.getFPLegIndex" [name]
-  cont candidate
-  mapM_ releaseWaypointCandidate candidate
-
-getLeg :: Int -> (Maybe WaypointCandidate -> MCDU ()) -> MCDU ()
-getLeg index cont = do
-  candidate :: Maybe WaypointCandidate <- fgCallNasalDef Nothing "fms.getWaypoint" [index]
-  cont candidate
-  mapM_ releaseWaypointCandidate candidate
-
-resolveWaypoint :: ByteString -> ByteString -> (Maybe WaypointCandidate -> MCDU ()) -> MCDU ()
-resolveWaypoint returnTitle name cont = do
-  candidates :: [WaypointCandidate] <- fgCallNasal "fms.findWaypoint" [name]
-  case candidates of
-    [] -> do
-      scratchWarn "NO WPT"
-      cont Nothing
-    [candidate] -> do
-      cont (Just candidate)
-      releaseWaypointCandidate candidate
-    _ -> do
-      mapM_ acquireWaypointCandidate candidates
-      loadView $ selectViewWith
-        SelectViewOptions
-          { selectViewSingleSided = True
-          , selectViewBreakLines = True
-          , selectViewUnloadAction = mapM_ releaseWaypointCandidate candidates
-          }
-        "SELECT WPT"
-        [ (c, colorize color . BS8.pack $ printf "%s\n%s %s %03.0f°"
-                          (Text.take (screenW - 2) (wpName c))
-                          (Text.toUpper $ wpType c)
-                          (formatDistance $ wpDistance c)
-                          (wpBearing c)
-          )
-        | c <- candidates
-        , let color = case wpType c of
-                        "leg" -> green
-                        _ -> cyan
-        ]
-        returnTitle
-        (\candidateMay -> do
-            cont candidateMay
-        )
+mcduResolveWaypoint :: ByteString -> ByteString -> (Maybe WaypointCandidate -> MCDU ()) -> MCDU ()
+mcduResolveWaypoint returnTitle name cont =
+  resolveWaypoint name scratchWarn (loadWaypointSelect returnTitle) cont
 
 loadDirectToView :: Maybe ByteString -> MCDU ()
 loadDirectToView Nothing = do
   loadDirectToViewWith Nothing Nothing
 loadDirectToView (Just toName) = do
-  resolveWaypoint "NO WPT" toName (loadDirectToViewWith Nothing)
+  mcduResolveWaypoint "NO WPT" toName (loadDirectToViewWith Nothing)
 
 loadDirectToViewWith :: Maybe WaypointCandidate -> Maybe WaypointCandidate -> MCDU ()
 loadDirectToViewWith fromMayOrig toMayOrig = do
@@ -286,7 +210,7 @@ loadDirectToViewWith fromMayOrig toMayOrig = do
         reload
         return True
       setTo (Just n) = do
-        resolveWaypoint "DIRECT TO" n $ \wpMay -> do
+        mcduResolveWaypoint "DIRECT TO" n $ \wpMay -> do
           store toVar wpMay
           reload
         return True
@@ -315,10 +239,12 @@ loadDirectToViewWith fromMayOrig toMayOrig = do
             reload
           Just toWP -> do
             done <- insertDirect fromMay toWP
-            if done then
-              loadView fplView
-            else
-              reload
+            case done of
+              Left err -> do
+                scratchWarn (encodeUtf8 err)
+                reload
+              Right () ->
+                loadView fplView
 
       directToView = defView
         { mcduViewTitle = "DIRECT TO"
@@ -362,13 +288,6 @@ loadDirectToViewWith fromMayOrig toMayOrig = do
   store toVar toMayOrig
   store fromVar fromMayOrig
   loadView directToView
-
-fplView :: MCDUView
-fplView = defView
-  { mcduViewTitle = "ACT FPL"
-  , mcduViewAutoReload = True
-  , mcduViewOnLoad = fplViewLoad
-  }
 
 parseRestrictions :: ByteString -> Either ByteString (Maybe Int, ByteString, Maybe Int, ByteString)
 parseRestrictions rbs = runExcept $ do
@@ -418,20 +337,64 @@ parseAltitudeRestriction str
         _ -> throwError "INVALID"
       return (Just val, restriction)
 
+progView :: MCDUView
+progView = defView
+  { mcduViewTitle = "PROGRESS"
+  , mcduViewAutoReload = True
+  , mcduViewOnLoad = progViewLoad
+  }
+
+progViewLoad :: MCDU ()
+progViewLoad = withFGView $ do
+  progress <- getProgressInfo
+  massUnit <- gets mcduMassUnit
+  let fuelFactor = case massUnit of
+                      Kilograms -> 1
+                      Pounds -> 1 / lbs2kg
+  debugPrint $ colorize 0 $ Text.pack $ show progress
+  modifyView $ \v -> v
+    { mcduViewDraw = do
+        let printWP color y wp = do
+              mcduPrint 0 y color (encodeUtf8 . Text.take 7 . Text.replace "-" "" $ legName wp)
+              forM_ (legETE wp) $ \ete ->
+                mcduPrint 13 y color (BS8.pack $ formatETE ete)
+              forM_ (legRouteDist wp) $ \dist ->
+                mcduPrintR 12 y color (BS8.pack $ formatDistanceCompact dist)
+              mcduPrintColoredR 24 y (formatEFOB color ((* fuelFactor) <$> legEFOB wp))
+        mcduPrint 1 1 white "TO"
+        mcduPrint 8 1 white "DIST"
+        mcduPrint 14 1 white "ETA"
+        mcduPrint 19 1 white "FUEL"
+
+        forM_ (progressCurrent =<< progress) $ printWP magenta 2
+        forM_ (progressNext =<< progress) $ printWP green 4
+        forM_ (progressDestination =<< progress) $ printWP green 6
+
+        mcduPrint 1 3 white "NEXT"
+
+        mcduPrint 1 5 white "DEST"
+    }
+
+fplView :: MCDUView
+fplView = defView
+  { mcduViewTitle = "ACT FPL"
+  , mcduViewAutoReload = True
+  , mcduViewOnLoad = fplViewLoad
+  }
 
 fplViewLoad :: MCDU ()
-fplViewLoad = withFGView $ \conn -> do
+fplViewLoad = withFGView $ do
   let legsPerPage = numLSKs - 1
   curPage <- gets (mcduViewPage . mcduView)
 
-  (groundspeed :: Double) <- max 100 <$> callNasalFunc conn "fms.getGroundspeed" ()
-  (utcMinutes :: Double) <- callNasalFunc conn "fms.getUTCMinutes" ()
+  (groundspeed :: Double) <- max 100 <$> getGroundspeed
+  (utcMinutes :: Double) <- getUTCMinutes
 
-  planSize <- callNasalFunc conn "fms.getFlightplanSize" ()
-  currentLeg <- callNasalFunc conn "fms.getCurrentLeg" ()
+  planSize <- getFlightplanSize
+  currentLeg <- getCurrentLeg
 
-  curLegs <- callNasalFunc conn "fms.getFlightplanLegs" (legsPerPage, curPage, fromMaybe 1 currentLeg - 1)
-  flightplanModified <- callNasalFunc conn "fms.hasFlightplanModifications" ()
+  curLegs <- getFlightplanLegs legsPerPage curPage (fromMaybe 1 currentLeg - 1)
+  flightplanModified <- hasFlightplanModifications
   let legsDropped = curPage * legsPerPage
   let numPages = (planSize - fromMaybe 0 currentLeg + legsPerPage) `div` legsPerPage
   massUnit <- gets mcduMassUnit
@@ -440,16 +403,15 @@ fplViewLoad = withFGView $ \conn -> do
                       Pounds -> 1 / lbs2kg
 
   let putWaypoint :: Int -> Maybe ByteString -> MCDU Bool
-      putWaypoint n Nothing = do
-        callNasalFunc conn "fms.deleteWaypoint" [n]
+      putWaypoint n Nothing = deleteWaypoint n
       putWaypoint n (Just targetWPName) = do
-        resolveWaypoint "FPL" targetWPName $ \case
+        mcduResolveWaypoint "FPL" targetWPName $ \case
           Nothing -> do
             loadView fplView
           Just toWP -> do
             getLeg n $ \fromWPMay -> do
-              toIndexMay <- fgCallNasalDef Nothing "fms.findFPWaypoint" ((), Just $ wpValue toWP)
-              fromIndexMay <- fgCallNasalDef Nothing "fms.findFPWaypoint" ((), wpValue <$> fromWPMay)
+              toIndexMay <- findFPWaypoint toWP
+              fromIndexMay <- join <$> mapM findFPWaypoint fromWPMay
               case (toIndexMay :: Maybe Int, fromIndexMay :: Maybe Int) of
                 (Nothing, Nothing) -> do
                   scratchWarn "INVALID"
@@ -465,17 +427,17 @@ fplViewLoad = withFGView $ \conn -> do
                   loadDirectToViewWith fromWPMay (Just toWP)
         return True
       getWaypoint n = do
-        callNasalFunc conn "fms.getWaypointName" [n]
+        getWaypointName n
 
       putRestrictions :: Int -> Maybe ByteString -> MCDU Bool
       putRestrictions n Nothing = do
-        err1 <- fgCallNasalDef Nothing "fms.setLegSpeed" (n, (), "" :: Text)
+        err1 <- setFPLegSpeed n Nothing ""
         case err1 of
           Just e -> do
             scratchWarn e
             return False
           Nothing -> do
-            err2 <- fgCallNasalDef Nothing "fms.setLegAltitude" (n, (), "" :: Text)
+            err2 <- setFPLegAltitude n Nothing ""
             case err2 of
               Just e -> do
                 scratchWarn e
@@ -492,7 +454,7 @@ fplViewLoad = withFGView $ \conn -> do
             err1 <- if speedType == "keep" then
                       return Nothing
                     else
-                      fgCallNasalDef Nothing "fms.setLegSpeed" (n, speedMay, speedType)
+                      setFPLegSpeed n speedMay speedType
             case err1 of
               Just e -> do
                 scratchWarn e
@@ -501,7 +463,7 @@ fplViewLoad = withFGView $ \conn -> do
                 err2 <- if altType == "keep" then
                           return Nothing
                         else
-                          fgCallNasalDef Nothing "fms.setLegAltitude" (n, altMay, altType)
+                          setFPLegAltitude n altMay altType
                 case err2 of
                   Just e -> do
                     scratchWarn e
@@ -518,7 +480,7 @@ fplViewLoad = withFGView $ \conn -> do
           _ -> do
             scratchWarn "NO WPT"
             return Nothing
-            
+
 
   modifyView $ \v -> v
     { mcduViewNumPages = numPages
@@ -566,12 +528,12 @@ fplViewLoad = withFGView $ \conn -> do
             if isPrevious then
               mcduPrint 0 (n * 2 + 2) color (encodeUtf8 $ legName leg)
             else if legIsDiscontinuity leg then do
-              mcduPrint 6 (n * 2 + 1) color (BS8.pack . maybe "----NM" formatDistance $ legRemainingDist leg)
+              mcduPrint 6 (n * 2 + 1) color (BS8.pack . maybe "----NM" formatDistance $ legDist leg)
               mcduPrint 0 (n * 2 + 2) color "---- DISCONTINUITY ----"
             else do
               mcduPrint 1 (n * 2 + 1) color (BS8.pack . maybe "---°" (printf "%03.0f°") $ legHeading leg)
-              mcduPrint 6 (n * 2 + 1) color (BS8.pack . maybe "----NM" formatDistance $ legDist leg)
-              mcduPrintColored 12 (n * 2 + 1) (formatEFOB color . fmap (* fuelFactor) $ legEFOB leg)
+              mcduPrint 6 (n * 2 + 1) color (BS8.pack . maybe "----NM" formatDistance $ if isCurrent then legRemainingDist leg else legDist leg)
+              mcduPrintColored 13 (n * 2 + 1) (formatEFOB color . fmap (* fuelFactor) $ legEFOB leg)
               mcduPrint 0 (n * 2 + 2) color (encodeUtf8 $ legName leg)
             unless (legIsDiscontinuity leg) $ do
               mcduPrint (screenW - 11) (n * 2 + 2) color (BS8.pack $ formatSpeed (legSpeed leg) (legSpeedType leg))
@@ -589,11 +551,11 @@ rteView = defView
 
 
 rteViewLoad :: MCDU ()
-rteViewLoad = withFGView $ \conn -> do
+rteViewLoad = withFGView $ do
   departureMay <- getDeparture
   destinationMay <- getDestination
   callsign <- lift getCallsign
-  flightplanModified <- callNasalFunc conn "fms.hasFlightplanModifications" ()
+  flightplanModified <- hasFlightplanModifications
   modifyView $ \v -> v
     { mcduViewNumPages = 1
     , mcduViewTitle = if flightplanModified then "MOD RTE" else "ACT RTE"
@@ -603,7 +565,7 @@ rteViewLoad = withFGView $ \conn -> do
                       setDeparture
                       getDeparture
                     reloadView))
-        , (LSKL 2, ("CLEAR", fgCallNasalBool "fms.clearFlightplan" () >> reloadView))
+        , (LSKL 2, ("CLEAR", clearFlightplan >> reloadView))
         ] ++
         [ (LSKL 4, ("DEPARTURE", loadView departureView))
         | isJust departureMay
@@ -730,15 +692,7 @@ departureViewLoad = do
       runway <- getDepartureRunway
       sid <- getSID
       transition <- getSidTransition
-      sidValid <- fgRunNasalBool
-                    [s| var fp = flightplan();
-                        if (fp.departure == nil) return 1;
-                        if (fp.sid == nil) return 1;
-                        if (fp.departure_runway == nil) return 1;
-                        var runways = fp.sid.runways;
-                        var runway = fp.departure_runway.id;
-                        return contains(runways, runway);
-                      |]
+      sidValid <- isValidSID
       modifyView $ \v -> v
         { mcduViewNumPages = 1
         , mcduViewLSKBindings = Map.fromList
@@ -750,12 +704,12 @@ departureViewLoad = do
             , (LSKL 1, ("", do
                         scratchInteractOrSelect
                           selectSID
-                          setSID
+                          (setSID >=> warnOrSucceed)
                         reloadView))
             , (LSKL 2, ("", do
                         scratchInteractOrSelect
                           selectSidTransition
-                          setSidTransition
+                          (setSidTransition >=> warnOrSucceed)
                         reloadView))
             , (LSKL 5, ("RTE", loadView rteView))
             ]
@@ -788,15 +742,7 @@ arrivalViewLoad = do
       approachTransition <- getApproachTransition
       approach <- getApproach
       transition <- getStarTransition
-      starValid <- fgRunNasalBool
-                    [s| var fp = flightplan();
-                        if (fp.destination == nil) return 1;
-                        if (fp.star == nil) return 1;
-                        if (fp.destination_runway == nil) return 1;
-                        var runways = fp.star.runways;
-                        var runway = fp.destination_runway.id;
-                        return contains(runways, runway);
-                      |]
+      starValid <- isValidSTAR
       modifyView $ \v -> v
         { mcduViewNumPages = 1
         , mcduViewLSKBindings = Map.fromList
@@ -808,22 +754,22 @@ arrivalViewLoad = do
             , (LSKL 1, ("", do
                         scratchInteractOrSelect
                           selectApproach
-                          setApproach
+                          (setApproach >=> warnOrSucceed)
                         reloadView))
             , (LSKL 2, ("", do
                         scratchInteractOrSelect
                           selectSTAR
-                          setSTAR
+                          (setSTAR >=> warnOrSucceed)
                         reloadView))
             , (LSKR 1, ("", do
                         scratchInteractOrSelect
                           selectApproachTransition
-                          setApproachTransition
+                          (setApproachTransition >=> warnOrSucceed)
                         reloadView))
             , (LSKR 2, ("", do
                         scratchInteractOrSelect
                           selectStarTransition
-                          setStarTransition
+                          (setStarTransition >=> warnOrSucceed)
                         reloadView))
             , (LSKL 5, ("RTE", loadView rteView))
             ]
@@ -854,13 +800,13 @@ fgErrorView err = do
     , mcduViewLSKBindings = mempty
     }
 
-withFGView :: (FGFSConnection -> MCDU ()) -> MCDU ()
+withFGView :: MCDU () -> MCDU ()
 withFGView go = do
   connMay <- gets mcduFlightgearConnection
   case connMay of
     Nothing -> fgErrorView "NO CONNECTION"
-    Just conn -> do
-      go conn `mcduCatches` handlers
+    Just _ -> do
+      go `mcduCatches` handlers
   where
     handlers :: [MCDUHandler ()]
     handlers =
@@ -892,15 +838,15 @@ withFGView go = do
             fgErrorView "ERROR"
       ]
 
-selectWith :: Text
+selectWith :: MCDU [ByteString]
            -> ByteString
            -> ByteString
            -> (ByteString -> MCDU Bool)
            -> ByteString
            -> MCDUView
            -> MCDU ()
-selectWith nasalFunc selectTitle warnMsg handleValue returnTitle returnView = do
-  itemsMay <- fgCallNasal nasalFunc ()
+selectWith getItems selectTitle warnMsg handleValue returnTitle returnView = do
+  itemsMay <- getItems
   case itemsMay of
     [] -> do
       scratchWarn warnMsg
@@ -920,169 +866,86 @@ warnOrSucceed (Just e) = do
   scratchWarn e
   return False
 
-setDeparture :: Maybe ByteString -> MCDU Bool
-setDeparture icao = do
-  debugPrint $ colorize 0 $ "setDeparture: " <> (Text.pack . show $ icao)
-  fgCallNasalBool "fms.setDeparture" [icao]
-
-getDeparture :: MCDU (Maybe ByteString)
-getDeparture = fgCallNasal "fms.getDeparture" ()
-
-setDepartureRunway :: Maybe ByteString -> MCDU Bool
-setDepartureRunway rwyID =
-  fgCallNasalBool "fms.setDepartureRunway" [rwyID]
-
-getDepartureRunway :: MCDU (Maybe ByteString)
-getDepartureRunway =
-  fgCallNasal "fms.getDepartureRunway" ()
-
 selectDepartureRunway :: MCDU ()
 selectDepartureRunway =
   selectWith
-    "fms.listDepartureRunways"
+    listDepartureRunways
     "RUNWAY"
     "NO RUNWAYS"
     (setDepartureRunway . Just)
     "DEPARTURE"
     departureView
 
-setSID :: Maybe ByteString -> MCDU Bool
-setSID sidID = do
-  fgCallNasal "fms.setSID" [sidID] >>= warnOrSucceed
-
 selectSID :: MCDU ()
 selectSID =
   selectWith
-    "fms.listSIDs"
+    listSIDs
     "SID"
     "NO SIDS"
-    (setSID . Just)
+    ((setSID >=> warnOrSucceed) . Just)
     "DEPARTURE"
     departureView
 
-
-getSID :: MCDU (Maybe ByteString)
-getSID = fgCallNasal "fms.getSID" ()
-
-
-setSidTransition :: Maybe ByteString -> MCDU Bool
-setSidTransition sidID = do
-  fgCallNasal "fms.setSidTransition" [sidID] >>= warnOrSucceed
 
 selectSidTransition :: MCDU ()
 selectSidTransition =
   selectWith
-    "fms.listSidTransitions"
+    listSidTransitions
     "TRANSITION"
     "NO TRANSITIONS"
-    (setSidTransition . Just)
+    ((setSidTransition >=> warnOrSucceed) . Just)
     "DEPARTURE"
     departureView
 
 
-getSidTransition :: MCDU (Maybe ByteString)
-getSidTransition = fgCallNasal "fms.getSidTransition" ()
-
-setDestination :: Maybe ByteString -> MCDU Bool
-setDestination icao = fgCallNasalBool "fms.setDestination" [icao]
-
-getDestination :: MCDU (Maybe ByteString)
-getDestination = fgCallNasal "fms.getDestination" ()
-
-
-getDestinationRunway :: MCDU (Maybe ByteString)
-getDestinationRunway =
-  fgCallNasal "fms.getDestinationRunway" ()
-
-setDestinationRunway :: Maybe ByteString -> MCDU Bool
-setDestinationRunway rwyID =
-  fgCallNasalBool "fms.setDestinationRunway" [rwyID]
-
 selectDestinationRunway :: MCDU ()
 selectDestinationRunway =
   selectWith
-    "fms.listDestinationRunways"
+    listDestinationRunways
     "RUNWAY"
     "NO RUNWAYS"
     (setDestinationRunway . Just)
     "ARRIVAL"
     arrivalView
 
-setSTAR :: Maybe ByteString -> MCDU Bool
-setSTAR starID = do
-  fgCallNasal "fms.setSTAR" [starID] >>= warnOrSucceed
-
 selectSTAR :: MCDU ()
 selectSTAR =
   selectWith
-    "fms.listSTARs"
+    listSTARs
     "STAR"
     "NO STARS"
-    (setSTAR . Just)
+    ((setSTAR >=> warnOrSucceed) . Just)
     "ARRIVAL"
     arrivalView
 
-
-getSTAR :: MCDU (Maybe ByteString)
-getSTAR = fgCallNasal "fms.getSTAR" ()
-
-
-setStarTransition :: Maybe ByteString -> MCDU Bool
-setStarTransition starID = do
-  fgCallNasal "fms.setStarTransition" [starID] >>= warnOrSucceed
 
 selectStarTransition :: MCDU ()
 selectStarTransition =
   selectWith
-    "fms.listStarTransitions"
+    listStarTransitions
     "TRANSITION"
     "NO TRANSITIONS"
-    (setStarTransition . Just)
+    ((setStarTransition >=> warnOrSucceed) . Just)
     "ARRIVAL"
     arrivalView
 
-
-getStarTransition :: MCDU (Maybe ByteString)
-getStarTransition = fgCallNasal "fms.getStarTransition" ()
-
-
-setApproach :: Maybe ByteString -> MCDU Bool
-setApproach approachID = do
-  fgCallNasal "fms.setApproach" [approachID] >>= warnOrSucceed
 
 selectApproach :: MCDU ()
 selectApproach =
   selectWith
-    "fms.listApproaches"
+    listApproaches
     "APPROACH"
     "NO APPROACHES"
-    (setApproach . Just)
+    ((setApproach >=> warnOrSucceed) . Just)
     "ARRIVAL"
     arrivalView
-
-getApproach :: MCDU (Maybe ByteString)
-getApproach = fgCallNasal "fms.getApproach" ()
-
-
-setApproachTransition :: Maybe ByteString -> MCDU Bool
-setApproachTransition approachID = do
-  fgCallNasal "fms.setApproachTransition" [approachID] >>= warnOrSucceed
 
 selectApproachTransition :: MCDU ()
 selectApproachTransition =
   selectWith
-    "fms.listApproachTransitions"
+    listApproachTransitions
     "APPR TRANS"
     "NO TRANSITIONS"
-    (setApproachTransition . Just)
+    ((setApproachTransition >=> warnOrSucceed) . Just)
     "ARRIVAL"
     arrivalView
-
-getApproachTransition :: MCDU (Maybe ByteString)
-getApproachTransition = fgCallNasal "fms.getApproachTransition" ()
-
-cancelFlightplanEdits :: MCDU ()
-cancelFlightplanEdits = fgCallNasal "fms.cancelFlightplanEdits" ()
-
-commitFlightplanEdits :: MCDU ()
-commitFlightplanEdits = fgCallNasal "fms.commitFlightplanEdits" ()

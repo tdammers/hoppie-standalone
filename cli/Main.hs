@@ -7,8 +7,6 @@
 
 module Main where
 
-import Web.Hoppie.FGFS.Connection
-import Web.Hoppie.FGFS.NasalValue
 import Web.Hoppie.System
 import Web.Hoppie.TUI.Input
 import Web.Hoppie.TUI.MCDU
@@ -33,8 +31,6 @@ import qualified Data.Text as Text
 import Data.List
 import qualified Data.Map.Strict as Map
 import Data.Maybe
-import Data.String.QQ (s)
-import Data.Text (Text)
 import Data.Word
 import qualified Data.Yaml as YAML
 import Options.Applicative
@@ -505,60 +501,3 @@ runInputTest = do
     runLogger kcl inputChan = forever $ do
       c <- readCommand kcl inputChan
       print c
-
-runFGFSTest :: IO ()
-runFGFSTest = do
-  withFGFSConnection "localhost" 10000 putStrLn $ \conn -> do
-    (flightplan :: NasalGhost "flightplan") <- runNasal conn "return flightplan();"
-    print flightplan
-    print (encodeNasal flightplan)
-    runNasal_ conn $ "debug.dump(" <> encodeNasal flightplan <> "); return nil"
-    sidMay <- runNasal conn
-      [s| var fp = flightplan();
-          if (fp.sid == nil)
-            return nil;
-          else
-            return fp.sid.id;
-        |]
-    starMay <- runNasal conn
-      [s| var fp = flightplan();
-          if (fp.star == nil)
-            return nil;
-          else
-            return fp.star.id;
-        |]
-    waypoints <- runNasal conn
-      [s| var fp = flightplan();
-          var result = [];
-          for (var i = 0; i < fp.getPlanSize(); i += 1) {
-            var wp = fp.getWP(i);
-            var parent_id = nil;
-            if (wp.wp_parent != nil)
-              parent_id = wp.wp_parent.id;
-            append(result, [wp.wp_name, wp.wp_role, parent_id]);
-          }
-          return result;
-        |]
-    currentWP <- runNasal conn
-      [s| var fp = flightplan();
-          if (fp == nil)
-            return nil;
-          else
-            return fp.current;
-        |]
-    printf "SID: %s\n" (fromMaybe "n/a" sidMay :: Text)
-    printf "STAR: %s\n" (fromMaybe "n/a" starMay :: Text)
-    putStrLn "WAYPOINTS:"
-    zipWithM_
-        (\i (wp_name, wp_role, wp_parent_id) -> do
-          printf "%s %3i %-10s %-8s %s\n"
-            (if Just i == currentWP then "*" else " " :: Text)
-            i
-            wp_name
-            (fromMaybe "-" wp_role)
-            (fromMaybe "-" wp_parent_id)
-        )
-        ([0,1..] :: [Int]) (waypoints :: [(Text, Maybe Text, Maybe Text)])
-    when (null waypoints) $ do
-      putStrLn "--- NO WAYPOINTS ---"
-    runNasal_ conn "debug.dump(refTable);"

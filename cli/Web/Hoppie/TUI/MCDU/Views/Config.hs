@@ -6,11 +6,11 @@ module Web.Hoppie.TUI.MCDU.Views.Config
 where
 
 import Web.Hoppie.System
+import Web.Hoppie.FGFS.FMS
 import Web.Hoppie.TUI.MCDU.Draw
 import Web.Hoppie.TUI.MCDU.Monad
 import Web.Hoppie.TUI.MCDU.Operations
 import Web.Hoppie.TUI.MCDU.Views.Enum
-import Web.Hoppie.TUI.MCDU.FGNasal
 import Web.Hoppie.TUI.Output
 import Web.Hoppie.TUI.StringUtil
 
@@ -227,7 +227,7 @@ configView = defView
           syncCallsign <- gets mcduFlightgearSyncCallsign
           callsignLocal <- lift getCallsign
           callsignFG <- if fgConnected then
-                          fgCallNasalDef Nothing "fms.getFGCallsign" ()
+                          getFGCallsign
                         else
                           return Nothing
 

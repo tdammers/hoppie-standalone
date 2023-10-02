@@ -15,10 +15,10 @@ import qualified Web.Hoppie.CPDLC.Message as CPDLC
 import qualified Web.Hoppie.CPDLC.MessageTypes as CPDLC
 import Web.Hoppie.System
 import Web.Hoppie.FGFS.Connection
+import Web.Hoppie.FGFS.FMS
 import Web.Hoppie.TUI.MCDU.Draw
 import Web.Hoppie.TUI.MCDU.HttpServer
 import Web.Hoppie.TUI.MCDU.Keys
-import Web.Hoppie.TUI.MCDU.FGNasal
 import Web.Hoppie.TUI.MCDU.Monad
 import Web.Hoppie.TUI.QR
 import Web.Hoppie.TUI.StringUtil
@@ -52,7 +52,7 @@ mcduGetCallsign = do
   fgsync <- gets mcduFlightgearSyncCallsign
   fgAvail <- gets (isJust . mcduFlightgearConnection)
   when (fgsync && fgAvail) $ do
-    fgCallsign <- fgCallNasalDef Nothing "fms.getFGCallsign" ()
+    fgCallsign <- getFGCallsign
     mapM_ (lift . setCallsign) fgCallsign
   lift getCallsign
 
@@ -62,7 +62,7 @@ mcduSetCallsign cs = do
   fgsync <- gets mcduFlightgearSyncCallsign
   fgAvail <- gets (isJust . mcduFlightgearConnection)
   when (fgsync && fgAvail) $ do
-    fgCallNasal "fms.setFGCallsign" [cs]
+    setFGCallsign cs
 
 addLskBinding :: LSK -> Colored ByteString -> MCDU () -> MCDU ()
 addLskBinding lsk label action =
@@ -361,6 +361,7 @@ handleKey key =
     MCDUFunction FPL -> loadViewByID FPLView
     MCDUFunction RTE -> loadViewByID RTEView
     MCDUFunction NAV -> loadViewByID NAVView
+    MCDUFunction PROG -> loadViewByID PROGView
     MCDUFunction Menu -> loadViewByID MainMenuView
 
     MCDUFunction DEL ->
@@ -447,7 +448,7 @@ handleMCDUEvent ev = do
         }
       syncCS <- gets mcduFlightgearSyncCallsign
       when syncCS $ do
-        cs <- fgCallNasalDef Nothing "fms.getFGCallsign" ()
+        cs <- getFGCallsign
         forM_ cs $ lift . setCallsign
       reloadView
 

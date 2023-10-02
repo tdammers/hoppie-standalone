@@ -3,6 +3,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE FlexibleInstances #-}
 
 module Web.Hoppie.TUI.MCDU.Monad
 ( module Web.Hoppie.TUI.MCDU.Monad
@@ -12,14 +13,17 @@ where
 
 import Web.Hoppie.System
 import Web.Hoppie.FGFS.Connection
+import Web.Hoppie.FGFS.Monad
 import Web.Hoppie.TUI.MCDU.Draw
 import Web.Hoppie.TUI.MCDU.HttpServer
 import Web.Hoppie.TUI.MCDU.Keys
+import Web.Hoppie.FGFS.NasalValue
 import Web.Hoppie.TUI.Output
 import Web.Hoppie.TUI.StringUtil
 import Web.Hoppie.Telex
 import Web.Hoppie.TUI.MCDU.Views.Enum
 
+import qualified Data.Text as Text
 import Control.Concurrent
 import Control.Concurrent.Async
 import Control.Concurrent.STM
@@ -30,6 +34,7 @@ import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BS8
 import Data.Map (Map)
+import Data.Maybe
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Vector as Vector
@@ -187,6 +192,54 @@ type MCDU = StateT MCDUState Hoppie
 runMCDU :: (TypedMessage -> Hoppie ()) -> MCDU a -> Hoppie a
 runMCDU rawSend = flip evalStateT defMCDUState { mcduSendMessage = rawSend }
 
+instance MonadFG MCDU where
+  withFGNasalDef defval action = do
+    connMay <- gets mcduFlightgearConnection
+    case connMay of
+      Nothing ->
+        handleError "NO CONNECTION" Nothing
+      Just conn -> do
+        action conn `mcduCatches` handlers
+    where
+
+      -- handleError :: ByteString -> Maybe String -> MCDU a
+      handleError scratchTxt logTxt = do
+        forM_ logTxt $ debugPrint . colorize red . Text.pack
+        scratchWarn scratchTxt
+        return defval
+
+      -- handlers :: [MCDUHandler a]
+      handlers =
+        [ MCDUHandler $ \case
+            NasalUnexpected expected found -> do
+              handleError "SERVER ERROR" . Just $
+                "Nasal value error: expected " <> expected <> ", but found " <> found
+            NasalMissingKey key -> do
+              handleError "SERVER ERROR" . Just $
+                "Nasal value error: map key " <> key <> "missing"
+        , MCDUHandler $ \case
+            NasalRuntimeError msg stackTrace -> do
+              handleError "SERVER ERROR" . Just $
+                  "Nasal runtime error:" <> msg <> "\n" <>
+                  unlines
+                    [ fromMaybe "?" fileMay <> ":" <> maybe "-" show lineMay
+                    | (fileMay, lineMay) <- stackTrace
+                    ]
+        , MCDUHandler $ \case
+            JSONDecodeError err -> do
+              handleError "JSON ERROR" . Just $ "JSON decoder error: " <> err
+        , MCDUHandler $ \case
+            FGFSConnectionClosed ->
+              handleError "CONNECTION CLOSED" . Just $ "FlightGear connection closed."
+            FGFSEndOfStream ->
+              handleError "NETWORK ERROR" . Just $ "Unexpected end of stream"
+            FGFSSocketError err ->
+              handleError "NETWORK ERROR" . Just $ show err
+            FGFSDNSError hostname ->
+              handleError "DNS ERROR" . Just $ "DNS lookup failure trying to resolve " ++ show hostname
+        , MCDUHandler $ \(e :: SomeException) -> do
+              handleError "ERROR" . Just $ "Error:\n" <> show e
+        ]
 rawPrintColored :: PutStr a => Colored a -> IO ()
 rawPrintColored (Colored []) = do
   resetFG

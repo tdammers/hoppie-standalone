@@ -11,4 +11,5 @@ data ViewID
   | FPLView
   | RTEView
   | NAVView
+  | PROGView
   deriving (Show, Eq, Ord)
