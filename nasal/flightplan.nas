@@ -30,6 +30,11 @@ var updateFuelSampler = func {
     }
 };
 
+# Update fuel sampler twice, so that the current fuel field is already filled
+updateFuelSampler();
+updateFuelSampler();
+
+
 var getFuelFlow = func {
     return fuelSamplerVars.ffKG;
 };
@@ -209,6 +214,10 @@ var getProgressInfo = func () {
             if (wp.wp_type == 'runway') {
                 wpDest = wp;
                 break;
+            }
+            if (wp.wp_role == 'approach' and fp.destination != nil and
+                wp.wp_name == fp.destination.id) {
+                wpDest = wp;
             }
         }
     }
