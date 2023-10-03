@@ -7,31 +7,34 @@
 module Web.Hoppie.TUI.MCDU.Views.FGFS
 where
 
+import Web.Hoppie.FGFS.FMS as FMS
+import Web.Hoppie.FGFS.NasalValue
 import Web.Hoppie.TUI.MCDU.Draw
 import Web.Hoppie.TUI.MCDU.Monad
 import Web.Hoppie.TUI.MCDU.Operations
-import Web.Hoppie.TUI.StringUtil
 import Web.Hoppie.TUI.MCDU.Views.Enum
-import Web.Hoppie.FGFS.NasalValue
-import Web.Hoppie.FGFS.FMS as FMS
+import Web.Hoppie.TUI.MCDU.Views.Common
+import Web.Hoppie.TUI.StringUtil
+import Web.Hoppie.Telex
 import Web.Hoppie.Trans
 
+import Control.Exception
+import Control.Monad
+import Control.Monad.Except (Except, runExcept, throwError)
+import Control.Monad.State
+import Data.ByteString (ByteString)
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Char8 as BS8
+import Data.Char (isDigit)
+import Data.IORef
+import qualified Data.Map.Strict as Map
+import Data.Maybe
 import Data.Text (Text)
 import qualified Data.Text as Text
-import Data.ByteString (ByteString)
-import qualified Data.ByteString.Char8 as BS8
-import Control.Monad.State
-import Control.Monad
-import Text.Printf
 import Data.Text.Encoding
-import Data.Maybe
-import Control.Exception
-import qualified Data.Map.Strict as Map
-import Data.IORef
-import Control.Monad.Except (Except, runExcept, throwError)
-import Data.Char (isDigit)
-import Text.Read (readMaybe)
 import Data.Word
+import Text.Printf
+import Text.Read (readMaybe)
 
 formatETE :: Double -> String
 formatETE minutesRaw =
@@ -728,48 +731,111 @@ rteViewLoad = withFGView $ do
   destinationMay <- getDestination
   callsign <- lift getCallsign
   flightplanModified <- hasFlightplanModifications
+  routeLegs <- getRoute
+  curPage <- gets (mcduViewPage . mcduView)
+  let (numRoutePages, curRouteLegs) = paginateWithHeadroom 2 6 (curPage - 1) routeLegs
+      numPages = numRoutePages + 1
+
+  let setViaTo :: Maybe ByteString -> MCDU Bool
+      setViaTo Nothing =
+        return False
+      setViaTo (Just viaToStr) = do
+        let (viaStr, r) = BS.span (/= ord8 '.') viaToStr
+            toStr = BS.drop 1 r
+        let goResult result = do
+              case result of
+                Just err -> do
+                  scratchWarn err
+                Nothing -> do
+                  return ()
+              loadView rteView
+              return ()
+        if BS.null toStr then do
+          mcduResolveWaypoint "RTE" viaStr $ \case
+            Nothing -> do
+              scratchWarn "NO WPT"
+              return ()
+            Just wp -> do
+              result <- appendDirectTo wp
+              releaseWaypointCandidate wp
+              goResult result
+        else do
+          mcduResolveWaypoint "RTE" toStr $ \case
+            Nothing -> do
+              scratchWarn "NO WPT"
+              return ()
+            Just wp -> do
+              result <- appendViaTo viaStr wp
+              releaseWaypointCandidate wp
+              goResult result
+        return True
+      getViaTo :: MCDU (Maybe ByteString)
+      getViaTo = return Nothing
+
   modifyView $ \v -> v
-    { mcduViewNumPages = 1
+    { mcduViewNumPages = numPages
     , mcduViewTitle = if flightplanModified then "MOD RTE" else "ACT RTE"
-    , mcduViewLSKBindings = Map.fromList $
-        [ (LSKL 0, ("", do
-                    scratchInteract
-                      setDeparture
-                      getDeparture
-                    reloadView))
-        , (LSKL 2, ("CLEAR", clearFlightplan >> reloadView))
-        ] ++
-        [ (LSKL 4, ("DEPARTURE", loadView departureView))
-        | isJust departureMay
-        ] ++
-        [ (LSKR 0, ("", do
-                    scratchInteract
-                      setDestination
-                      getDestination
-                    reloadView))
-        , (LSKR 1, ("", do
-                    scratchInteract
-                      (maybe (return False) (\c -> mcduSetCallsign c >> return True))
-                      (Just <$> lift getCallsign)
-                    reloadView))
-        ] ++
-        [ (LSKR 4, ("ARRIVAL", loadView arrivalView))
-        | isJust destinationMay
-        ]
-        ++
-        [ (LSKL 5, ("CANCEL", cancelFlightplanEdits >> reloadView)) | flightplanModified ]
-        ++
-        [ (LSKR 5, ("CONFIRM", commitFlightplanEdits >> reloadView)) | flightplanModified ]
-    , mcduViewDraw = do
-        mcduPrint 1 1 white "ORIGIN"
-        mcduPrint 1 2 green (fromMaybe "----" departureMay)
-        mcduPrintR (screenW - 1) 1 white "DEST"
-        mcduPrintR (screenW - 1) 2 green (fromMaybe "----" destinationMay)
-        mcduPrint 1 3 white "CO RTE"
-        mcduPrint 1 4 green "----------"
-        mcduPrintR (screenW - 1) 3 white "FLT NO"
-        mcduPrintR (screenW - 1) 4 green callsign
     }
+
+  case curPage of
+    0 -> do
+      modifyView $ \v -> v
+        { mcduViewLSKBindings = Map.fromList $
+            [ (LSKL 0, ("", do
+                        scratchInteract
+                          setDeparture
+                          getDeparture
+                        reloadView))
+            , (LSKL 2, ("CLEAR", clearFlightplan >> reloadView))
+            ] ++
+            [ (LSKL 4, ("DEPARTURE", loadView departureView))
+            | isJust departureMay
+            ] ++
+            [ (LSKR 0, ("", do
+                        scratchInteract
+                          setDestination
+                          getDestination
+                        reloadView))
+            , (LSKR 1, ("", do
+                        scratchInteract
+                          (maybe (return False) (\c -> mcduSetCallsign c >> return True))
+                          (Just <$> lift getCallsign)
+                        reloadView))
+            ] ++
+            [ (LSKR 3, ("APPEND", scratchInteract setViaTo getViaTo)) ] ++
+            [ (LSKR 4, ("ARRIVAL", loadView arrivalView))
+            | isJust destinationMay
+            ]
+            ++
+            [ (LSKL 5, ("CANCEL", cancelFlightplanEdits >> reloadView)) | flightplanModified ]
+            ++
+            [ (LSKR 5, ("CONFIRM", commitFlightplanEdits >> reloadView)) | flightplanModified ]
+        , mcduViewDraw = do
+            mcduPrint 1 1 white "ORIGIN"
+            mcduPrint 1 2 green (fromMaybe "----" departureMay)
+            mcduPrintR (screenW - 1) 1 white "DEST"
+            mcduPrintR (screenW - 1) 2 green (fromMaybe "----" destinationMay)
+            mcduPrint 1 3 white "CO RTE"
+            mcduPrint 1 4 green "----------"
+            mcduPrintR (screenW - 1) 3 white "FLT NO"
+            mcduPrintR (screenW - 1) 4 green callsign
+        }
+    _ -> do
+      let offset = 6 * (curPage - 1)
+      modifyView $ \v -> v
+        { mcduViewLSKBindings = mempty
+        , mcduViewDraw = do
+            mcduPrint  1 1 white "VIA"
+            mcduPrint 10 1 white "TO"
+            zipWithM_ (\n leg -> do
+                mcduPrint  1 (n * 2 + 2) green (fromMaybe "DCT" $ routeLegVia leg)
+                mcduPrint 10 (n * 2 + 2) green (routeLegTo leg)
+              ) [0,1..] curRouteLegs
+            when (length curRouteLegs < 6) $ do
+              let n = length curRouteLegs
+              mcduPrint  1 (n * 2 + 2) green "-----"
+              mcduPrint 10 (n * 2 + 2) green "-----"
+        }
 
 selectView :: ByteString -> [ByteString] -> ByteString -> (Maybe ByteString -> MCDU ()) -> MCDUView
 selectView title options returnLabel handleResult= defView

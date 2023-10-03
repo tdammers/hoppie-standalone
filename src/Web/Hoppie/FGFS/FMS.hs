@@ -64,6 +64,19 @@ instance FromNasal FPLeg where
       <*> fromNasalFieldMaybe "efob" n
       <*> fromNasalFieldMaybe "ete" n
 
+data RouteLeg =
+  RouteLeg
+    { routeLegVia :: Maybe ByteString
+    , routeLegTo :: ByteString
+    }
+    deriving (Show)
+
+instance FromNasal RouteLeg where
+  fromNasal n =
+    RouteLeg
+      <$> fromNasalFieldMaybe "via" n
+      <*> fromNasalField "to" n
+
 data WaypointCandidate =
   WaypointCandidate
     { wpID :: Text
@@ -165,6 +178,18 @@ insertDirect fromWPMay toWP = do
     Just err -> return $ Left err
     Nothing -> return $ Right ()
 
+getRoute :: (MonadFG m) => m [RouteLeg]
+getRoute =
+  fgCallNasal "fms.getRoute" ()
+
+appendViaTo :: (MonadFG m) => ByteString -> WaypointCandidate -> m (Maybe ByteString)
+appendViaTo via toWP =
+  fgCallNasal "fms.appendViaTo" (via, wpValue toWP)
+
+appendDirectTo :: (MonadFG m) => WaypointCandidate -> m (Maybe ByteString)
+appendDirectTo toWP =
+  fgCallNasal "fms.appendDirectTo" (wpValue toWP)
+
 resolveLeg :: (MonadFG m) => ByteString -> (Maybe WaypointCandidate -> m ()) -> m ()
 resolveLeg name cont = do
   candidate :: Maybe WaypointCandidate <- fgCallNasalDef Nothing "fms.getFPLegIndex" [name]
@@ -209,8 +234,8 @@ setFPLegSpeed n spd restr = fgCallNasalDef Nothing "fms.setLegSpeed" (n, spd, re
 setFPLegAltitude :: (MonadFG m) => Int -> Maybe Int -> ByteString -> m (Maybe ByteString)
 setFPLegAltitude n spd restr = fgCallNasalDef Nothing "fms.setLegAltitude" (n, spd, restr)
 
-clearFlightplan :: (MonadFG m) => m ()
-clearFlightplan = fgCallNasal "fms.clearFlightplan" ()
+clearFlightplan :: (MonadFG m) => m Bool
+clearFlightplan = fgCallNasalBool "fms.clearFlightplan" ()
 
 listDepartureRunways :: (MonadFG m) => m [ByteString]
 listDepartureRunways = fgCallNasal "fms.listDepartureRunways" ()

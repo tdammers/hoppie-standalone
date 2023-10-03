@@ -35,7 +35,10 @@ paginateWithHeadroom :: Int
                      -> [a]
                      -> (Int, [a])
 paginateWithHeadroom headroom itemsPerPage page items =
-  let pageItems = take itemsPerPage . drop (itemsPerPage * page) $ items
+  let pageItems = if page < 0 then
+                    []
+                  else
+                    take itemsPerPage . drop (itemsPerPage * page) $ items
       numPages = (length items + headroom + itemsPerPage - 1) `div` itemsPerPage
   in (numPages, pageItems)
 

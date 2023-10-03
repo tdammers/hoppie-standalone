@@ -172,7 +172,7 @@ var getFlightplanLegs = func (pageSize = nil, curPage = nil, offset = nil) {
             append(result,
                     removeNilFields(
                         { "name": wp.wp_name
-                        , "hdg": math.round(wp.leg_bearing)
+                        , "hdg": math.round(geo.normdeg(wp.leg_bearing))
                         , "ldist": wp.leg_distance
                         , "cdist": wp.distance_along_route
                         , "rdist": distanceRemaining
@@ -415,6 +415,34 @@ var insertDirect = func (wp, from) {
     return nil;
 };
 
+var getRoute = func {
+    var fp = fms.getVisibleFlightplan();
+    var curParent = 'DCT';
+    var curName = nil;
+    var entries = [];
+    for (var i = 0; i < fp.getPlanSize(); i += 1) {
+        var wp = fp.getWP(i);
+        printf("%s %s", wp.wp_name, wp.wp_role);
+        if (wp.wp_role == nil) {
+            var parent = wp.wp_parent;
+            var parentName = 'DCT';
+            if (parent != nil)
+                parentName = parent.id;
+            if (parentName != curParent or parentName == 'DCT') {
+                if (curParent != nil and curName != nil) {
+                    append(entries, { 'via': curParent, 'to': curName });
+                }
+            }
+            curParent = parentName;
+            curName = wp.wp_name;
+        }
+    }
+    if (curParent != nil and curName != nil) {
+        append(entries, { 'via': curParent, 'to': curName });
+    }
+    return entries;
+};
+
 var insertDirectFP = func (toWP, fromWP) {
     var fp = fms.getVisibleFlightplan();
     var acpos = geo.aircraft_position();
@@ -442,6 +470,64 @@ var insertDirectFP = func (toWP, fromWP) {
         }
         fp.insertWP(createDiscontinuity(), fromIndex + 1);
         fp.current = fpIndex;
+    }
+    return nil;
+};
+
+appendViaTo = func (via, toWP) {
+    var leg = createViaTo(via, toWP);
+    var fp = fms.getVisibleFlightplan();
+    var insertIndex = 0;
+
+    for (var i = 1; i < fp.getPlanSize(); i += 1) {
+        var wp = fp.getWP(i);
+        if (wp != nil) {
+            # print(wp.wp_name);
+            # print(wp.wp_type);
+            # print(wp.wp_role);
+        
+            if (wp.wp_type == 'runway' or
+                    wp.wp_role == 'approach' or
+                    wp.wp_role == 'star') {
+                insertIndex = i;
+                break;
+            }
+        }
+    }
+
+    fp = fms.getModifyableFlightplan();
+
+    if (insertIndex != nil) {
+        fp.insertWPAfter(leg, insertIndex - 1);
+    }
+    return nil;
+};
+
+appendDirectTo = func (toWP) {
+    var leg = createWPFrom(toWP);
+    var fp = fms.getVisibleFlightplan();
+    var insertIndex = 0;
+
+    for (var i = 1; i < fp.getPlanSize(); i += 1) {
+        var wp = fp.getWP(i);
+        if (wp != nil) {
+            # print(wp.wp_name);
+            # print(wp.wp_type);
+            # print(wp.wp_role);
+        
+            if (wp.wp_type == 'runway' or
+                    wp.wp_role == 'approach' or
+                    wp.wp_role == 'star') {
+                insertIndex = i;
+                break;
+            }
+        }
+    }
+
+    fp = fms.getModifyableFlightplan();
+
+    if (insertIndex != nil) {
+        fp.insertWPAfter(leg, insertIndex - 1);
     }
     return nil;
 };
@@ -865,6 +951,10 @@ var fms = {
     'insertDirectFP': insertDirectFP,
     'setLegAltitude': setLegAltitude,
     'setLegSpeed': setLegSpeed,
+
+    'getRoute': getRoute,
+    'appendViaTo': appendViaTo,
+    'appendDirectTo': appendDirectTo,
 
     'getGroundspeed': getGroundspeed,
     'getFuelFlow': getFuelFlow,
