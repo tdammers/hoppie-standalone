@@ -90,6 +90,7 @@ data ProgressInfo =
     { progressCurrent :: Maybe FPLeg
     , progressNext :: Maybe FPLeg
     , progressDestination :: Maybe FPLeg
+    , progressFOB :: Maybe Double
     }
     deriving (Show)
 
@@ -99,6 +100,7 @@ instance FromNasal ProgressInfo where
       <$> fromNasalFieldMaybe "current" nv
       <*> fromNasalFieldMaybe "next" nv
       <*> fromNasalFieldMaybe "destination" nv
+      <*> fromNasalFieldMaybe "fob" nv
 
 releaseWaypointCandidate :: (MonadFG m) => WaypointCandidate -> m ()
 releaseWaypointCandidate candidate =

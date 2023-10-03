@@ -216,6 +216,7 @@ var getProgressInfo = func () {
         info.next = makeLegInfo(wpNext, totalDistance, totalDistanceRemaining, fuelOnBoard, fuelGS, fuelFlow);
     if (wpDest != nil)
         info.destination = makeLegInfo(wpDest, totalDistance, totalDistanceRemaining, fuelOnBoard, fuelGS, fuelFlow);
+    info.fob = fuelOnBoard;
     return info;
 };
 

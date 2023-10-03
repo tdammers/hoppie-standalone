@@ -351,28 +351,48 @@ progViewLoad = withFGView $ do
   let fuelFactor = case massUnit of
                       Kilograms -> 1
                       Pounds -> 1 / lbs2kg
+      massUnitStr = case massUnit of
+                      Kilograms -> "KG"
+                      Pounds -> "LBS"
   debugPrint $ colorize 0 $ Text.pack $ show progress
   modifyView $ \v -> v
     { mcduViewDraw = do
-        let printWP color y wp = do
+        let printWP color y (Just wp) = do
               mcduPrint 0 y color (encodeUtf8 . Text.take 7 . Text.replace "-" "" $ legName wp)
               forM_ (legETE wp) $ \ete ->
                 mcduPrint 13 y color (BS8.pack $ formatETE ete)
               forM_ (legRouteDist wp) $ \dist ->
                 mcduPrintR 12 y color (BS8.pack $ formatDistanceCompact dist)
               mcduPrintColoredR 24 y (formatEFOB color ((* fuelFactor) <$> legEFOB wp))
+            printWP color y Nothing = do
+              mcduPrint 0 y color "-----"
+              mcduPrintColoredR 24 y (formatEFOB color Nothing)
         mcduPrint 1 1 white "TO"
         mcduPrint 8 1 white "DIST"
-        mcduPrint 14 1 white "ETA"
-        mcduPrint 19 1 white "FUEL"
-
-        forM_ (progressCurrent =<< progress) $ printWP magenta 2
-        forM_ (progressNext =<< progress) $ printWP green 4
-        forM_ (progressDestination =<< progress) $ printWP green 6
+        mcduPrint 14 1 white "ETE"
+        mcduPrint 20 1 white "FUEL"
+        printWP magenta 2 (progressCurrent =<< progress)
 
         mcduPrint 1 3 white "NEXT"
+        printWP green 4 (progressNext =<< progress)
 
         mcduPrint 1 5 white "DEST"
+        printWP green 6 (progressDestination =<< progress)
+
+        mcduPrintR (screenW - 1) 7 white "FOB"
+        mcduPrintColoredR (screenW - 1) 8 $
+          ( colorize green $
+            maybe
+              "-----"
+              (\fob -> 
+                let fobU = floor (fob * fuelFactor) :: Int
+                in BS8.pack $ printf "%2i'%03i" (fobU `div` 1000) (fobU `mod` 1000)
+              )
+              (progressFOB =<< progress)
+          ) <>
+          " " <>
+          ( colorize white massUnitStr )
+
     }
 
 fplView :: MCDUView
