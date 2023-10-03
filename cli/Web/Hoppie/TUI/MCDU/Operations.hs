@@ -63,6 +63,7 @@ mcduSetCallsign cs = do
   fgAvail <- gets (isJust . mcduFlightgearConnection)
   when (fgsync && fgAvail) $ do
     setFGCallsign cs
+  persistData
 
 addLskBinding :: LSK -> Colored ByteString -> MCDU () -> MCDU ()
 addLskBinding lsk label action =
@@ -79,9 +80,10 @@ removeLskBinding lsk =
   }
 
 clearTelexBody :: MCDU ()
-clearTelexBody =
+clearTelexBody = do
   modify $ \s -> s
     { mcduTelexBody = Nothing }
+  persistData
 
 sendMessage :: TypedMessage -> MCDU ()
 sendMessage tm = do
@@ -210,10 +212,11 @@ sendCpdlc tyIDs toMay mrnMay varDict = do
       return False
 
 setReferenceAirport :: MCDU ()
-setReferenceAirport =
+setReferenceAirport = do
   scratchInteract
     (\val -> True <$ modify (\s -> s { mcduReferenceAirport = val }))
     (gets mcduReferenceAirport)
+  persistData
 
 loadViewByID :: ViewID -> MCDU ()
 loadViewByID viewID = do
@@ -401,6 +404,9 @@ handleMCDUEvent ev = do
     TickEvent -> do
       autoReload <- gets (mcduViewAutoReload . mcduView)
       when autoReload reloadView
+
+    PersistEvent -> do
+      persistData
 
     DownlinkEvent mtm -> do
       debugPrint $ colorize cyan $ wordJoin

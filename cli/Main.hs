@@ -329,7 +329,7 @@ main = do
                 , onDownlink = handleDownlink eventChan
                 , onNetworkStatus = handleNetworkStatus eventChan
                 , onCpdlcLogon = handleCurrentDataAuthority eventChan
-                , onDataUpdated = handleDataUpdated (hoppieMainPersistenceFile hmo)
+                , onDataUpdated = handleDataUpdated eventChan
                 }
   runInput inputChan
     `race_`
@@ -397,11 +397,9 @@ handleCurrentDataAuthority :: TChan MCDUEvent -> Maybe ByteString -> Hoppie ()
 handleCurrentDataAuthority eventChan = do
   liftIO . atomically . writeTChan eventChan . CurrentDataAuthorityEvent
 
-handleDataUpdated :: Maybe FilePath -> Hoppie ()
-handleDataUpdated Nothing = return ()
-handleDataUpdated (Just ppath) = do
-  pdata <- getPersistentData
-  liftIO $ JSON.encodeFile ppath pdata
+handleDataUpdated :: TChan MCDUEvent -> Hoppie ()
+handleDataUpdated eventChan = do
+  liftIO . atomically . writeTChan eventChan $ PersistEvent
 
 data HoppieMainOptions =
   HoppieMainOptions
@@ -445,6 +443,7 @@ applyHoppieMainOptions hmo m =
         isJust (hoppieMainFlightgearHostname hmo) &&
         isJust (hoppieMainFlightgearPort hmo)
     , mcduHeadless = hoppieMainHeadless hmo
+    , mcduPersistPath = hoppieMainPersistenceFile hmo
     }
 
 
@@ -452,25 +451,25 @@ hoppieMain :: HoppieMainOptions
            -> TChan MCDUEvent
            -> (TypedMessage -> Hoppie ()) -> Hoppie ()
 hoppieMain hmo eventChan rawSend = do
-  forM_ (hoppieMainPersistenceFile hmo) $ \ppath -> do
-    sessionMay <- liftIO $ do
-        (JSON.eitherDecodeFileStrict' ppath >>= \case
-            Left e -> do
-              atomically $ writeTChan eventChan $ LogEvent ("Failed to load session: " <> Text.pack e)
-              return Nothing
-            Right session -> do
-              atomically $ writeTChan eventChan $ LogEvent "Session loaded"
-              return (Just session)
-          ) `catch` (\e -> do
-            if isDoesNotExistError e then do
-              atomically $ writeTChan eventChan $ LogEvent ("Session file does not exist: " <> Text.pack ppath)
-              return Nothing
-            else do
-              atomically $ writeTChan eventChan $ LogEvent ("Error reading session file " <> Text.pack ppath <> ": " <> Text.pack (show e))
-              return Nothing
-          )
-    forM_ sessionMay restorePersistentData
+  let sessionPathMay = hoppieMainPersistenceFile hmo 
+  sessionMay <- fmap join $ forM sessionPathMay $ \ppath -> liftIO $ do
+      (JSON.eitherDecodeFileStrict' ppath >>= \case
+          Left e -> do
+            atomically $ writeTChan eventChan $ LogEvent ("Failed to load session: " <> Text.pack e)
+            return Nothing
+          Right session -> do
+            atomically $ writeTChan eventChan $ LogEvent "Session loaded"
+            return (Just session)
+        ) `catch` (\e -> do
+          if isDoesNotExistError e then do
+            atomically $ writeTChan eventChan $ LogEvent ("Session file does not exist: " <> Text.pack ppath)
+            return Nothing
+          else do
+            atomically $ writeTChan eventChan $ LogEvent ("Error reading session file " <> Text.pack ppath <> ": " <> Text.pack (show e))
+            return Nothing
+        )
   runMCDU rawSend $ do
+    forM_ sessionMay restoreData
     modify (applyHoppieMainOptions hmo)
     mcduMain eventChan
 

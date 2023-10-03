@@ -4,6 +4,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE LambdaCase #-}
 
 module Web.Hoppie.TUI.MCDU.Monad
 ( module Web.Hoppie.TUI.MCDU.Monad
@@ -42,6 +43,9 @@ import Data.Word
 import System.IO
 import Text.Printf
 import Control.Exception
+import Data.Aeson (FromJSON (..), ToJSON (..), (.:), (.=))
+import qualified Data.Aeson as JSON
+import Data.Text.Encoding (encodeUtf8, decodeUtf8)
 
 {-# ANN module ("HLint: ignore redundant <$>" :: String) #-}
 
@@ -56,6 +60,7 @@ data MCDUEvent
   | TickEvent
   | FGFSConnectEvent FGFSConnection
   | FGFSDisconnectEvent
+  | PersistEvent
   deriving (Show)
 
 data ScratchVal
@@ -64,10 +69,39 @@ data ScratchVal
   | ScratchDel
   deriving (Show, Read, Eq, Ord)
 
+instance ToJSON ScratchVal where
+  toJSON ScratchEmpty = JSON.Null
+  toJSON (ScratchStr bs) = toJSON (decodeUtf8 bs)
+  toJSON ScratchDel = JSON.object [("special", "delete")]
+
+instance FromJSON ScratchVal where
+  parseJSON (JSON.Object obj) = do
+    special <- obj .: "special"
+    case special :: Text of
+      "delete" -> return ScratchDel
+      x -> fail $ "Invalid scratchpad special content: " ++ show x
+  parseJSON (JSON.String "") =
+    return ScratchEmpty
+  parseJSON j@(JSON.String _) =
+    ScratchStr . encodeUtf8 <$> parseJSON j
+  parseJSON JSON.Null =
+    return ScratchEmpty
+  parseJSON x = fail $ "Expected ScratchVal, but found " ++ show x
+
 data MassUnit
   = Kilograms
   | Pounds
   deriving (Show, Read, Eq, Ord, Enum, Bounded)
+
+instance ToJSON MassUnit where
+  toJSON Kilograms = JSON.String "kg"
+  toJSON Pounds = JSON.String "lb"
+
+instance FromJSON MassUnit where
+  parseJSON = JSON.withText "MassUnit" $ \case
+                  "kg" -> pure Kilograms
+                  "lb" -> pure Pounds
+                  x -> fail $ "Invalid mass unit: " ++ Text.unpack x
 
 data MCDUState =
   MCDUState
@@ -78,6 +112,7 @@ data MCDUState =
     , mcduResolveViewID :: ViewID -> MCDUView
 
     , mcduEventChan :: Maybe (TChan MCDUEvent)
+    , mcduPersistPath :: Maybe FilePath
 
     , mcduUnreadDLK :: Maybe Word
     , mcduUnreadCPDLC :: Maybe Word
@@ -121,6 +156,7 @@ defMCDUState =
     , mcduResolveViewID = const defView
 
     , mcduEventChan = Nothing
+    , mcduPersistPath = Nothing
 
     , mcduUnreadDLK = Nothing
     , mcduUnreadCPDLC = Nothing
@@ -152,6 +188,105 @@ defMCDUState =
     , mcduFlightgearHostname = Nothing
     , mcduFlightgearPort = Nothing
     , mcduFlightgearSyncCallsign = False
+    }
+
+data MCDUPersistState =
+  MCDUPersistState
+    { mcduPersistScratchpad :: ScratchVal
+    , mcduPersistScratchMessage :: Maybe ByteString
+
+    , mcduPersistUnreadDLK :: Maybe Word
+    , mcduPersistUnreadCPDLC :: Maybe Word
+
+    , mcduPersistAircraftType :: Maybe ByteString
+    , mcduPersistMassUnit :: MassUnit
+    , mcduPersistReferenceAirport :: Maybe ByteString
+    , mcduPersistTelexRecipient :: Maybe ByteString
+    , mcduPersistTelexBody :: Maybe ByteString
+    , mcduPersistClearanceType :: Maybe ByteString
+    , mcduPersistClearanceFacility :: Maybe ByteString
+    , mcduPersistClearanceDestination :: Maybe ByteString
+    , mcduPersistClearanceStand :: Maybe ByteString
+    , mcduPersistClearanceAtis :: Maybe Word8
+    }
+
+instance ToJSON MCDUPersistState where
+  toJSON s =
+    JSON.object
+    [ "scratchpad" .= mcduPersistScratchpad s
+    , "scratchMessage" .= (decodeUtf8 <$> mcduPersistScratchMessage s)
+    , "unreadDLK" .= mcduPersistUnreadDLK s
+    , "unreadCPDLC" .= mcduPersistUnreadCPDLC s
+    , "aircraftType" .= (decodeUtf8 <$> mcduPersistAircraftType s)
+    , "massUnit" .= mcduPersistMassUnit s
+    , "referenceAirport" .= (decodeUtf8 <$> mcduPersistReferenceAirport s)
+    , "telexRecipient" .= (decodeUtf8 <$> mcduPersistTelexRecipient s)
+    , "telexBody" .= (decodeUtf8 <$> mcduPersistTelexBody s)
+    , "clearanceType" .= (decodeUtf8 <$> mcduPersistClearanceType s)
+    , "clearanceFacility" .= (decodeUtf8 <$> mcduPersistClearanceFacility s)
+    , "clearanceDestination" .= (decodeUtf8 <$> mcduPersistClearanceDestination s)
+    , "clearanceStand" .= (decodeUtf8 <$> mcduPersistClearanceStand s)
+    , "clearanceAtis" .= (decodeUtf8 . BS.singleton <$> mcduPersistClearanceAtis s)
+    ]
+
+instance FromJSON MCDUPersistState where
+  parseJSON = JSON.withObject "MCDUPersistState" $ \obj ->
+    MCDUPersistState
+      <$> obj .: "scratchpad"
+      <*> (fmap encodeUtf8 <$> obj .: "scratchMessage")
+      <*> obj .: "unreadDLK"
+      <*> obj .: "unreadCPDLC"
+      <*> (fmap encodeUtf8 <$> obj .: "aircraftType")
+      <*> obj .: "massUnit"
+      <*> (fmap encodeUtf8 <$> obj .: "referenceAirport")
+      <*> (fmap encodeUtf8 <$> obj .: "telexRecipient")
+      <*> (fmap encodeUtf8 <$> obj .: "telexBody")
+      <*> (fmap encodeUtf8 <$> obj .: "clearanceType")
+      <*> (fmap encodeUtf8 <$> obj .: "clearanceFacility")
+      <*> (fmap encodeUtf8 <$> obj .: "clearanceDestination")
+      <*> (fmap encodeUtf8 <$> obj .: "clearanceStand")
+      <*> ((listToMaybe <=< fmap (BS.unpack . encodeUtf8)) <$> obj .: "clearanceAtis")
+
+getPersistentState :: MCDU MCDUPersistState
+getPersistentState = do
+  s <- get
+  return
+    MCDUPersistState
+      { mcduPersistScratchpad = mcduScratchpad s
+      , mcduPersistScratchMessage = mcduScratchMessage s
+
+      , mcduPersistUnreadDLK = mcduUnreadDLK s
+      , mcduPersistUnreadCPDLC = mcduUnreadCPDLC s
+
+      , mcduPersistAircraftType = mcduAircraftType s
+      , mcduPersistMassUnit = mcduMassUnit s
+      , mcduPersistReferenceAirport = mcduReferenceAirport s
+      , mcduPersistTelexRecipient = mcduTelexRecipient s
+      , mcduPersistTelexBody = mcduTelexBody s
+      , mcduPersistClearanceType = mcduClearanceType s
+      , mcduPersistClearanceFacility = mcduClearanceFacility s
+      , mcduPersistClearanceDestination = mcduClearanceDestination s
+      , mcduPersistClearanceStand = mcduClearanceStand s
+      , mcduPersistClearanceAtis = mcduClearanceAtis s
+      }
+
+restorePersistentState :: MCDUPersistState -> MCDU ()
+restorePersistentState ps =
+  modify $ \s -> s
+    { mcduScratchpad = mcduPersistScratchpad ps
+    , mcduScratchMessage = mcduPersistScratchMessage ps
+    , mcduUnreadDLK = mcduPersistUnreadDLK ps
+    , mcduUnreadCPDLC = mcduPersistUnreadCPDLC ps
+    , mcduAircraftType = mcduPersistAircraftType ps
+    , mcduMassUnit = mcduPersistMassUnit ps
+    , mcduReferenceAirport = mcduPersistReferenceAirport ps
+    , mcduTelexRecipient = mcduPersistTelexRecipient ps
+    , mcduTelexBody = mcduPersistTelexBody ps
+    , mcduClearanceType = mcduPersistClearanceType ps
+    , mcduClearanceFacility = mcduPersistClearanceFacility ps
+    , mcduClearanceDestination = mcduPersistClearanceDestination ps
+    , mcduClearanceStand = mcduPersistClearanceStand ps
+    , mcduClearanceAtis = mcduPersistClearanceAtis ps
     }
 
 data MCDUView =
@@ -268,6 +403,7 @@ modifyScratchpad :: (ScratchVal -> ScratchVal) -> MCDU ()
 modifyScratchpad f =  do
   modify $ \s -> s { mcduScratchpad = f (mcduScratchpad s) }
   redrawScratch
+  persistData
 
 reloadView :: MCDU ()
 reloadView = do
@@ -507,3 +643,35 @@ scratchClearWarn = do
   modify $ \s -> s { mcduScratchMessage = Nothing }
   redrawScratch
 
+data PersistentState =
+  PersistentState
+    { mcduState :: MCDUPersistState
+    , hoppieState :: PersistentHoppieData
+    }
+
+instance ToJSON PersistentState where
+  toJSON s =
+    JSON.object
+      [ "mcdu" .= mcduState s
+      , "hoppie" .= hoppieState s
+      ]
+
+instance FromJSON PersistentState where
+  parseJSON = JSON.withObject "PersistentState" $ \obj ->
+    PersistentState
+      <$> obj .: "mcdu"
+      <*> obj .: "hoppie"
+
+persistData :: MCDU ()
+persistData = do
+  hoppieData <- lift $ getPersistentData
+  mcduData <- getPersistentState
+  ppathMay <- gets mcduPersistPath
+  forM_ ppathMay $ \ppath -> do
+    let pdata = PersistentState mcduData hoppieData
+    liftIO $ JSON.encodeFile ppath pdata
+
+restoreData :: PersistentState -> MCDU ()
+restoreData pdata = do
+  lift $ restorePersistentData (hoppieState pdata)
+  restorePersistentState (mcduState pdata)
