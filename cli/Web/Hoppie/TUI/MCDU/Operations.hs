@@ -365,6 +365,7 @@ handleKey key =
     MCDUFunction RTE -> loadViewByID RTEView
     MCDUFunction NAV -> loadViewByID NAVView
     MCDUFunction PROG -> loadViewByID PROGView
+    MCDUFunction INIT -> loadViewByID INITView
     MCDUFunction Menu -> loadViewByID MainMenuView
 
     MCDUFunction DEL ->

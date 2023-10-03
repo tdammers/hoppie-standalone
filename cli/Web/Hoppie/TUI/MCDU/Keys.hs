@@ -37,6 +37,7 @@ data FunctionKey
   | RTE
   | NAV
   | PROG
+  | INIT
   deriving (Show, Read, Eq, Ord, Enum, Bounded)
 
 data MCDUKey

@@ -102,6 +102,45 @@ instance FromNasal ProgressInfo where
       <*> fromNasalFieldMaybe "destination" nv
       <*> fromNasalFieldMaybe "fob" nv
 
+data PerfInitData =
+  PerfInitData
+    { perfInitZFW :: Maybe Double
+    , perfInitBlockFuel :: Maybe Double
+    , perfInitMinTakeoffFuel :: Maybe Double
+    , perfInitReserveFuel :: Maybe Double
+    , perfInitContingencyFuel :: Maybe Double
+    }
+    deriving (Show, Eq)
+
+defPerfInitData :: PerfInitData
+defPerfInitData =
+  PerfInitData
+    { perfInitZFW = Nothing
+    , perfInitBlockFuel = Nothing
+    , perfInitMinTakeoffFuel = Nothing
+    , perfInitReserveFuel = Nothing
+    , perfInitContingencyFuel = Nothing
+    }
+
+instance ToNasal PerfInitData where
+  toNasal pd =
+    NasalHash $ Map.fromList
+      [ ("zfw", toNasal (perfInitZFW pd))
+      , ("blockFuel", toNasal (perfInitBlockFuel pd))
+      , ("toFuel", toNasal (perfInitMinTakeoffFuel pd))
+      , ("reserveFuel", toNasal (perfInitReserveFuel pd))
+      , ("contFuel", toNasal (perfInitContingencyFuel pd))
+      ]
+
+instance FromNasal PerfInitData where
+  fromNasal nv =
+    PerfInitData
+      <$> fromNasalFieldMaybe "zfw" nv
+      <*> fromNasalFieldMaybe "blockFuel" nv
+      <*> fromNasalFieldMaybe "toFuel" nv
+      <*> fromNasalFieldMaybe "reserveFuel" nv
+      <*> fromNasalFieldMaybe "contFuel" nv
+
 releaseWaypointCandidate :: (MonadFG m) => WaypointCandidate -> m ()
 releaseWaypointCandidate candidate =
   fgCallNasal "release" [wpValue candidate]
@@ -317,3 +356,12 @@ hasFlightplanModifications =
 
 deleteWaypoint :: (MonadFG m) => Int -> m Bool
 deleteWaypoint n = fgCallNasalBool "fms.deleteWaypoint" [n]
+
+getPerfInitData :: (MonadFG m) => m PerfInitData
+getPerfInitData = fgCallNasalDef defPerfInitData "fms.getPerfInitData" ()
+
+setPerfInitData :: (MonadFG m) => PerfInitData -> m ()
+setPerfInitData pd = fgCallNasal "fms.setPerfInitData" [pd]
+
+getFuelOnBoard :: (MonadFG m) => m (Maybe Double)
+getFuelOnBoard = fgCallNasalDef Nothing "fms.getFuelOnBoard" ()

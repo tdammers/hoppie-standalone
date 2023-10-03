@@ -6,6 +6,10 @@ if (!contains(mcdu, 'fuelSampler')) {
     mcdu.fuelSampler.simulatedTime = 1;
 }
 
+if (!contains(mcdu, 'perfInitData')) {
+    mcdu.perfInitData = {};
+}
+
 var fuelSamplerVars = {
     deltat: 10,
     lastKG: nil,
@@ -813,6 +817,17 @@ var isValidSTAR = func () {
     return contains(runways, runway);
 }
 
+var getPerfInitData = func {
+    return mcdu.perfInitData;
+}
+
+var setPerfInitData = func (data) {
+    foreach (var k; keys(data)) {
+        mcdu.perfInitData[k] = data[k];
+    }
+    return nil;
+}
+
 var fms = {
     '_updateFuelSampler': updateFuelSampler,
 
@@ -839,12 +854,15 @@ var fms = {
 
     'getGroundspeed': getGroundspeed,
     'getFuelFlow': getFuelFlow,
-    'getFuel': getFuelFlow,
+    'getFuelOnBoard': getFuelOnBoard,
     'getUTCMinutes': getUTCMinutes,
     'getFlightplanLegs': getFlightplanLegs,
     'getFlightplanSize': getFlightplanSize,
     'getCurrentLeg': getCurrentLeg,
     'getProgressInfo': getProgressInfo,
+
+    'getPerfInitData': getPerfInitData,
+    'setPerfInitData': setPerfInitData,
 
     'setDeparture': setDeparture,
     'getDeparture': getDeparture,

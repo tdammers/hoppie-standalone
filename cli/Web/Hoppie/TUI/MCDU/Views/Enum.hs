@@ -12,4 +12,5 @@ data ViewID
   | RTEView
   | NAVView
   | PROGView
+  | INITView
   deriving (Show, Eq, Ord)

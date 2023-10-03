@@ -337,6 +337,159 @@ parseAltitudeRestriction str
         _ -> throwError "INVALID"
       return (Just val, restriction)
 
+perfInitView :: MCDUView
+perfInitView = defView
+  { mcduViewTitle = "PERF INIT"
+  , mcduViewAutoReload = False
+  , mcduViewOnLoad = perfInitViewLoad
+  }
+
+perfInitViewLoad :: MCDU ()
+perfInitViewLoad = withFGView $ do
+  pdVar <- liftIO . newIORef =<< getPerfInitData
+
+  massUnit <- gets mcduMassUnit
+  let massFactor = case massUnit of
+                      Kilograms -> 1
+                      Pounds -> 1 / lbs2kg
+      massUnitStr = case massUnit of
+                      Kilograms -> "KG"
+                      Pounds -> "LBS"
+  let doLoad = do
+        pd <- liftIO $ readIORef pdVar
+        pdStored <- getPerfInitData
+        currentFuel <- getFuelOnBoard
+
+        let setZFW Nothing = do
+              liftIO $ writeIORef pdVar $ pd { perfInitZFW = Nothing }
+              return True
+            setZFW (Just val) = do
+              case readMaybe . BS8.unpack $ val of
+                Nothing -> do
+                  scratchWarn "INVALID"
+                  return False
+                Just x ->  do
+                  liftIO $ writeIORef pdVar $ pd { perfInitZFW = Just (x / massFactor) }
+                  return True
+            getZFW =
+              return $ BS8.pack . printf "%1.0f" . (* massFactor) <$> perfInitZFW pd
+
+        let setBlockFuel Nothing = do
+              liftIO $ writeIORef pdVar $ pd { perfInitBlockFuel = Nothing }
+              return True
+            setBlockFuel (Just val) = do
+              case readMaybe . BS8.unpack $ val of
+                Nothing -> do
+                  scratchWarn "INVALID"
+                  return False
+                Just x ->  do
+                  liftIO $ writeIORef pdVar $ pd { perfInitBlockFuel = Just (x / massFactor) }
+                  return True
+            getBlockFuel =
+              return $ BS8.pack . printf "%1.0f" . (* massFactor) <$> perfInitBlockFuel pd
+
+        let setMinTakeoffFuel Nothing = do
+              liftIO $ writeIORef pdVar $ pd { perfInitMinTakeoffFuel = Nothing }
+              return True
+            setMinTakeoffFuel (Just val) = do
+              case readMaybe . BS8.unpack $ val of
+                Nothing -> do
+                  scratchWarn "INVALID"
+                  return False
+                Just x ->  do
+                  liftIO $ writeIORef pdVar $ pd { perfInitMinTakeoffFuel = Just (x / massFactor) }
+                  return True
+            getMinTakeoffFuel =
+              return $ BS8.pack . printf "%1.0f" . (* massFactor) <$> perfInitMinTakeoffFuel pd
+
+        let setContingencyFuel Nothing = do
+              liftIO $ writeIORef pdVar $ pd { perfInitContingencyFuel = Nothing }
+              return True
+            setContingencyFuel (Just val) = do
+              case readMaybe . BS8.unpack $ val of
+                Nothing -> do
+                  scratchWarn "INVALID"
+                  return False
+                Just x ->  do
+                  liftIO $ writeIORef pdVar $ pd { perfInitContingencyFuel = Just (x / massFactor) }
+                  return True
+            getContingencyFuel =
+              return $ BS8.pack . printf "%1.0f" . (* massFactor) <$> perfInitContingencyFuel pd
+
+        let setReserveFuel Nothing = do
+              liftIO $ writeIORef pdVar $ pd { perfInitReserveFuel = Nothing }
+              return True
+            setReserveFuel (Just val) = do
+              case readMaybe . BS8.unpack $ val of
+                Nothing -> do
+                  scratchWarn "INVALID"
+                  return False
+                Just x ->  do
+                  liftIO $ writeIORef pdVar $ pd { perfInitReserveFuel = Just (x / massFactor) }
+                  return True
+            getReserveFuel =
+              return $ BS8.pack . printf "%1.0f" . (* massFactor) <$> perfInitReserveFuel pd
+
+        let confirmInit = do
+              setPerfInitData pd
+              reloadView
+
+            resetData = do
+              getPerfInitData >>= liftIO . writeIORef pdVar
+              reloadView
+
+            isModified getter = do
+              ((floor . (* 10) <$> getter pd) :: Maybe Int) /= (floor . (* 10) <$> getter pdStored)
+
+            fieldColor getter =
+              if isModified getter then
+                cyan
+              else
+                green
+
+            modificationsExist =
+              any isModified
+                [ perfInitZFW
+                , perfInitBlockFuel
+                , perfInitMinTakeoffFuel
+                , perfInitContingencyFuel
+                , perfInitReserveFuel
+                ]
+
+        modifyView $ \v -> v
+          { mcduViewTitle = "PERF INIT " <> massUnitStr
+          , mcduViewDraw = do
+              let formatMass :: Maybe Double -> ByteString
+                  formatMass = maybe "-----" (BS8.pack . printf "%7.0f" . (* massFactor))
+              mcduPrintR (screenW - 1) 1 white "ZFW"
+              mcduPrintR (screenW - 1) 2 (fieldColor perfInitZFW) $ formatMass (perfInitZFW pd)
+              mcduPrint 1 3 white "GAUGE"
+              mcduPrint 1 4 white $ formatMass currentFuel
+              mcduPrintR (screenW - 1) 3 white "BLOCK FUEL"
+              mcduPrintR (screenW - 1) 4 (fieldColor perfInitBlockFuel) $ formatMass (perfInitBlockFuel pd)
+              mcduPrintR (screenW - 1) 5 white "T/O FUEL"
+              mcduPrintR (screenW - 1) 6 (fieldColor perfInitMinTakeoffFuel) $ formatMass (perfInitMinTakeoffFuel pd)
+              mcduPrintR (screenW - 1) 7 white "CONT FUEL"
+              mcduPrintR (screenW - 1) 8 (fieldColor perfInitContingencyFuel) $ formatMass (perfInitContingencyFuel pd)
+              mcduPrintR (screenW - 1) 9 white "RSRV FUEL"
+              mcduPrintR (screenW - 1) 10 (fieldColor perfInitReserveFuel) $ formatMass (perfInitReserveFuel pd)
+          , mcduViewLSKBindings = Map.fromList $
+              [ ( LSKR 0, ("", scratchInteract setZFW getZFW >> reloadView))
+              , ( LSKR 1, ("", scratchInteract setBlockFuel getBlockFuel >> reloadView))
+              , ( LSKR 2, ("", scratchInteract setMinTakeoffFuel getMinTakeoffFuel >> reloadView))
+              , ( LSKR 3, ("", scratchInteract setContingencyFuel getContingencyFuel >> reloadView))
+              , ( LSKR 4, ("", scratchInteract setReserveFuel getReserveFuel >> reloadView))
+              ] ++
+              [ ( LSKL 5, ("RESET", resetData)) | modificationsExist ] ++
+              [ ( LSKR 5, ("CONFIRM INIT", confirmInit)) | modificationsExist ]
+          }
+
+  modifyView $ \v -> v
+    { mcduViewOnLoad = doLoad
+    , mcduViewAutoReload = True
+    }
+  doLoad
+
 progView :: MCDUView
 progView = defView
   { mcduViewTitle = "PROGRESS"
@@ -348,13 +501,12 @@ progViewLoad :: MCDU ()
 progViewLoad = withFGView $ do
   progress <- getProgressInfo
   massUnit <- gets mcduMassUnit
-  let fuelFactor = case massUnit of
+  let massFactor = case massUnit of
                       Kilograms -> 1
                       Pounds -> 1 / lbs2kg
       massUnitStr = case massUnit of
                       Kilograms -> "KG"
                       Pounds -> "LBS"
-  debugPrint $ colorize 0 $ Text.pack $ show progress
   modifyView $ \v -> v
     { mcduViewDraw = do
         let printWP color y (Just wp) = do
@@ -363,7 +515,7 @@ progViewLoad = withFGView $ do
                 mcduPrint 13 y color (BS8.pack $ formatETE ete)
               forM_ (legRouteDist wp) $ \dist ->
                 mcduPrintR 12 y color (BS8.pack $ formatDistanceCompact dist)
-              mcduPrintColoredR 24 y (formatEFOB color ((* fuelFactor) <$> legEFOB wp))
+              mcduPrintColoredR 24 y (formatEFOB color ((* massFactor) <$> legEFOB wp))
             printWP color y Nothing = do
               mcduPrint 0 y color "-----"
               mcduPrintColoredR 24 y (formatEFOB color Nothing)
@@ -385,7 +537,7 @@ progViewLoad = withFGView $ do
             maybe
               "-----"
               (\fob -> 
-                let fobU = floor (fob * fuelFactor) :: Int
+                let fobU = floor (fob * massFactor) :: Int
                 in BS8.pack $ printf "%2i'%03i" (fobU `div` 1000) (fobU `mod` 1000)
               )
               (progressFOB =<< progress)
@@ -418,7 +570,7 @@ fplViewLoad = withFGView $ do
   let legsDropped = curPage * legsPerPage
   let numPages = (planSize - fromMaybe 0 currentLeg + legsPerPage) `div` legsPerPage
   massUnit <- gets mcduMassUnit
-  let fuelFactor = case massUnit of
+  let massFactor = case massUnit of
                       Kilograms -> 1
                       Pounds -> 1 / lbs2kg
 
@@ -553,7 +705,7 @@ fplViewLoad = withFGView $ do
             else do
               mcduPrint 1 (n * 2 + 1) color (BS8.pack . maybe "---°" (printf "%03.0f°") $ legHeading leg)
               mcduPrint 6 (n * 2 + 1) color (BS8.pack . maybe "----NM" formatDistance $ if isCurrent then legRemainingDist leg else legDist leg)
-              mcduPrintColored 13 (n * 2 + 1) (formatEFOB color . fmap (* fuelFactor) $ legEFOB leg)
+              mcduPrintColored 13 (n * 2 + 1) (formatEFOB color . fmap (* massFactor) $ legEFOB leg)
               mcduPrint 0 (n * 2 + 2) color (encodeUtf8 $ legName leg)
             unless (legIsDiscontinuity leg) $ do
               mcduPrint (screenW - 11) (n * 2 + 2) color (BS8.pack $ formatSpeed (legSpeed leg) (legSpeedType leg))
