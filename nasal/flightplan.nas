@@ -207,15 +207,20 @@ var getProgressInfo = func () {
     for (var i = fp.current; i < fp.getPlanSize(); i += 1) {
         var wp = fp.getWP(i);
         if (wp != nil) {
-            print(wp.wp_name);
-            print(wp.wp_type);
-            print(wp.wp_role);
+            # print(wp.wp_name);
+            # print(wp.wp_type);
+            # print(wp.wp_role);
         
             if (wp.wp_type == 'runway') {
+                # This happens when the destination exists and has a runway
+                # selected.
                 wpDest = wp;
                 break;
             }
             if (wp.wp_role == 'approach' and fp.destination != nil and
+                # This is our fallback when no destination runway has been
+                # selected; it will (hopefully) match the destination airport,
+                # if any.
                 wp.wp_name == fp.destination.id) {
                 wpDest = wp;
             }
