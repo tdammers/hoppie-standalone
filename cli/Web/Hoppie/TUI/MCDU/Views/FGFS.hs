@@ -87,12 +87,21 @@ formatSpeed (Just speed) (Just cstr) =
       _ -> " "
 formatSpeed _ _ = "---"
 
-formatEFOB :: Word8 -> Maybe Double -> Colored ByteString
-formatEFOB _ Nothing = ""
-formatEFOB defcolor (Just efob) =
-  colorize color . BS8.pack $ printf "%5.1f" (abs efob / 1000)
+formatEFOB :: Word8 -> Double -> Double -> Maybe Double -> Colored ByteString
+formatEFOB _ _ _ Nothing = ""
+formatEFOB defcolor finres cont (Just efob)
+  | efob <= 0
+  = colorize red "---/-"
+  | otherwise
+  = colorize color . BS8.pack $ printf "%5.1f" (abs efob / 1000)
   where
-    color = if efob <= 0 then red else defcolor
+    color
+      | efob <= finres
+      = red
+      | efob <= finres + cont
+      = yellow
+      | otherwise
+      = defcolor
 
 formatAltitudeCompact :: Maybe Double -> Maybe Text -> String
 formatAltitudeCompact (Just alt) (Just cstr) =
@@ -510,6 +519,9 @@ progViewLoad = withFGView $ do
       massUnitStr = case massUnit of
                       Kilograms -> "KG"
                       Pounds -> "LBS"
+  perfInit <- getPerfInitData
+  let finres = maybe 0 (* massFactor) $ perfInitReserveFuel perfInit
+      cont = maybe 0 (* massFactor) $ perfInitContingencyFuel perfInit
   modifyView $ \v -> v
     { mcduViewDraw = do
         let printWP color y (Just wp) = do
@@ -518,10 +530,10 @@ progViewLoad = withFGView $ do
                 mcduPrint 13 y color (BS8.pack $ formatETE ete)
               forM_ (legRouteDist wp) $ \dist ->
                 mcduPrintR 12 y color (BS8.pack $ formatDistanceCompact dist)
-              mcduPrintColoredR 24 y (formatEFOB color ((* massFactor) <$> legEFOB wp))
+              mcduPrintColoredR 24 y (formatEFOB color finres cont ((* massFactor) <$> legEFOB wp))
             printWP color y Nothing = do
               mcduPrint 0 y color "-----"
-              mcduPrintColoredR 24 y (formatEFOB color Nothing)
+              mcduPrintColoredR 24 y (formatEFOB color finres cont Nothing)
         mcduPrint 1 1 white "TO"
         mcduPrint 8 1 white "DIST"
         mcduPrint 14 1 white "ETE"
@@ -576,6 +588,10 @@ fplViewLoad = withFGView $ do
   let massFactor = case massUnit of
                       Kilograms -> 1
                       Pounds -> 1 / lbs2kg
+  perfInit <- getPerfInitData
+  liftIO $ print perfInit
+  let finres = maybe 0 (* massFactor) $ perfInitReserveFuel perfInit
+      cont = maybe 0 (* massFactor) $ perfInitContingencyFuel perfInit
 
   let putWaypoint :: Int -> Maybe ByteString -> MCDU Bool
       putWaypoint n Nothing = deleteWaypoint n
@@ -708,7 +724,7 @@ fplViewLoad = withFGView $ do
             else do
               mcduPrint 1 (n * 2 + 1) color (BS8.pack . maybe "---°" (printf "%03.0f°") $ legHeading leg)
               mcduPrint 6 (n * 2 + 1) color (BS8.pack . maybe "----NM" formatDistance $ if isCurrent then legRemainingDist leg else legDist leg)
-              mcduPrintColored 13 (n * 2 + 1) (formatEFOB color . fmap (* massFactor) $ legEFOB leg)
+              mcduPrintColored 13 (n * 2 + 1) (formatEFOB color finres cont . fmap (* massFactor) $ legEFOB leg)
               mcduPrint 0 (n * 2 + 2) color (encodeUtf8 $ legName leg)
             unless (legIsDiscontinuity leg) $ do
               mcduPrint (screenW - 11) (n * 2 + 2) color (BS8.pack $ formatSpeed (legSpeed leg) (legSpeedType leg))
