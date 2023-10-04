@@ -541,7 +541,7 @@ progViewLoad = withFGView $ do
               "-----"
               (\fob -> 
                 let fobU = floor (fob * massFactor) :: Int
-                in BS8.pack $ printf "%2i'%03i" (fobU `div` 1000) (fobU `mod` 1000)
+                in BS8.pack $ printf "%5i" fobU
               )
               (progressFOB =<< progress)
           ) <>
