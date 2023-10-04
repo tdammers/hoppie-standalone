@@ -288,7 +288,7 @@ var findWaypoint = func (needle) {
     var fp = fms.getVisibleFlightplan();
     var acpos = geo.aircraft_position();
     var results = [];
-    for (var i = fp.current or 0; i < fp.getPlanSize(); i += 1) {
+    for (var i = math.max(0, fp.current or 0); i < fp.getPlanSize(); i += 1) {
         var wp = fp.getWP(i);
         if (wp.wp_name == needle)
             append(results,
@@ -328,13 +328,20 @@ var findWaypoint = func (needle) {
         }
     }
     var sortfunc = func (a, b) {
+        # Sort FP legs first
+        debug.dump(a.type, a.distance, b.type, b.distance);
         if (a.type == "leg" and b.type != "leg")
             return -1;
         elsif (b.type == "leg" and a.type != "leg")
             return 1;
-        elsif (a.distance < b.distance - 0.1)
+        # Show VORs before other navaids
+        elsif (a.distance < b.distance - 0.01)
             return -1;
-        elsif (a.distance > b.distance - 0.1)
+        elsif (a.distance > b.distance + 0.01)
+            return 1;
+        elsif (a.type == "VOR" and b.type != "VOR")
+            return -1;
+        elsif (b.type == "VOR" and a.type != "VOR")
             return 1;
         else
             return 0;
@@ -418,29 +425,85 @@ var insertDirect = func (wp, from) {
 var getRoute = func {
     var fp = fms.getVisibleFlightplan();
     var curParent = 'DCT';
-    var curName = nil;
+    var curWP = nil;
     var entries = [];
-    for (var i = 0; i < fp.getPlanSize(); i += 1) {
+    var dist = nil;
+    var destinationName = (fp.destination == nil) ? nil : fp.destination.id;
+
+    var firstEnroute = nil;
+    var firstArrival = nil;
+
+    for (var i = 1; i < fp.getPlanSize(); i += 1) {
         var wp = fp.getWP(i);
-        printf("%s %s", wp.wp_name, wp.wp_role);
-        if (wp.wp_role == nil) {
-            var parent = wp.wp_parent;
-            var parentName = 'DCT';
-            if (parent != nil)
-                parentName = parent.id;
-            if (parentName != curParent or parentName == 'DCT') {
-                if (curParent != nil and curName != nil) {
-                    append(entries, { 'via': curParent, 'to': curName });
-                }
-            }
-            curParent = parentName;
-            curName = wp.wp_name;
-        }
+        printf("%s %s", wp.id, wp.wp_role);
+        if (firstEnroute == nil and wp.wp_role == nil)
+            firstEnroute = i;
+        if (firstArrival == nil and firstEnroute != nil and (wp.wp_role != nil or wp.id == destinationName))
+            firstArrival = i;
     }
-    if (curParent != nil and curName != nil) {
-        append(entries, { 'via': curParent, 'to': curName });
+    if (firstEnroute == nil)
+        return [];
+    if (firstArrival == nil)
+        firstArrival = fp.getPlanSize() - 1;
+
+    var lastIndex = firstEnroute;
+    for (var i = firstEnroute; i < firstArrival; i += 1) {
+        var wp = fp.getWP(i);
+
+        if (dist == nil)
+            dist = wp.distance_along_route;
+        var parent = wp.wp_parent;
+        var parentName = 'DCT';
+        if (parent != nil)
+            parentName = parent.id;
+        printf("%s %s", parentName, wp.wp_name);
+        if (parentName != curParent or parentName == 'DCT') {
+            if (curParent != nil and curWP != nil) {
+                append(entries, { 'via': curParent, 'to': curWP.id, 'dist': dist, 'fromIndex': lastIndex, 'toIndex': i });
+                dist = 0;
+                lastIndex = i;
+            }
+        }
+        curParent = parentName;
+        curWP = wp;
+        dist += wp.leg_distance;
+    }
+    if (curParent != nil and curWP != nil and dist > 0) {
+        append(entries, { 'via': curParent, 'to': curWP.id, 'dist': dist, 'fromIndex': lastIndex, 'toIndex': firstArrival });
+    }
+    printf("Plan size: %i", fp.getPlanSize());
+    foreach (var entry; entries) {
+        printf("%s %s %i %i", entry.via, entry.to, entry.fromIndex, entry.toIndex);
     }
     return entries;
+};
+
+var deleteRouteLeg = func (fromIndex, toIndex) {
+    var fp = fms.getVisibleFlightplan();
+    var destinationName = (fp.destination == nil) ? nil : fp.destination.id;
+
+    var count = toIndex - fromIndex;
+    var fp = fms.getModifyableFlightplan();
+
+    var nextWP = fp.getWP(toIndex);
+    var lastWP = fp.getWP(toIndex - 1);
+    printf("Next WP: %i %s %s %s",
+        toIndex,
+        nextWP ? nextWP.id : '---',
+        nextWP ? nextWP.wp_role : '---',
+        (nextWP and nextWP.wp_parent) ? nextWP.wp_parent.id : '---');
+    var newWP = createWP({lat: lastWP.lat, lon: lastWP.lon}, lastWP.id);
+
+    while (count > 0 and fromIndex < fp.getPlanSize()) {
+        printf("DELETE %s", fp.getWP(fromIndex).id);
+        fp.deleteWP(fromIndex);
+        count -= 1;
+    }
+
+    if (nextWP.wp_parent != nil and nextWP.wp_role != 'star' and nextWP.wp_role != 'approach') {
+        fp.insertWP(newWP, fromIndex);
+    }
+    return nil;
 };
 
 var insertDirectFP = func (toWP, fromWP) {
@@ -475,7 +538,17 @@ var insertDirectFP = func (toWP, fromWP) {
 };
 
 appendViaTo = func (via, toWP) {
-    var leg = createViaTo(via, toWP);
+    var err = [];
+    var leg = call(createViaTo, [via, toWP], nil, nil, err);
+    if (size(err) > 0) {
+        debug.dump(err);
+        if (string.match(err[0], "createViaTo: couldn't find airway with provided name:*"))
+            return "NO AIRWAY"
+        elsif (err[0] == "createViaTo: navaid not on airway")
+            return "NOT ON AIRWAY"
+        else
+            return "INVALID"
+    }
     var fp = fms.getVisibleFlightplan();
     var insertIndex = 0;
 
@@ -955,6 +1028,7 @@ var fms = {
     'getRoute': getRoute,
     'appendViaTo': appendViaTo,
     'appendDirectTo': appendDirectTo,
+    'deleteRouteLeg': deleteRouteLeg,
 
     'getGroundspeed': getGroundspeed,
     'getFuelFlow': getFuelFlow,

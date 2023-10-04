@@ -566,7 +566,7 @@ fplViewLoad = withFGView $ do
   (utcMinutes :: Double) <- getUTCMinutes
 
   planSize <- getFlightplanSize
-  currentLeg <- getCurrentLeg
+  currentLeg <- fmap (max 1) <$> getCurrentLeg
 
   curLegs <- getFlightplanLegs legsPerPage curPage (fromMaybe 1 currentLeg - 1)
   flightplanModified <- hasFlightplanModifications
@@ -584,7 +584,7 @@ fplViewLoad = withFGView $ do
           Nothing -> do
             loadView fplView
           Just toWP -> do
-            getLeg n $ \fromWPMay -> do
+            getFlightplanLeg n $ \fromWPMay -> do
               toIndexMay <- findFPWaypoint toWP
               fromIndexMay <- join <$> mapM findFPWaypoint fromWPMay
               case (toIndexMay :: Maybe Int, fromIndexMay :: Maybe Int) of
@@ -735,6 +735,7 @@ rteViewLoad = withFGView $ do
   curPage <- gets (mcduViewPage . mcduView)
   let (numRoutePages, curRouteLegs) = paginateWithHeadroom 2 6 (curPage - 1) routeLegs
       numPages = numRoutePages + 1
+      numLegs = length routeLegs
 
   let setViaTo :: Maybe ByteString -> MCDU Bool
       setViaTo Nothing =
@@ -749,6 +750,9 @@ rteViewLoad = withFGView $ do
                 Nothing -> do
                   return ()
               loadView rteView
+              modifyView $ \v -> v
+                { mcduViewPage = numLegs `div` 6 + 1 }
+              reloadView
               return ()
         if BS.null toStr then do
           mcduResolveWaypoint "RTE" viaStr $ \case
@@ -771,6 +775,28 @@ rteViewLoad = withFGView $ do
         return True
       getViaTo :: MCDU (Maybe ByteString)
       getViaTo = return Nothing
+
+      setLeg :: Int -> Maybe ByteString -> MCDU Bool
+      setLeg i Nothing = do
+        case drop i routeLegs of
+          [] -> do
+            scratchWarn "INVALID"
+            return False
+          (leg:_) -> do
+            deleteRouteLeg (routeLegFromIndex leg) (routeLegToIndex leg)
+            return True
+      setLeg _ _ = do
+        scratchWarn "NOT ALLOWED"
+        return False
+      getLeg :: Int -> MCDU (Maybe ByteString)
+      getLeg i =
+        case drop i routeLegs of
+          [] -> do
+            scratchWarn "INVALID"
+            return Nothing
+          (leg:_) -> case routeLegVia leg of
+            Nothing -> return . Just $ routeLegTo leg
+            Just via -> return . Just $ via <> "." <> routeLegTo leg
 
   modifyView $ \v -> v
     { mcduViewNumPages = numPages
@@ -802,7 +828,6 @@ rteViewLoad = withFGView $ do
                           (Just <$> lift getCallsign)
                         reloadView))
             ] ++
-            [ (LSKR 3, ("APPEND", scratchInteract setViaTo getViaTo)) ] ++
             [ (LSKR 4, ("ARRIVAL", loadView arrivalView))
             | isJust destinationMay
             ]
@@ -822,20 +847,40 @@ rteViewLoad = withFGView $ do
         }
     _ -> do
       let offset = 6 * (curPage - 1)
+          newLegN = numLegs - offset
       modifyView $ \v -> v
         { mcduViewLSKBindings = mempty
         , mcduViewDraw = do
             mcduPrint  1 1 white "VIA"
             mcduPrint 10 1 white "TO"
+            mcduPrintR (screenW - 1) 1 white "DIST"
             zipWithM_ (\n leg -> do
-                mcduPrint  1 (n * 2 + 2) green (fromMaybe "DCT" $ routeLegVia leg)
-                mcduPrint 10 (n * 2 + 2) green (routeLegTo leg)
+                if routeLegTo leg == "DISCONTINUITY" then do
+                  mcduPrint  1 (n * 2 + 2) white "-DISCONTINUITY-"
+                  mcduPrintR (screenW - 1) (n * 2 + 2) white (BS8.pack $ maybe "" formatDistance $ routeLegDistance leg)
+                else do
+                  mcduPrint  1 (n * 2 + 2) green (fromMaybe "DCT" $ routeLegVia leg)
+                  mcduPrint 10 (n * 2 + 2) green (routeLegTo leg)
+                  mcduPrintR (screenW - 1) (n * 2 + 2) green (BS8.pack $ maybe "" formatDistance $ routeLegDistance leg)
+                  -- mcduPrint 1 (n * 2 + 3) blue (BS8.pack $ printf "FROM % i" (routeLegFromIndex leg))
+                  -- mcduPrint 10 (n * 2 + 3) blue (BS8.pack $ printf "TO % i" (routeLegToIndex leg))
               ) [0,1..] curRouteLegs
-            when (length curRouteLegs < 6) $ do
-              let n = length curRouteLegs
-              mcduPrint  1 (n * 2 + 2) green "-----"
-              mcduPrint 10 (n * 2 + 2) green "-----"
+            when (newLegN >= 0 && newLegN < 6) $ do
+              mcduPrint  1 (newLegN * 2 + 2) green "-----"
+              mcduPrint 10 (newLegN * 2 + 2) green "-----"
+              mcduPrintR (screenW - 1) (newLegN * 2 + 2) green "-----"
         }
+      zipWithM_ (\n _ -> do
+          addLskBinding (LSKR n) "" (scratchInteract (setLeg (n + offset)) (getLeg (n + offset)) >> reloadView)
+        ) [0,1..] curRouteLegs
+      when (newLegN >= 0 && newLegN < 6) $ do
+        addLskBinding
+          (LSKR newLegN)
+          ""
+          (scratchInteract setViaTo getViaTo >> reloadView)
+      when (flightplanModified && newLegN + 1 >= 0 && newLegN + 1 < 6) $ do
+        addLskBinding (LSKL 5) "CANCEL" (cancelFlightplanEdits >> reloadView)
+        addLskBinding (LSKR 5) "CONFIRM" (commitFlightplanEdits >> reloadView)
 
 selectView :: ByteString -> [ByteString] -> ByteString -> (Maybe ByteString -> MCDU ()) -> MCDUView
 selectView title options returnLabel handleResult= defView

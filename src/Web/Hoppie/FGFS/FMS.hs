@@ -68,6 +68,9 @@ data RouteLeg =
   RouteLeg
     { routeLegVia :: Maybe ByteString
     , routeLegTo :: ByteString
+    , routeLegDistance :: Maybe Double
+    , routeLegFromIndex :: Int
+    , routeLegToIndex :: Int
     }
     deriving (Show)
 
@@ -76,6 +79,9 @@ instance FromNasal RouteLeg where
     RouteLeg
       <$> fromNasalFieldMaybe "via" n
       <*> fromNasalField "to" n
+      <*> fromNasalFieldMaybe "dist" n
+      <*> fromNasalField "fromIndex" n
+      <*> fromNasalField "toIndex" n
 
 data WaypointCandidate =
   WaypointCandidate
@@ -188,7 +194,11 @@ appendViaTo via toWP =
 
 appendDirectTo :: (MonadFG m) => WaypointCandidate -> m (Maybe ByteString)
 appendDirectTo toWP =
-  fgCallNasal "fms.appendDirectTo" (wpValue toWP)
+  fgCallNasal "fms.appendDirectTo" [wpValue toWP]
+
+deleteRouteLeg :: (MonadFG m) => Int -> Int -> m ()
+deleteRouteLeg fromIndex toIndex =
+  fgCallNasal "fms.deleteRouteLeg" [fromIndex, toIndex]
 
 resolveLeg :: (MonadFG m) => ByteString -> (Maybe WaypointCandidate -> m ()) -> m ()
 resolveLeg name cont = do
@@ -196,8 +206,8 @@ resolveLeg name cont = do
   cont candidate
   mapM_ releaseWaypointCandidate candidate
 
-getLeg :: (MonadFG m) => Int -> (Maybe WaypointCandidate -> m ()) -> m ()
-getLeg index cont = do
+getFlightplanLeg :: (MonadFG m) => Int -> (Maybe WaypointCandidate -> m ()) -> m ()
+getFlightplanLeg index cont = do
   candidate :: Maybe WaypointCandidate <- fgCallNasalDef Nothing "fms.getWaypoint" [index]
   cont candidate
   mapM_ releaseWaypointCandidate candidate
@@ -217,7 +227,6 @@ resolveWaypoint name warn sel cont = do
       cont Nothing
     [candidate] -> do
       cont (Just candidate)
-      releaseWaypointCandidate candidate
     _ -> do
       mapM_ acquireWaypointCandidate candidates
       sel candidates cont
