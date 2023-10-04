@@ -403,7 +403,7 @@ var insertDirect = func (wp, from) {
     var fp = fms.getModifyableFlightplan();
     var acpos = geo.aircraft_position();
     if (typeof(from) == 'ghost') {
-        print("from is ghost, finding in flightplan");
+        # print("from is ghost, finding in flightplan");
         from = findFPWaypoint(fp, from);
     }
     if (from == nil) {
@@ -435,7 +435,7 @@ var getRoute = func {
 
     for (var i = 1; i < fp.getPlanSize(); i += 1) {
         var wp = fp.getWP(i);
-        printf("%s %s", wp.id, wp.wp_role);
+        # printf("%s %s", wp.id, wp.wp_role);
         if (firstEnroute == nil and wp.wp_role == nil)
             firstEnroute = i;
         if (firstArrival == nil and firstEnroute != nil and (wp.wp_role != nil or wp.id == destinationName))
@@ -456,7 +456,7 @@ var getRoute = func {
         var parentName = 'DCT';
         if (parent != nil)
             parentName = parent.id;
-        printf("%s %s", parentName, wp.wp_name);
+        # printf("%s %s", parentName, wp.wp_name);
         if (parentName != curParent or parentName == 'DCT') {
             if (curParent != nil and curWP != nil) {
                 append(entries, { 'via': curParent, 'to': curWP.id, 'dist': dist, 'fromIndex': lastIndex, 'toIndex': i });
@@ -471,10 +471,10 @@ var getRoute = func {
     if (curParent != nil and curWP != nil and dist > 0) {
         append(entries, { 'via': curParent, 'to': curWP.id, 'dist': dist, 'fromIndex': lastIndex, 'toIndex': firstArrival });
     }
-    printf("Plan size: %i", fp.getPlanSize());
-    foreach (var entry; entries) {
-        printf("%s %s %i %i", entry.via, entry.to, entry.fromIndex, entry.toIndex);
-    }
+    # printf("Plan size: %i", fp.getPlanSize());
+    # foreach (var entry; entries) {
+    #     printf("%s %s %i %i", entry.via, entry.to, entry.fromIndex, entry.toIndex);
+    # }
     return entries;
 };
 
@@ -487,15 +487,15 @@ var deleteRouteLeg = func (fromIndex, toIndex) {
 
     var nextWP = fp.getWP(toIndex);
     var lastWP = fp.getWP(toIndex - 1);
-    printf("Next WP: %i %s %s %s",
-        toIndex,
-        nextWP ? nextWP.id : '---',
-        nextWP ? nextWP.wp_role : '---',
-        (nextWP and nextWP.wp_parent) ? nextWP.wp_parent.id : '---');
+    # printf("Next WP: %i %s %s %s",
+    #     toIndex,
+    #     nextWP ? nextWP.id : '---',
+    #     nextWP ? nextWP.wp_role : '---',
+    #     (nextWP and nextWP.wp_parent) ? nextWP.wp_parent.id : '---');
     var newWP = createWP({lat: lastWP.lat, lon: lastWP.lon}, lastWP.id);
 
     while (count > 0 and fromIndex < fp.getPlanSize()) {
-        printf("DELETE %s", fp.getWP(fromIndex).id);
+        # printf("DELETE %s", fp.getWP(fromIndex).id);
         fp.deleteWP(fromIndex);
         count -= 1;
     }
