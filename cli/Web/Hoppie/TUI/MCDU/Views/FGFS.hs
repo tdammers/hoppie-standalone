@@ -354,20 +354,29 @@ perfInitView = defView
   { mcduViewTitle = "PERF INIT"
   , mcduViewAutoReload = False
   , mcduViewOnLoad = perfInitViewLoad
+  , mcduViewNumPages = 2
   }
 
 perfInitViewLoad :: MCDU ()
 perfInitViewLoad = withFGView $ do
   pdVar <- liftIO . newIORef =<< getPerfInitData
 
-  massUnit <- gets mcduMassUnit
-  let massFactor = case massUnit of
-                      Kilograms -> 1
-                      Pounds -> 1 / lbs2kg
-      massUnitStr = case massUnit of
-                      Kilograms -> "KG"
-                      Pounds -> "LBS"
   let doLoad = do
+        massUnit <- gets mcduMassUnit
+        let massFactor = case massUnit of
+                            Kilograms -> 1
+                            Pounds -> 1 / lbs2kg
+            massUnitStr = case massUnit of
+                            Kilograms -> "KG"
+                            Pounds -> "LBS"
+        let setMyCallsign (Just c) = do
+              mcduSetCallsign c
+              return True
+            setMyCallsign Nothing =
+              return False
+            getMyCallsign =
+              Just <$> mcduGetCallsign
+
         pd <- liftIO $ readIORef pdVar
         pdStored <- getPerfInitData
         currentFuel <- getFuelOnBoard
@@ -468,33 +477,78 @@ perfInitViewLoad = withFGView $ do
                 , perfInitReserveFuel
                 ]
 
-        modifyView $ \v -> v
-          { mcduViewTitle = "PERF INIT " <> massUnitStr
-          , mcduViewDraw = do
-              let formatMass :: Maybe Double -> ByteString
-                  formatMass = maybe "-----" (BS8.pack . printf "%7.0f" . (* massFactor))
-              mcduPrintR (screenW - 1) 1 white "ZFW"
-              mcduPrintR (screenW - 1) 2 (fieldColor perfInitZFW) $ formatMass (perfInitZFW pd)
-              mcduPrint 1 3 white "GAUGE"
-              mcduPrint 1 4 white $ formatMass currentFuel
-              mcduPrintR (screenW - 1) 3 white "BLOCK FUEL"
-              mcduPrintR (screenW - 1) 4 (fieldColor perfInitBlockFuel) $ formatMass (perfInitBlockFuel pd)
-              mcduPrintR (screenW - 1) 5 white "T/O FUEL"
-              mcduPrintR (screenW - 1) 6 (fieldColor perfInitMinTakeoffFuel) $ formatMass (perfInitMinTakeoffFuel pd)
-              mcduPrintR (screenW - 1) 7 white "CONT FUEL"
-              mcduPrintR (screenW - 1) 8 (fieldColor perfInitContingencyFuel) $ formatMass (perfInitContingencyFuel pd)
-              mcduPrintR (screenW - 1) 9 white "RSRV FUEL"
-              mcduPrintR (screenW - 1) 10 (fieldColor perfInitReserveFuel) $ formatMass (perfInitReserveFuel pd)
-          , mcduViewLSKBindings = Map.fromList $
-              [ ( LSKR 0, ("", scratchInteract setZFW getZFW >> reloadView))
-              , ( LSKR 1, ("", scratchInteract setBlockFuel getBlockFuel >> reloadView))
-              , ( LSKR 2, ("", scratchInteract setMinTakeoffFuel getMinTakeoffFuel >> reloadView))
-              , ( LSKR 3, ("", scratchInteract setContingencyFuel getContingencyFuel >> reloadView))
-              , ( LSKR 4, ("", scratchInteract setReserveFuel getReserveFuel >> reloadView))
-              ] ++
-              [ ( LSKL 5, ("RESET", resetData)) | modificationsExist ] ++
-              [ ( LSKR 5, ("CONFIRM INIT", confirmInit)) | modificationsExist ]
-          }
+        actype <- gets mcduAircraftType
+        callsign <- mcduGetCallsign
+        let setACType :: Maybe ByteString -> MCDU Bool
+            setACType actypeMay = do
+              modify (\s -> s { mcduAircraftType = actypeMay })
+              persistData
+              return True
+            getACType :: MCDU (Maybe ByteString)
+            getACType =
+              gets mcduAircraftType
+
+        curPage <- gets (mcduViewPage . mcduView)
+        case curPage of
+          0 -> do
+            modifyView $ \v -> v
+              { mcduViewTitle = "PERF INIT"
+              , mcduViewDraw = do
+                  mcduPrint 1 1 white "A/C TYPE"
+                  mcduPrint 1 2 green (fromMaybe "----" actype)
+                  mcduPrintR (screenW - 1) 1 white "ATC C/S"
+                  mcduPrintR (screenW - 1) 2 green callsign
+
+                  mcduPrint 1 5 white "UNITS"
+                  mcduPrint 1 6 green (case massUnit of { Kilograms -> "KG"; Pounds -> "LBS" })
+              , mcduViewLSKBindings = Map.fromList $
+                  [ (LSKL 0, ("", scratchInteract setACType getACType >> reloadView))
+                  , (LSKR 0, ("", scratchInteract setMyCallsign getMyCallsign >> reloadView))
+                  , (LSKL 2, ("", do
+                               modify (\s -> s
+                                 { mcduMassUnit = case massUnit of
+                                     Kilograms -> Pounds
+                                     Pounds -> Kilograms
+                                 })
+                               reloadView
+                               persistData
+                             )
+                    )
+                  ]
+              }
+          1 -> do
+            modifyView $ \v -> v
+              { mcduViewTitle = "PERF INIT " <> massUnitStr
+              , mcduViewDraw = do
+                  let formatMass :: Maybe Double -> ByteString
+                      formatMass = maybe "-----" (BS8.pack . printf "%7.0f" . (* massFactor))
+                  mcduPrintR (screenW - 1) 1 white "ZFW"
+                  mcduPrintR (screenW - 1) 2 (fieldColor perfInitZFW) $ formatMass (perfInitZFW pd)
+                  mcduPrint 1 3 white "GAUGE"
+                  mcduPrint 1 4 white $ formatMass currentFuel
+                  mcduPrintR (screenW - 1) 3 white "BLOCK FUEL"
+                  mcduPrintR (screenW - 1) 4 (fieldColor perfInitBlockFuel) $ formatMass (perfInitBlockFuel pd)
+                  mcduPrintR (screenW - 1) 5 white "T/O FUEL"
+                  mcduPrintR (screenW - 1) 6 (fieldColor perfInitMinTakeoffFuel) $ formatMass (perfInitMinTakeoffFuel pd)
+                  mcduPrintR (screenW - 1) 7 white "CONT FUEL"
+                  mcduPrintR (screenW - 1) 8 (fieldColor perfInitContingencyFuel) $ formatMass (perfInitContingencyFuel pd)
+                  mcduPrintR (screenW - 1) 9 white "RSRV FUEL"
+                  mcduPrintR (screenW - 1) 10 (fieldColor perfInitReserveFuel) $ formatMass (perfInitReserveFuel pd)
+              , mcduViewLSKBindings = Map.fromList $
+                  [ ( LSKR 0, ("", scratchInteract setZFW getZFW >> reloadView))
+                  , ( LSKR 1, ("", scratchInteract setBlockFuel getBlockFuel >> reloadView))
+                  , ( LSKR 2, ("", scratchInteract setMinTakeoffFuel getMinTakeoffFuel >> reloadView))
+                  , ( LSKR 3, ("", scratchInteract setContingencyFuel getContingencyFuel >> reloadView))
+                  , ( LSKR 4, ("", scratchInteract setReserveFuel getReserveFuel >> reloadView))
+                  ] ++
+                  [ ( LSKL 5, ("RESET", resetData)) | modificationsExist ] ++
+                  [ ( LSKR 5, ("CONFIRM INIT", confirmInit)) | modificationsExist ]
+              }
+          _ -> modifyView $ \v -> v
+                { mcduViewDraw = do
+                    mcduPrintC (screenW `div` 2) (screenH `div` 2) red "INVALID PAGE"
+                , mcduViewLSKBindings = mempty
+                }
 
   modifyView $ \v -> v
     { mcduViewOnLoad = doLoad
