@@ -528,7 +528,7 @@ progViewLoad = withFGView $ do
               mcduPrint 0 y color (encodeUtf8 . Text.take 7 . Text.replace "-" "" $ legName wp)
               forM_ (legETE wp) $ \ete ->
                 mcduPrint 13 y color (BS8.pack $ formatETE ete)
-              forM_ (legRouteDist wp) $ \dist ->
+              forM_ (legRemainingDist wp) $ \dist ->
                 mcduPrintR 12 y color (BS8.pack $ formatDistanceCompact dist)
               mcduPrintColoredR 24 y (formatEFOB color finres cont ((* massFactor) <$> legEFOB wp))
             printWP color y Nothing = do
