@@ -121,6 +121,50 @@ instance FromNasal ProgressInfo where
       <*> fromNasalFieldMaybe "destination" nv
       <*> fromNasalFieldMaybe "fob" nv
 
+data IASOrMach
+  = IAS Int
+  | Mach Double
+  deriving (Show, Eq)
+
+instance ToNasal IASOrMach where
+  toNasal (IAS i) = toNasal i
+  toNasal (Mach m) = toNasal . Text.pack $ printf "M%02.0f" (m * 100)
+
+instance FromNasal IASOrMach where
+  fromNasal (NasalInt i) = pure $ IAS i
+  fromNasal (NasalFloat f) = pure $ IAS (round f)
+  fromNasal n@(NasalString t)
+    | Text.take 1 t == "M"
+    = case readMaybe (Text.unpack . Text.drop 1 $ t) of
+        Nothing -> Left $ NasalUnexpected "IAS/Mach" (show n)
+        Just m -> pure $ Mach $ m / 100
+  fromNasal n = Left $ NasalUnexpected "IAS/Mach" (show n)
+
+data ClimbPerf =
+  ClimbPerf
+    { climbSpeed :: IASOrMach
+    , climbRate :: Int
+    , climbToFL :: Int
+    }
+    deriving (Show, Eq)
+
+instance ToNasal ClimbPerf where
+  toNasal c =
+    NasalHash $ Map.fromList
+      [ ("spd", toNasal (climbSpeed c))
+      , ("roc", toNasal (climbRate c))
+      , ("fl", toNasal (climbToFL c))
+      ]
+
+instance FromNasal ClimbPerf where
+  fromNasal n =
+    ClimbPerf
+      <$> fromNasalField "spd" n
+      <*> fromNasalField "roc" n
+      <*> fromNasalField "fl" n
+
+type ClimbProfile = [ClimbPerf]
+
 data PerfInitData =
   PerfInitData
     { perfInitZFW :: Maybe Double
@@ -128,12 +172,17 @@ data PerfInitData =
     , perfInitMinTakeoffFuel :: Maybe Double
     , perfInitReserveFuel :: Maybe Double
     , perfInitContingencyFuel :: Maybe Double
-    , perfInitCruiseAlt :: Maybe Double
-    , perfInitCruiseFL :: Maybe Double
-    , perfInitCruiseIAS :: Maybe Double
+    , perfInitClimbProfile :: ClimbProfile
+    , perfInitCruiseAlt :: Maybe Int
+    , perfInitCruiseFL :: Maybe Int
+    , perfInitCruiseIAS :: Maybe Int
     , perfInitCruiseMach :: Maybe Double
-    , perfInitTransAlt :: Maybe Double
-    , perfInitTransFL :: Maybe Double
+    , perfInitCruiseWind :: Maybe (Int, Int)
+    , perfInitDescentFPA :: Maybe Double
+    , perfInitDescentMach :: Maybe Double
+    , perfInitDescentIAS :: Maybe Int
+    , perfInitTransAlt :: Maybe Int
+    , perfInitTransFL :: Maybe Int
     }
     deriving (Show, Eq)
 
@@ -145,28 +194,52 @@ defPerfInitData =
     , perfInitMinTakeoffFuel = Nothing
     , perfInitReserveFuel = Nothing
     , perfInitContingencyFuel = Nothing
+    , perfInitClimbProfile = []
     , perfInitCruiseAlt = Nothing
     , perfInitCruiseFL = Nothing
     , perfInitCruiseIAS = Nothing
     , perfInitCruiseMach = Nothing
+    , perfInitCruiseWind = Nothing
+    , perfInitDescentFPA = Nothing
+    , perfInitDescentMach = Nothing
+    , perfInitDescentIAS = Nothing
     , perfInitTransAlt = Nothing
     , perfInitTransFL = Nothing
     }
 
 instance ToNasal PerfInitData where
   toNasal pd =
-    NasalHash $ Map.fromList
+    NasalHash $ Map.fromList $
       [ ("zfw", toNasal (perfInitZFW pd))
       , ("blockFuel", toNasal (perfInitBlockFuel pd))
       , ("toFuel", toNasal (perfInitMinTakeoffFuel pd))
       , ("reserveFuel", toNasal (perfInitReserveFuel pd))
       , ("contFuel", toNasal (perfInitContingencyFuel pd))
-      , ("crzAlt", toNasal (perfInitCruiseAlt pd))
-      , ("crzFL", toNasal (perfInitCruiseFL pd))
-      , ("crzIAS", toNasal (perfInitCruiseIAS pd))
-      , ("crzMach", toNasal (perfInitCruiseMach pd))
+      , ("crzWind", toNasal (perfInitCruiseWind pd))
+      , ("desFPA", toNasal (perfInitDescentFPA pd))
+      , ("desMach", toNasal (perfInitDescentMach pd))
+      , ("desIAS", toNasal (perfInitDescentIAS pd))
       , ("transAlt", toNasal (perfInitTransAlt pd))
       , ("transFL", toNasal (perfInitTransFL pd))
+      ]
+      ++
+      [ ("climb", toNasal (perfInitClimbProfile pd))
+      | not . null $ perfInitClimbProfile pd
+      ]
+      ++
+      [ ("crzAlt", toNasal (perfInitCruiseAlt pd))
+      | isJust (perfInitCruiseAlt pd) || isNothing (perfInitCruiseFL pd)
+      ]
+      ++
+      [ ("crzFL", toNasal (perfInitCruiseFL pd))
+      | isJust (perfInitCruiseFL pd)
+      ] ++
+      [ ("crzIAS", toNasal (perfInitCruiseIAS pd))
+      | isJust (perfInitCruiseIAS pd) || isNothing (perfInitCruiseMach pd)
+      ]
+      ++
+      [ ("crzMach", toNasal (perfInitCruiseMach pd))
+      | isJust (perfInitCruiseMach pd)
       ]
 
 instance FromNasal PerfInitData where
@@ -177,12 +250,20 @@ instance FromNasal PerfInitData where
       <*> fromNasalFieldMaybe "toFuel" nv
       <*> fromNasalFieldMaybe "reserveFuel" nv
       <*> fromNasalFieldMaybe "contFuel" nv
-      <*> fromNasalFieldMaybe "crzAlt" nv
-      <*> fromNasalFieldMaybe "crzFL" nv
-      <*> fromNasalFieldMaybe "crzIAS" nv
-      <*> fromNasalFieldMaybe "crzMach" nv
+      <*> (fromMaybe [] <$> fromNasalFieldMaybe "climb" nv)
+      <*> (nothingIfJustZero <$> fromNasalFieldMaybe "crzAlt" nv)
+      <*> (nothingIfJustZero <$> fromNasalFieldMaybe "crzFL" nv)
+      <*> (nothingIfJustZero <$> fromNasalFieldMaybe "crzIAS" nv)
+      <*> (nothingIfJustZero <$> fromNasalFieldMaybe "crzMach" nv)
+      <*> fromNasalFieldMaybe "crzWind" nv
+      <*> fromNasalFieldMaybe "desFPA" nv
+      <*> fromNasalFieldMaybe "desMach" nv
+      <*> fromNasalFieldMaybe "desIAS" nv
       <*> fromNasalFieldMaybe "transAlt" nv
       <*> fromNasalFieldMaybe "transFL" nv
+    where
+      nothingIfJustZero (Just 0) = Nothing
+      nothingIfJustZero x = x
 
 releaseWaypointCandidate :: (MonadFG m) => WaypointCandidate -> m ()
 releaseWaypointCandidate candidate =
