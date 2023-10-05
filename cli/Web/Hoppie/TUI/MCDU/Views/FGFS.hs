@@ -354,7 +354,7 @@ perfInitView = defView
   { mcduViewTitle = "PERF INIT"
   , mcduViewAutoReload = False
   , mcduViewOnLoad = perfInitViewLoad
-  , mcduViewNumPages = 2
+  , mcduViewNumPages = 3
   }
 
 perfInitViewLoad :: MCDU ()
@@ -451,6 +451,48 @@ perfInitViewLoad = withFGView $ do
             getReserveFuel =
               return $ BS8.pack . printf "%1.0f" . (* massFactor) <$> perfInitReserveFuel pd
 
+        let setCruiseFL Nothing = do
+              liftIO $ writeIORef pdVar $ pd { perfInitCruiseFL = Nothing }
+              return True
+            setCruiseFL (Just val) = do
+              case readMaybe . BS8.unpack $ val of
+                Nothing -> do
+                  scratchWarn "INVALID"
+                  return False
+                Just x ->  do
+                  liftIO $ writeIORef pdVar $ pd { perfInitCruiseFL = Just x }
+                  return True
+            getCruiseFL =
+              return $ BS8.pack . printf "%3.0f" <$> perfInitCruiseFL pd
+
+        let setCruiseMach Nothing = do
+              liftIO $ writeIORef pdVar $ pd { perfInitCruiseMach = Nothing }
+              return True
+            setCruiseMach (Just val) = do
+              case readMaybe . BS8.unpack $ val of
+                Nothing -> do
+                  scratchWarn "INVALID"
+                  return False
+                Just x ->  do
+                  liftIO $ writeIORef pdVar $ pd { perfInitCruiseMach = Just (x / 100), perfInitCruiseIAS = Nothing }
+                  return True
+            getCruiseMach =
+              return $ BS8.pack . printf "%3.0f" . (* 100) <$> perfInitCruiseMach pd
+
+        let setCruiseIAS Nothing = do
+              liftIO $ writeIORef pdVar $ pd { perfInitCruiseIAS = Nothing }
+              return True
+            setCruiseIAS (Just val) = do
+              case readMaybe . BS8.unpack $ val of
+                Nothing -> do
+                  scratchWarn "INVALID"
+                  return False
+                Just x ->  do
+                  liftIO $ writeIORef pdVar $ pd { perfInitCruiseIAS = Just x, perfInitCruiseMach = Nothing }
+                  return True
+            getCruiseIAS =
+              return $ BS8.pack . printf "%3.0f" <$> perfInitCruiseIAS pd
+
         let confirmInit = do
               setPerfInitData pd
               reloadView
@@ -475,6 +517,10 @@ perfInitViewLoad = withFGView $ do
                 , perfInitMinTakeoffFuel
                 , perfInitContingencyFuel
                 , perfInitReserveFuel
+                , perfInitCruiseFL
+                , perfInitCruiseAlt
+                , perfInitCruiseMach
+                , perfInitCruiseIAS
                 ]
 
         actype <- gets mcduAircraftType
@@ -517,6 +563,26 @@ perfInitViewLoad = withFGView $ do
                   ]
               }
           1 -> do
+            modifyView $ \v -> v
+              { mcduViewTitle = "PERF INIT"
+              , mcduViewDraw = do
+                  mcduPrint 1 1 white "MACH"
+                  mcduPrintC (screenW `div` 2) 1 white "<- CRUISE ->"
+                  mcduPrintR (screenW - 1) 1 white "IAS"
+                  mcduPrint 1 2 (fieldColor perfInitCruiseMach) $
+                    maybe "---" (BS8.pack . printf "M%3.2f") (perfInitCruiseMach pd)
+                  mcduPrintR (screenW -1) 2 (fieldColor perfInitCruiseIAS) $
+                    maybe "---" (BS8.pack . printf "%3.0f") (perfInitCruiseIAS pd)
+                  mcduPrint 1 3 white "FL"
+                  mcduPrint 1 4 (fieldColor perfInitCruiseFL) $
+                    maybe "---" (BS8.pack . printf "%3.0f") (perfInitCruiseFL pd)
+              , mcduViewLSKBindings = Map.fromList $
+                  [ ( LSKL 0, ("", scratchInteract setCruiseMach getCruiseMach >> reloadView))
+                  , ( LSKR 0, ("", scratchInteract setCruiseIAS getCruiseIAS >> reloadView))
+                  , ( LSKL 1, ("", scratchInteract setCruiseFL getCruiseFL >> reloadView))
+                  ]
+              }
+          2 -> do
             modifyView $ \v -> v
               { mcduViewTitle = "PERF INIT " <> massUnitStr
               , mcduViewDraw = do

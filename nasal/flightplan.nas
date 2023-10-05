@@ -991,12 +991,52 @@ var isValidSTAR = func () {
 }
 
 var getPerfInitData = func {
-    return mcdu.perfInitData;
+    var result = {};
+    foreach (var k; keys(mcdu.perfInitData)) {
+        result[k] = mcdu.perfInitData[k];
+    }
+    var crzAlt = getprop('/autopilot/route-manager/cruise/altitude-ft') or nil;
+    var crzFL = getprop('/autopilot/route-manager/cruise/flight-level') or nil;
+
+    if (crzAlt == nil and crzFL != nil)
+        crzAlt = crzFL * 100;
+    if (crzAlt != nil and crzFL == nil)
+        crzFL = math.round(crzAlt / 100);
+    var crzIAS = getprop('/autopilot/route-manager/cruise/speed-kts') or nil;
+    var crzMach = getprop('/autopilot/route-manager/cruise/mach') or nil;
+
+    if (crzAlt != nil) result.crzAlt = crzAlt;
+    if (crzFL != nil) result.crzFL = crzFL;
+    if (crzIAS != nil) result.crzIAS = crzIAS;
+    if (crzMach != nil) result.crzMach = crzMach;
+
+    return result;
 }
 
 var setPerfInitData = func (data) {
     foreach (var k; keys(data)) {
-        mcdu.perfInitData[k] = data[k];
+        var val = data[k];
+        if (k == 'crzAlt') {
+            if (val == nil) val = 0;
+            setprop('/autopilot/route-manager/cruise/altitude-ft', val);
+            setprop('/autopilot/route-manager/cruise/flight-level', math.round(val / 100));
+        }
+        if (k == 'crzFL') {
+            if (val == nil) val = 0;
+            setprop('/autopilot/route-manager/cruise/altitude-ft', val * 100);
+            setprop('/autopilot/route-manager/cruise/flight-level', val);
+        }
+        elsif (k == 'crzIAS') {
+            if (val == nil) val = 0;
+            setprop('/autopilot/route-manager/cruise/speed-kts', val);
+        }
+        elsif (k == 'crzMach') {
+            if (val == nil) val = 0;
+            setprop('/autopilot/route-manager/cruise/mach', val);
+        }
+        else {
+            mcdu.perfInitData[k] = val;
+        }
     }
     return nil;
 }

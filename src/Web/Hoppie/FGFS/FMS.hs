@@ -128,6 +128,12 @@ data PerfInitData =
     , perfInitMinTakeoffFuel :: Maybe Double
     , perfInitReserveFuel :: Maybe Double
     , perfInitContingencyFuel :: Maybe Double
+    , perfInitCruiseAlt :: Maybe Double
+    , perfInitCruiseFL :: Maybe Double
+    , perfInitCruiseIAS :: Maybe Double
+    , perfInitCruiseMach :: Maybe Double
+    , perfInitTransAlt :: Maybe Double
+    , perfInitTransFL :: Maybe Double
     }
     deriving (Show, Eq)
 
@@ -139,6 +145,12 @@ defPerfInitData =
     , perfInitMinTakeoffFuel = Nothing
     , perfInitReserveFuel = Nothing
     , perfInitContingencyFuel = Nothing
+    , perfInitCruiseAlt = Nothing
+    , perfInitCruiseFL = Nothing
+    , perfInitCruiseIAS = Nothing
+    , perfInitCruiseMach = Nothing
+    , perfInitTransAlt = Nothing
+    , perfInitTransFL = Nothing
     }
 
 instance ToNasal PerfInitData where
@@ -149,6 +161,12 @@ instance ToNasal PerfInitData where
       , ("toFuel", toNasal (perfInitMinTakeoffFuel pd))
       , ("reserveFuel", toNasal (perfInitReserveFuel pd))
       , ("contFuel", toNasal (perfInitContingencyFuel pd))
+      , ("crzAlt", toNasal (perfInitCruiseAlt pd))
+      , ("crzFL", toNasal (perfInitCruiseFL pd))
+      , ("crzIAS", toNasal (perfInitCruiseIAS pd))
+      , ("crzMach", toNasal (perfInitCruiseMach pd))
+      , ("transAlt", toNasal (perfInitTransAlt pd))
+      , ("transFL", toNasal (perfInitTransFL pd))
       ]
 
 instance FromNasal PerfInitData where
@@ -159,6 +177,12 @@ instance FromNasal PerfInitData where
       <*> fromNasalFieldMaybe "toFuel" nv
       <*> fromNasalFieldMaybe "reserveFuel" nv
       <*> fromNasalFieldMaybe "contFuel" nv
+      <*> fromNasalFieldMaybe "crzAlt" nv
+      <*> fromNasalFieldMaybe "crzFL" nv
+      <*> fromNasalFieldMaybe "crzIAS" nv
+      <*> fromNasalFieldMaybe "crzMach" nv
+      <*> fromNasalFieldMaybe "transAlt" nv
+      <*> fromNasalFieldMaybe "transFL" nv
 
 releaseWaypointCandidate :: (MonadFG m) => WaypointCandidate -> m ()
 releaseWaypointCandidate candidate =
