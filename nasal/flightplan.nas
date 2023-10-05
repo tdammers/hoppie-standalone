@@ -56,7 +56,10 @@ var hasFlightplanModifications = func {
 var getModifyableFlightplan = func {
     if (mcdu.modifiedFlightplan == nil) {
         mcdu.modifiedFlightplan = flightplan().clone();
-        mcdu.modifiedFlightplan.current = flightplan().current;
+        if (flightplan().current >= mcdu.modifiedFlightplan.getPlanSize())
+            mcdu.modifiedFlightplan.current = -1;
+        else
+            mcdu.modifiedFlightplan.current = flightplan().current;
     }
     return mcdu.modifiedFlightplan;
 };
@@ -80,7 +83,10 @@ var commitFlightplanEdits = func {
     # start of the route, but of course that is not the correct way.
     mcdu.modifiedFlightplan.activate();
     fgcommand("activate-flightplan", props.Node.new({"activate": 1}));
-    flightplan().current = current;
+    if (current < flightplan().getPlanSize())
+        flightplan().current = current;
+    else
+        flightplan().current = -1;
     mcdu.modifiedFlightplan = nil;
     return nil;
 };
@@ -110,11 +116,11 @@ var makeLegInfo = func (wp, totalDistance, totalDistanceRemaining, fuelOnBoard, 
     var fuelRemaining = nil;
     var fuelGS = math.max(40, groundspeed);
     if (fuelFlow != nil and fuelOnBoard != nil) {
-        fuelRemaining = fuelOnBoard + fuelFlow * (distanceToWP + wp.leg_distance) / fuelGS * 3600;
+        fuelRemaining = fuelOnBoard + fuelFlow * distanceToWP / fuelGS * 3600;
     }
     var timeRemaining = nil;
     # if (groundspeed > 40)
-        timeRemaining = (distanceToWP + wp.leg_distance) * 60 / fuelGS;
+        timeRemaining = distanceToWP * 60 / fuelGS;
     return removeNilFields(
         { "name": wp.wp_name
         , "hdg": math.round(wp.leg_bearing)
@@ -743,9 +749,10 @@ var setDeparture = func (icao) {
         return 1;
     }
     else {
-        var airports = findAirportsByICAO(icao);
-        if (size(airports) == 0) return 0;
-        fp.departure = airports[0];
+        var airport = airportinfo(icao);
+        debug.dump(airport);
+        if (airport == nil) return 0;
+        fp.departure = airport;
         return 1;
     }
 }
