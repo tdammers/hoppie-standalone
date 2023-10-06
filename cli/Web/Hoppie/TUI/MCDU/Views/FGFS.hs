@@ -1188,7 +1188,7 @@ rteViewLoad = withFGView $ do
         }
     _ -> do
       let offset = 6 * (curPage - 1)
-          newLegN = numLegs - offset - 1
+          newLegN = if numLegs == 0 then numLegs - offset else numLegs - offset - 1
           lastLegN = numLegs - offset
       modifyView $ \v -> v
         { mcduViewLSKBindings = mempty
@@ -1236,7 +1236,7 @@ rteViewLoad = withFGView $ do
           (LSKR newLegN)
           ""
           (scratchInteract setViaTo getViaTo >> reloadView)
-      when (flightplanModified && newLegN + 1 >= 0 && newLegN + 1 < 6) $ do
+      when (flightplanModified && lastLegN + 1 >= 0 && lastLegN + 1 < 6) $ do
         addLskBinding (LSKL 5) "CANCEL" (cancelFlightplanEdits >> reloadView)
         addLskBinding (LSKR 5) "CONFIRM" (commitFlightplanEdits >> reloadView)
 

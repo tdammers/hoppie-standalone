@@ -1054,6 +1054,21 @@ var iasToTAS = func (alt, ias) {
     return ias * (1.0 + 0.015 * alt / 1000);
 }
 
+var machToTAS = func (alt, mach) {
+    # temperature: we'll use a simplified model here, where the tropopause is
+    # assumed to be at FL350, sea level temperature is 20°C, and a constant
+    # -51°C throughout the stratosphere.
+    var tropopause = 35000;
+    var tempC = (alt > tropopause) ? -51.0 : alt / tropopause * (-51 - 20) + 20;
+    var gamma = 1.4;
+    var R = 287.053;
+    var T = tempC + 273.15;
+    var c = math.sqrt(gamma * R * T);
+    var tas_mps = mach * c;
+    var tas = tas_mps * MPS2KT;
+    return tas;
+}
+
 var dumpPerfProfile = func {
     var alt = 0;
     var dist = 0;
@@ -1074,11 +1089,81 @@ var dumpPerfProfile = func {
         }
         if (perfEntry == nil)
             break;
-        var tas = iasToTAS(alt, perfEntry.spd);
-        printf("%02i FL%03i IAS %3i TAS %3i %5.1fnmi", t, alt / 100, perfEntry.spd, tas, dist);
+        var tas = (substr(perfEntry.spd ~ '', 0, 1) == 'M')
+                        ? machToTAS(alt, substr(perfEntry.spd ~ '', 1) / 100)
+                        : iasToTAS(alt, perfEntry.spd);
+        printf("%02i FL%03i SPD %3s TAS %3i %5.1fnmi", t, alt / 100, perfEntry.spd, tas, dist);
         alt += perfEntry.roc;
         dist += tas / 60;
     }
+}
+
+var calcTOC = func {
+    var pressureAlt = getprop('/instrumentation/altimeter/pressure-alt-ft');
+    var cruiseAlt = getprop('/autopilot/route-manager/cruise/altitude-ft');
+    if (cruiseAlt == nil or cruiseAlt == 0) {
+        cruiseAlt = getprop('/autopilot/route-manager/cruise/flight-level');
+        if (cruiseAlt != nil)
+            cruiseAlt *= 100;
+    }
+    if (cruiseAlt == nil) {
+        mcdu.vnav.tocDist = nil;
+        mcdu.vnav.tocDistRemaining = nil;
+        return;
+    }
+    if (pressureAlt >= cruiseAlt - 100) {
+        mcdu.vnav.tocDist = nil;
+        mcdu.vnav.tocDistRemaining = 0;
+    }
+    var t = 0;
+    var alt = pressureAlt;
+    var distRemaining = 0;
+    var perfIdx = 0;
+    if (!contains(mcdu, 'perfInitData') or !contains(mcdu.perfInitData, 'climb')) {
+        mcdu.vnav.tocDist = nil;
+        mcdu.vnav.tocDistRemaining = nil;
+        return;
+    }
+    printf("Cruise alt: %i", math.floor(cruiseAlt));
+    var perfEntry = mcdu.perfInitData.climb[perfIdx];
+    while (alt < cruiseAlt and perfEntry != nil) {
+        var fl = alt / 100;
+        while (perfEntry != nil and fl > perfEntry.fl) {
+            printf("Next perf entry, because %f > %f", fl, perfEntry.fl);
+            perfIdx += 1;
+            if (perfIdx >= size(mcdu.perfInitData.climb))
+                perfEntry = nil;
+            else
+                perfEntry = mcdu.perfInitData.climb[perfIdx];
+        }
+        if (perfEntry == nil) {
+            mcdu.vnav.tocDist = nil;
+            mcdu.vnav.tocDistRemaining = nil;
+            return;
+        }
+        var tas = (substr(perfEntry.spd ~ '', 0, 1) == 'M')
+                        ? machToTAS(alt, substr(perfEntry.spd ~ '', 1) / 100)
+                        : iasToTAS(alt, perfEntry.spd);
+        if (perfEntry.roc < cruiseAlt - alt) {
+            alt += perfEntry.roc;
+            distRemaining += tas / 60;
+            t += 1;
+        }
+        else {
+            var dt = (cruiseAlt - alt) / perfEntry.roc;
+            distRemaining += tas * perfEntry.roc / (cruiseAlt - alt) / 60;
+            alt = cruiseAlt;
+            t += dt;
+        }
+        var minutes = math.fmod(math.floor(t), 60);
+        var hours = math.floor(t / 60);
+        printf("%02i%02i FL%03i TAS %3i dist %1.1fnmi", hours, minutes, math.round(alt / 100), math.round(tas), distRemaining);
+    }
+    mcdu.vnav.tocDistRemaining = distRemaining;
+    var totalDistance = getprop('/autopilot/route-manager/total-distance');
+    var totalDistanceRemaining = getprop('/autopilot/route-manager/distance-remaining-nm');
+    var distanceTravelled = totalDistance - totalDistanceRemaining;
+    mcdu.vnav.tocDist = distRemaining + distanceTravelled;
 }
 
 var getPerfInitData = func {
@@ -1124,6 +1209,8 @@ var setPerfInitData = func (data) {
     }
 
     calcTOD();
+    calcTOC();
+    debug.dump(mcdu.vnav);
 
     return nil;
 }
@@ -1194,6 +1281,8 @@ var calcTOD = func {
     }
 }
 calcTOD();
+calcTOC();
+debug.dump(mcdu.vnav);
 
 var fms = {
     '_updateFuelSampler': updateFuelSampler,

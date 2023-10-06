@@ -142,15 +142,17 @@ instance FromNasal IASOrMach where
         Just m -> pure $ Mach $ m / 100
   fromNasal n = Left $ NasalUnexpected "IAS/Mach" (show n)
 
-data ClimbPerf =
+data ClimbPerfOf a =
   ClimbPerf
     { climbSpeed :: IASOrMach
-    , climbRate :: Int
+    , climbRate :: a
     , climbToFL :: Int
     }
     deriving (Show, Eq)
 
-instance ToNasal ClimbPerf where
+type ClimbPerf = ClimbPerfOf Int
+
+instance ToNasal a => ToNasal (ClimbPerfOf a) where
   toNasal c =
     NasalHash $ Map.fromList
       [ ("spd", toNasal (climbSpeed c))
@@ -158,14 +160,12 @@ instance ToNasal ClimbPerf where
       , ("fl", toNasal (climbToFL c))
       ]
 
-instance FromNasal ClimbPerf where
+instance FromNasal a => FromNasal (ClimbPerfOf a) where
   fromNasal n =
     ClimbPerf
       <$> fromNasalField "spd" n
       <*> fromNasalField "roc" n
       <*> fromNasalField "fl" n
-
-type ClimbProfile = [ClimbPerf]
 
 data PerfInitData =
   PerfInitData
@@ -174,7 +174,7 @@ data PerfInitData =
     , perfInitMinTakeoffFuel :: Maybe Double
     , perfInitReserveFuel :: Maybe Double
     , perfInitContingencyFuel :: Maybe Double
-    , perfInitClimbProfile :: ClimbProfile
+    , perfInitClimbProfile :: [ClimbPerf]
     , perfInitCruiseAlt :: Maybe Int
     , perfInitCruiseFL :: Maybe Int
     , perfInitCruiseIAS :: Maybe Int
