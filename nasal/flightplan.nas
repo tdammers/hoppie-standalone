@@ -1045,7 +1045,7 @@ var setFGCallsign = func (callsign) {
 }
 
 var getFGAircraftType = func {
-    return getprop('/sim/aircraft');
+    return string.uc(getprop('/sim/aircraft'));
 }
 
 var isValidSID = func () {
