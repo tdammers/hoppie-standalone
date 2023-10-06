@@ -91,7 +91,7 @@ formatEFOB :: Word8 -> Double -> Double -> Maybe Double -> Colored ByteString
 formatEFOB _ _ _ Nothing = ""
 formatEFOB defcolor finres cont (Just efob)
   | efob <= 0
-  = colorize red "---/-"
+  = colorize red . BS8.pack $ printf "%+4.1f" (efob / 1000)
   | otherwise
   = colorize color . BS8.pack $ printf "%5.1f" (abs efob / 1000)
   where
@@ -380,6 +380,7 @@ perfInitViewLoad = withFGView $ do
         pd <- liftIO $ readIORef pdVar
         pdStored <- getPerfInitData
         currentFuel <- getFuelOnBoard
+        aircraftModel <- getFGAircraftType
 
         let setZFW Nothing = do
               liftIO $ writeIORef pdVar $ pd { perfInitZFW = Nothing }
@@ -646,6 +647,8 @@ perfInitViewLoad = withFGView $ do
                   mcduPrint 1 2 green (fromMaybe "----" actype)
                   mcduPrintR (screenW - 1) 1 white "ATC C/S"
                   mcduPrintR (screenW - 1) 2 green callsign
+                  mcduPrint 1 3 white "A/C MODEL"
+                  mcduPrint 1 4 green (fromMaybe "----" aircraftModel)
 
                   mcduPrint 1 5 white "UNITS"
                   mcduPrint 1 6 green (case massUnit of { Kilograms -> "KG"; Pounds -> "LBS" })

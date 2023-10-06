@@ -1026,6 +1026,10 @@ var setFGCallsign = func (callsign) {
     return nil;
 }
 
+var getFGAircraftType = func {
+    return getprop('/sim/aircraft');
+}
+
 var isValidSID = func () {
     var fp = getVisibleFlightplan();
     if (fp.departure == nil) return 1;
@@ -1202,6 +1206,7 @@ var fms = {
 
     'getFGCallsign': getFGCallsign,
     'setFGCallsign': setFGCallsign,
+    'getAircraftType': getFGAircraftType,
 
     'getWaypointName': getWaypointName,
     'deleteWaypoint': deleteWaypoint,

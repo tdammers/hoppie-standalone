@@ -281,6 +281,9 @@ getFGCallsign = fgCallNasal "fms.getFGCallsign" ()
 setFGCallsign :: (MonadFG m) => ByteString -> m ()
 setFGCallsign cs = fgCallNasal "fms.setFGCallsign" [cs]
 
+getFGAircraftType :: (MonadFG m) => m (Maybe ByteString)
+getFGAircraftType = fgCallNasal "fms.getAircraftType" ()
+
 insertDirect :: forall m. (MonadFG m) => Maybe WaypointCandidate -> WaypointCandidate -> m (Either Text ())
 insertDirect fromWPMay toWP = do
   let nasalFunc = case wpType toWP of
