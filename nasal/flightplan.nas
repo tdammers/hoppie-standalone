@@ -56,10 +56,6 @@ var hasFlightplanModifications = func {
 var getModifyableFlightplan = func {
     if (mcdu.modifiedFlightplan == nil) {
         mcdu.modifiedFlightplan = flightplan().clone();
-        if (flightplan().current >= mcdu.modifiedFlightplan.getPlanSize())
-            mcdu.modifiedFlightplan.current = -1;
-        else
-            mcdu.modifiedFlightplan.current = flightplan().current;
     }
     return mcdu.modifiedFlightplan;
 };
@@ -441,24 +437,36 @@ var getRoute = func {
     var entries = [];
     var dist = nil;
     var destinationName = (fp.destination == nil) ? nil : fp.destination.id;
+    var totalDistance = getprop('/autopilot/route-manager/total-distance');
 
+    var lastSid = nil;
+    var lastSidWP = nil;
     var firstEnroute = nil;
     var firstArrival = nil;
+    var firstArrivalWP = nil;
 
     for (var i = 1; i < fp.getPlanSize(); i += 1) {
         var wp = fp.getWP(i);
-        # printf("%s %s", wp.id, wp.wp_role);
+        if (wp.wp_role == 'sid') {
+            lastSid = i;
+            lastSidWP = wp;
+        }
         if (firstEnroute == nil and wp.wp_role == nil)
             firstEnroute = i;
-        if (firstArrival == nil and firstEnroute != nil and (wp.wp_role != nil or wp.id == destinationName))
+        if (firstArrival == nil and firstEnroute != nil and (wp.wp_role != nil or wp.id == destinationName)) {
             firstArrival = i;
+            firstArrivalWP = wp;
+        }
     }
     if (firstEnroute == nil)
         return [];
-    if (firstArrival == nil)
+    if (firstArrival == nil) {
         firstArrival = fp.getPlanSize() - 1;
+        firstArrivalWP = fp.getWP(firstArrival);
+    }
 
     var lastIndex = firstEnroute;
+    var isSid = 0;
     for (var i = firstEnroute; i < firstArrival; i += 1) {
         var wp = fp.getWP(i);
 
@@ -466,27 +474,62 @@ var getRoute = func {
             dist = wp.distance_along_route;
         var parent = wp.wp_parent;
         var parentName = 'DCT';
+        if (i == firstEnroute and lastSidWP != nil and lastSidWP.id == wp.id) {
+            if (fp.sid != nil) {
+                parentName = fp.sid.id;
+                if (fp.sid_trans != nil) {
+                    parentName ~= "." ~ fp.sid_trans.id;
+                }
+            }
+        }
         if (parent != nil)
             parentName = parent.id;
         # printf("%s %s", parentName, wp.wp_name);
         if (parentName != curParent or parentName == 'DCT') {
             if (curParent != nil and curWP != nil) {
-                append(entries, { 'via': curParent, 'to': curWP.id, 'dist': dist, 'fromIndex': lastIndex, 'toIndex': i });
+                var entry = { 'via': curParent, 'to': curWP.id, 'dist': dist, 'fromIndex': lastIndex, 'toIndex': i };
+                if (isSid)
+                    entry['is'] = 'sid';
+                append(entries, entry);
                 dist = 0;
                 lastIndex = i;
             }
         }
         curParent = parentName;
         curWP = wp;
+        isSid = (i == firstEnroute);
         dist += wp.leg_distance;
     }
     if (curParent != nil and curWP != nil and dist > 0) {
-        append(entries, { 'via': curParent, 'to': curWP.id, 'dist': dist, 'fromIndex': lastIndex, 'toIndex': firstArrival });
+        var entry = { 'via': curParent, 'to': curWP.id, 'dist': dist, 'fromIndex': lastIndex, 'toIndex': firstArrival };
+        if (isSid)
+            entry['is'] = 'sid';
+        append(entries, entry);
     }
-    # printf("Plan size: %i", fp.getPlanSize());
-    # foreach (var entry; entries) {
-    #     printf("%s %s %i %i", entry.via, entry.to, entry.fromIndex, entry.toIndex);
-    # }
+    if (firstArrivalWP != nil and fp.destination != nil) {
+        var parentNameParts = [];
+        if (fp.star_trans != nil and fp.star == nil) {
+            append(parentNameParts, fp.star_trans.id);
+        }
+        if (fp.star != nil) {
+            append(parentNameParts, fp.star.id);
+        }
+        if (fp.approach_trans != nil) {
+            append(parentNameParts, fp.approach_trans.id);
+        }
+        if (fp.approach_trans != nil) {
+            append(parentNameParts, fp.approach_trans.id);
+        }
+        var parentName = 'DCT';
+        if (size(parentNameParts) > 0) {
+            parentName = string.join('.', parentNameParts);
+        }
+        dist = totalDistance - firstArrivalWP.distance_along_route;
+        var destname = fp.destination.id;
+        if (fp.destination_runway != nil)
+         destname ~= fp.destination_runway.id;
+        append(entries, { 'is': 'star', 'via': parentName, 'to': destname, 'dist': dist, 'fromIndex': firstArrival, 'toIndex': fp.getPlanSize() });
+    }
     return entries;
 };
 

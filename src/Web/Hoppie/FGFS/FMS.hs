@@ -71,6 +71,7 @@ data RouteLeg =
     , routeLegDistance :: Maybe Double
     , routeLegFromIndex :: Int
     , routeLegToIndex :: Int
+    , routeLegArrDep :: Maybe Text
     }
     deriving (Show)
 
@@ -82,6 +83,7 @@ instance FromNasal RouteLeg where
       <*> fromNasalFieldMaybe "dist" n
       <*> fromNasalField "fromIndex" n
       <*> fromNasalField "toIndex" n
+      <*> fromNasalFieldMaybe "is" n
 
 data WaypointCandidate =
   WaypointCandidate

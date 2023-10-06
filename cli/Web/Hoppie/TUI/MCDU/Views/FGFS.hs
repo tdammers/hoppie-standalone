@@ -1066,9 +1066,14 @@ rteViewLoad = withFGView $ do
   flightplanModified <- hasFlightplanModifications
   routeLegs <- getRoute
   curPage <- gets (mcduViewPage . mcduView)
-  let (numRoutePages, curRouteLegs) = paginateWithHeadroom 2 6 (curPage - 1) routeLegs
+  let (numRoutePages, curRouteLegs') = paginateWithHeadroom 2 6 (curPage - 1) routeLegs
       numPages = numRoutePages + 1
       numLegs = length routeLegs
+  let curRouteLegs
+        | curPage == numPages - 1
+        = curRouteLegs' ++ drop (length routeLegs - 1) routeLegs
+        | otherwise
+        = curRouteLegs'
 
   let setViaTo :: Maybe ByteString -> MCDU Bool
       setViaTo Nothing =
@@ -1180,31 +1185,48 @@ rteViewLoad = withFGView $ do
         }
     _ -> do
       let offset = 6 * (curPage - 1)
-          newLegN = numLegs - offset
+          newLegN = numLegs - offset - 1
+          lastLegN = numLegs - offset
       modifyView $ \v -> v
         { mcduViewLSKBindings = mempty
         , mcduViewDraw = do
-            mcduPrint  1 1 white "VIA"
-            mcduPrint 10 1 white "TO"
-            mcduPrintR (screenW - 1) 1 white "DIST"
-            zipWithM_ (\n leg -> do
+            mcduPrint  0 1 white "VIA"
+            mcduPrint 11 1 white "TO"
+            mcduPrintR screenW 1 white "DIST"
+            zipWithM_ (\n' leg -> do
+                let n | n' == newLegN
+                      = lastLegN
+                      | otherwise
+                      = n'
                 if routeLegTo leg == "DISCONTINUITY" then do
-                  mcduPrint  1 (n * 2 + 2) white "-DISCONTINUITY-"
-                  mcduPrintR (screenW - 1) (n * 2 + 2) white (BS8.pack $ maybe "" formatDistance $ routeLegDistance leg)
+                  mcduPrint  0 (n * 2 + 2) white "-DISCONTINUITY-"
+                  mcduPrintR screenW (n * 2 + 2) white (BS8.pack $ maybe "" formatDistance $ routeLegDistance leg)
                 else do
-                  mcduPrint  1 (n * 2 + 2) green (fromMaybe "DCT" $ routeLegVia leg)
-                  mcduPrint 10 (n * 2 + 2) green (routeLegTo leg)
-                  mcduPrintR (screenW - 1) (n * 2 + 2) green (BS8.pack $ maybe "" formatDistance $ routeLegDistance leg)
-                  -- mcduPrint 1 (n * 2 + 3) blue (BS8.pack $ printf "FROM % i" (routeLegFromIndex leg))
-                  -- mcduPrint 10 (n * 2 + 3) blue (BS8.pack $ printf "TO % i" (routeLegToIndex leg))
+                  let via = fromMaybe "DCT" $ routeLegVia leg
+                      viaColor = if isNothing (routeLegArrDep leg) then green else cyan
+                  if BS.length via > 10 then
+                    mcduPrint  0 (n * 2 + 2) viaColor (BS.take 8 via <> "..")
+                  else
+                    mcduPrint  0 (n * 2 + 2) viaColor via
+                  mcduPrint 11 (n * 2 + 2) green (routeLegTo leg)
+                  mcduPrintR screenW (n * 2 + 2) green (BS8.pack $ maybe "" formatDistance $ routeLegDistance leg)
               ) [0,1..] curRouteLegs
             when (newLegN >= 0 && newLegN < 6) $ do
               mcduPrint  1 (newLegN * 2 + 2) green "-----"
-              mcduPrint 10 (newLegN * 2 + 2) green "-----"
-              mcduPrintR (screenW - 1) (newLegN * 2 + 2) green "-----"
+              mcduPrint 11 (newLegN * 2 + 2) green "-----"
+              mcduPrintR screenW (newLegN * 2 + 2) green "-----"
         }
-      zipWithM_ (\n _ -> do
-          addLskBinding (LSKR n) "" (scratchInteract (setLeg (n + offset)) (getLeg (n + offset)) >> reloadView)
+      zipWithM_ (\n' leg -> do
+          let n | n' == newLegN
+                = lastLegN
+                | otherwise
+                = n'
+          when (routeLegArrDep leg == Just "sid") $
+            addLskBinding (LSKL n) "" (loadView departureView)
+          when (routeLegArrDep leg == Just "star") $
+            addLskBinding (LSKL n) "" (loadView arrivalView)
+          when (isNothing $ routeLegArrDep leg) $
+            addLskBinding (LSKR n) "" (scratchInteract (setLeg (n + offset)) (getLeg (n + offset)) >> reloadView)
         ) [0,1..] curRouteLegs
       when (newLegN >= 0 && newLegN < 6) $ do
         addLskBinding
