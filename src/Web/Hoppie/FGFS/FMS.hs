@@ -509,3 +509,6 @@ setPerfInitData pd = fgCallNasal "fms.setPerfInitData" [pd]
 
 getFuelOnBoard :: (MonadFG m) => m (Maybe Double)
 getFuelOnBoard = fgCallNasalDef Nothing "fms.getFuelOnBoard" ()
+
+getFuelCapacity :: (MonadFG m) => m Double
+getFuelCapacity = fgCallNasalDef 0 "fms.getFuelCapacity" ()

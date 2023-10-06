@@ -40,6 +40,19 @@ var updateFuelSampler = func {
 updateFuelSampler();
 updateFuelSampler();
 
+var getFuelCapacity = func {
+    var baseNode = props.globals.getNode('/consumables/fuel');
+    var tanks = baseNode.getChildren('tank');
+    var totalCapacity = 0;
+    foreach (var tank; tanks) {
+        var capacity = tank.getValue('capacity-m3');
+        var density = tank.getValue('density-kgpm3');
+        if (capacity == nil or density == nil)
+            continue;
+        totalCapacity += density * capacity;
+    }
+    return totalCapacity;
+};
 
 var getFuelFlow = func {
     return fuelSamplerVars.ffKG;
@@ -1335,6 +1348,7 @@ var fms = {
     'getGroundspeed': getGroundspeed,
     'getFuelFlow': getFuelFlow,
     'getFuelOnBoard': getFuelOnBoard,
+    'getFuelCapacity': getFuelCapacity,
     'getUTCMinutes': getUTCMinutes,
     'getFlightplanLegs': getFlightplanLegs,
     'getFlightplanSize': getFlightplanSize,

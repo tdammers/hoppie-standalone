@@ -87,13 +87,13 @@ formatSpeed (Just speed) (Just cstr) =
       _ -> " "
 formatSpeed _ _ = "---"
 
-formatEFOB :: Word8 -> Double -> Double -> Maybe Double -> Colored ByteString
-formatEFOB _ _ _ Nothing = ""
-formatEFOB defcolor finres cont (Just efob)
-  | efob <= 0
-  = colorize red . BS8.pack $ printf "%+4.1f" (efob / 1000)
+formatEFOB :: Word8 -> Double -> Double -> Double -> Maybe Double -> Colored ByteString
+formatEFOB _ _ _ _ Nothing = ""
+formatEFOB defcolor finres cont maxFOB (Just efob)
+  | maxFOB >= 10000
+  = colorize color . BS8.pack $ printf "%5.1f" (efob / 1000)
   | otherwise
-  = colorize color . BS8.pack $ printf "%5.1f" (abs efob / 1000)
+  = colorize color . BS8.pack $ printf "%5.0f" efob
   where
     color
       | efob <= finres
@@ -841,6 +841,7 @@ progViewLoad = withFGView $ do
                       Kilograms -> "KG"
                       Pounds -> "LBS"
   perfInit <- getPerfInitData
+  fuelCapacity <- (* massFactor) <$> getFuelCapacity
   let finres = maybe 0 (* massFactor) $ perfInitReserveFuel perfInit
       cont = maybe 0 (* massFactor) $ perfInitContingencyFuel perfInit
   modifyView $ \v -> v
@@ -851,10 +852,10 @@ progViewLoad = withFGView $ do
                 mcduPrint 13 y color (BS8.pack $ formatETE ete)
               forM_ (legRemainingDist wp) $ \dist ->
                 mcduPrintR 12 y color (BS8.pack $ formatDistanceCompact dist)
-              mcduPrintColoredR 24 y (formatEFOB color finres cont ((* massFactor) <$> legEFOB wp))
+              mcduPrintColoredR 24 y (formatEFOB color finres cont fuelCapacity ((* massFactor) <$> legEFOB wp))
             printWP color y Nothing = do
               mcduPrint 0 y color "-----"
-              mcduPrintColoredR 24 y (formatEFOB color finres cont Nothing)
+              mcduPrintColoredR 24 y (formatEFOB color finres cont fuelCapacity Nothing)
         mcduPrint 1 1 white "TO"
         mcduPrint 8 1 white "DIST"
         mcduPrint 14 1 white "ETE"
@@ -910,6 +911,7 @@ fplViewLoad = withFGView $ do
                       Kilograms -> 1
                       Pounds -> 1 / lbs2kg
   perfInit <- getPerfInitData
+  fuelCapacity <- (* massFactor) <$> getFuelCapacity
   let finres = maybe 0 (* massFactor) $ perfInitReserveFuel perfInit
       cont = maybe 0 (* massFactor) $ perfInitContingencyFuel perfInit
 
@@ -1044,7 +1046,7 @@ fplViewLoad = withFGView $ do
             else do
               mcduPrint 1 (n * 2 + 1) color (BS8.pack . maybe "---°" (printf "%03.0f°") $ legHeading leg)
               mcduPrint 6 (n * 2 + 1) color (BS8.pack . maybe "----NM" formatDistance $ if isCurrent then legRemainingDist leg else legDist leg)
-              mcduPrintColored 13 (n * 2 + 1) (formatEFOB color finres cont . fmap (* massFactor) $ legEFOB leg)
+              mcduPrintColored 13 (n * 2 + 1) (formatEFOB color finres cont fuelCapacity . fmap (* massFactor) $ legEFOB leg)
               mcduPrint 0 (n * 2 + 2) color (encodeUtf8 $ legName leg)
             unless (legIsDiscontinuity leg) $ do
               mcduPrint (screenW - 11) (n * 2 + 2) color (BS8.pack $ formatSpeed (legSpeed leg) (legSpeedType leg))
