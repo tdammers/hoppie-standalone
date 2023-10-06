@@ -53,10 +53,22 @@ var hasFlightplanModifications = func {
     return (mcdu.modifiedFlightplan != nil);
 };
 
+var reportFlightplanCurrent = func (label='---') {
+    var fp = flightplan();
+    var mfp = mcdu.modifiedFlightplan;
+    if (fp != nil)
+        printf("%s: Active FP: %i/%i", label, fp.current, fp.getPlanSize());
+    if (mfp != nil)
+        printf("%s: Modified FP: %i/%i", label, mfp.current, mfp.getPlanSize());
+};
+
 var getModifyableFlightplan = func {
+    # reportFlightplanCurrent('getModifyableFlightplan[pre]');
     if (mcdu.modifiedFlightplan == nil) {
         mcdu.modifiedFlightplan = flightplan().clone();
+        mcdu.modifiedFlightplan.current = flightplan().current;
     }
+    # reportFlightplanCurrent('getModifyableFlightplan[post]');
     return mcdu.modifiedFlightplan;
 };
 
@@ -72,18 +84,24 @@ var cancelFlightplanEdits = func {
 };
 
 var commitFlightplanEdits = func {
+    # reportFlightplanCurrent('commitFlightplanEdits[pre]');
     var current = math.max(1, mcdu.modifiedFlightplan.current);
     # TODO: if modifiedFlightplan.current < 0, then that means we have
     # deleted the previously-current waypoint from the flightplan.
     # Right now, the "solution" we pick is to just rewind the flightplan to the
     # start of the route, but of course that is not the correct way.
     mcdu.modifiedFlightplan.activate();
+    # reportFlightplanCurrent('commitFlightplanEdits[after activate()]');
     fgcommand("activate-flightplan", props.Node.new({"activate": 1}));
+    # reportFlightplanCurrent('commitFlightplanEdits[after fgcommand(activate)]');
     if (current < flightplan().getPlanSize())
         flightplan().current = current;
+    elsif (flightplan().getPlanSize() >= 2)
+        flightplan().current = 1;
     else
         flightplan().current = -1;
     mcdu.modifiedFlightplan = nil;
+    # reportFlightplanCurrent('commitFlightplanEdits[post]');
     return nil;
 };
 
