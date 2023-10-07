@@ -536,6 +536,7 @@ var insertDirect = func (wp, from) {
 };
 
 var getRoute = func {
+    print("getRoute");
     var fp = fms.getVisibleFlightplan();
     var curParent = 'DCT';
     var curWP = nil;
@@ -564,7 +565,7 @@ var getRoute = func {
         }
     }
     if (firstEnroute == nil)
-        return [];
+        firstEnroute = 1;
     if (firstArrival == nil) {
         firstArrival = fp.getPlanSize() - 1;
         firstArrivalWP = fp.getWP(firstArrival);
@@ -611,7 +612,8 @@ var getRoute = func {
             entry['is'] = 'sid';
         append(entries, entry);
     }
-    if (firstArrivalWP != nil and fp.destination != nil) {
+    debug.dump(fp.destination);
+    if (fp.destination != nil) {
         var parentNameParts = [];
         if (fp.star_trans != nil and fp.star == nil) {
             append(parentNameParts, fp.star_trans.id);
@@ -629,10 +631,16 @@ var getRoute = func {
         if (size(parentNameParts) > 0) {
             parentName = string.join('.', parentNameParts);
         }
-        dist = totalDistance - firstArrivalWP.distance_along_route;
+
         var destname = fp.destination.id;
         if (fp.destination_runway != nil)
          destname ~= fp.destination_runway.id;
+        if (firstArrivalWP == nil) {
+            dist = 0;
+        }
+        else {
+            dist = totalDistance - firstArrivalWP.distance_along_route;
+        }
         append(entries, { 'is': 'star', 'via': parentName, 'to': destname, 'dist': dist, 'fromIndex': firstArrival, 'toIndex': fp.getPlanSize() });
     }
     return entries;
