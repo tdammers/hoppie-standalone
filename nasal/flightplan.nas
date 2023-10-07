@@ -273,6 +273,36 @@ var getFlightplanLegs = func (pageSize = nil, curPage = nil, offset = nil) {
     return result;
 };
 
+var getDestinationIndex = func (fp = nil) {
+    if (fp == nil)
+        fp = fms.getVisibleFlightplan();
+    for (var i = 1; i < fp.getPlanSize(); i += 1) {
+        var wp = fp.getWP(i);
+        if (wp != nil) {
+            # print(wp.wp_name);
+            # print(wp.wp_type);
+            # print(wp.wp_role);
+        
+            if (wp.wp_type == 'runway') {
+                # This happens when the destination exists and has a runway
+                # selected.
+                wpDest = wp;
+                return i;
+                break;
+            }
+            if (wp.wp_role == 'approach' and fp.destination != nil and
+                # This is our fallback when no destination runway has been
+                # selected; it will (hopefully) match the destination airport,
+                # if any.
+                wp.wp_name == fp.destination.id) {
+                wpDest = wp;
+                return i;
+            }
+        }
+    }
+    return -1;
+}
+
 var getProgressInfo = func () {
     var fp = fms.getVisibleFlightplan();
     var groundspeed = getprop('/velocities/groundspeed-kt');
@@ -287,31 +317,7 @@ var getProgressInfo = func () {
     var wpCurrent = fp.getWP(fp.current);
     var wpNext = fp.getWP(fp.current + 1);
     var wpDest = nil;
-    var destIdx = -1;
-    for (var i = fp.current; i < fp.getPlanSize(); i += 1) {
-        var wp = fp.getWP(i);
-        if (wp != nil) {
-            # print(wp.wp_name);
-            # print(wp.wp_type);
-            # print(wp.wp_role);
-        
-            if (wp.wp_type == 'runway') {
-                # This happens when the destination exists and has a runway
-                # selected.
-                wpDest = wp;
-                destIdx = i;
-                break;
-            }
-            if (wp.wp_role == 'approach' and fp.destination != nil and
-                # This is our fallback when no destination runway has been
-                # selected; it will (hopefully) match the destination airport,
-                # if any.
-                wp.wp_name == fp.destination.id) {
-                wpDest = wp;
-                destIdx = i;
-            }
-        }
-    }
+    var destIdx = getDestinationIndex(fp);
 
     var info = {};
     if (wpCurrent != nil)
@@ -640,6 +646,8 @@ var getRoute = func {
     if (!rteClosed)
         append(entries, nil);
     if (fp.destination != nil) {
+        var destinationIndex = getDestinationIndex(fp);
+        var destinationWP = fp.getWP(destinationIndex);
         var parentNameParts = [];
         if (fp.star_trans != nil and fp.star == nil) {
             append(parentNameParts, fp.star_trans.id);
@@ -661,13 +669,13 @@ var getRoute = func {
         var destname = fp.destination.id;
         if (fp.destination_runway != nil)
          destname ~= fp.destination_runway.id;
-        if (firstArrivalWP == nil) {
+        if (lastEnrouteWP == nil) {
             dist = 0;
         }
         else {
-            dist = totalDistance - firstArrivalWP.distance_along_route;
+            dist = destinationWP.distance_along_route - lastEnrouteWP.distance_along_route;
         }
-        append(entries, { 'is': 'star', 'via': parentName, 'to': destname, 'dist': dist, 'fromIndex': firstArrival, 'toIndex': fp.getPlanSize() });
+        append(entries, { 'is': 'star', 'via': parentName, 'to': destname, 'dist': dist, 'fromIndex': firstArrival, 'toIndex': destinationIndex });
     }
     return entries;
 };
