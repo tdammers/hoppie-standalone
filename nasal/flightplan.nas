@@ -129,11 +129,6 @@ var getUTCMinutes = func {
     return (hour * 60 + minute + second / 60);
 };
 
-var getFlightplanSize = func {
-    var fp = fms.getVisibleFlightplan();
-    return fp.getPlanSize();
-};
-
 var makeLegInfo = func (wp, totalDistance, totalDistanceRemaining, fuelOnBoard, groundspeed, fuelFlow) {
     var parent_id = nil;
     if (wp.wp_parent != nil)
@@ -166,6 +161,31 @@ var makeLegInfo = func (wp, totalDistance, totalDistanceRemaining, fuelOnBoard, 
         });
 };
 
+var getFlightplanSize = func {
+    var current = nil;
+    var fp = fms.getVisibleFlightplan();
+
+    var n = 0;
+    for (var i = 0; i < fp.getPlanSize(); i += 1) {
+        var wp = fp.getWP(i);
+        if (current != nil and
+                current.name == wp.wp_name and
+                wp.leg_distance < 0.001) {
+            # skip
+        }
+        else {
+            if (current != nil)
+                n += 1;
+            current =
+                { "name": wp.wp_name
+                }
+        }
+    }
+    if (current != nil)
+        n += 1;
+    return n;
+};
+
 var getFlightplanLegs = func (pageSize = nil, curPage = nil, offset = nil) {
     var acpos = geo.aircraft_position();
     var fp = fms.getVisibleFlightplan();
@@ -188,9 +208,12 @@ var getFlightplanLegs = func (pageSize = nil, curPage = nil, offset = nil) {
             }
         }
     }
-    var end = math.min(fp.getPlanSize(), first + length);
+    var end = first + pageSize;
 
-    for (var i = 0; i < end; i += 1) {
+    var current = nil;
+
+    var n = 0;
+    for (var i = 0; i < fp.getPlanSize(); i += 1) {
         var wp = fp.getWP(i);
         var parent_id = nil;
         if (wp.wp_parent != nil)
@@ -207,25 +230,44 @@ var getFlightplanLegs = func (pageSize = nil, curPage = nil, offset = nil) {
                 fuelRemaining += fuelFlow * wp.leg_distance / fuelGS * 3600;
             }
         }
-        if (i >= first) {
-            append(result,
-                    removeNilFields(
-                        { "name": wp.wp_name
-                        , "hdg": math.round(geo.normdeg(wp.leg_bearing))
-                        , "ldist": wp.leg_distance
-                        , "cdist": wp.distance_along_route
-                        , "rdist": distanceRemaining
-                        , "spd": wp.speed_cstr
-                        , "spdty": wp.speed_cstr_type
-                        , "alt": wp.alt_cstr
-                        , "altty": wp.alt_cstr_type
-                        , "p": parent_id
-                        , "role": wp.wp_role
-                        , "efob": fuelRemaining
-                        , "disc": (wp.wp_type == "discontinuity" or wp.wp_type == "vectors")
-                        }));
+        if (current != nil and
+                current.name == wp.wp_name and
+                wp.leg_distance < 0.001) {
+            if (wp.speed_cstr > 0) {
+                current.spd = wp.speed_cstr;
+                current.spdty = wp.speed_cstr_type;
+            }
+            if (wp.alt_cstr > 0) {
+                current.alt = wp.alt_cstr;
+                current.altty = wp.alt_cstr_type;
+            }
+            current.ito = i;
+        }
+        else {
+            if (current != nil and n >= first and n < end)
+                append(result, removeNilFields(current));
+            current =
+                { "name": wp.wp_name
+                , "hdg": math.round(geo.normdeg(wp.leg_bearing))
+                , "ldist": wp.leg_distance
+                , "cdist": wp.distance_along_route
+                , "rdist": distanceRemaining
+                , "spd": wp.speed_cstr
+                , "spdty": wp.speed_cstr_type
+                , "alt": wp.alt_cstr
+                , "altty": wp.alt_cstr_type
+                , "p": parent_id
+                , "role": wp.wp_role
+                , "efob": fuelRemaining
+                , "disc": (wp.wp_type == "discontinuity" or wp.wp_type == "vectors")
+                , "ifrom": i
+                , "ito": i
+                };
+            n += 1;
         }
     }
+    if (current != nil and n >= first and n < end)
+        append(result, removeNilFields(current));
     return result;
 };
 
@@ -283,6 +325,7 @@ var setLegAltitude = func (n, alt, altType) {
     if (wp == nil)
         return "NO WPT";
     wp = fms.getModifyableFlightplan().getWP(n);
+    printf("Set altitude %i: %s %i", n, altType, alt);
     wp.setAltitude(alt, altType);
     return nil;
 };
@@ -292,6 +335,7 @@ var setLegSpeed = func (n, speed, speedType) {
     if (wp == nil)
         return "NO WPT";
     wp = fms.getModifyableFlightplan().getWP(n);
+    printf("Set speed: %s %i", speedType, speed);
     wp.setSpeed(speed, speedType);
     return nil;
 };
@@ -400,9 +444,35 @@ var completeWaypoint = func (wp, acpos = nil) {
 };
 
 var getCurrentLeg = func {
+    var current = nil;
     var fp = fms.getVisibleFlightplan();
-    return fp.current;
+
+    var n = 0;
+    var i = 0;
+    for (i = 0; i < fp.getPlanSize(); i += 1) {
+        var wp = fp.getWP(i);
+        if (current != nil and
+                current.name == wp.wp_name and
+                wp.leg_distance < 0.001) {
+            # skip
+        }
+        else {
+            if (current != nil)
+                n += 1;
+            current =
+                { "name": wp.wp_name
+                , "lat": wp.lat
+                , "lon": wp.lon
+                }
+        }
+        if (fp.current == i)
+            return n + 1;
+    }
+    if (current != nil and n >= first and n < end)
+        n += 1;
+    return n + 1;
 };
+
 
 var getWaypointName = func (i) {
     var fp = fms.getVisibleFlightplan();
@@ -1197,6 +1267,13 @@ var calcTOC = func {
     mcdu.vnav.tocDist = distRemaining + distanceTravelled;
 }
 
+var getTransitionAlt = func {
+    if (!contains(mcdu, 'perfInitData') or !contains(mcdu.perfInitData, 'transAlt'))
+        return 18000;
+    else
+        return mcdu.perfInitData.transAlt;
+}
+
 var getPerfInitData = func {
     var result = {};
     foreach (var k; keys(mcdu.perfInitData)) {
@@ -1357,6 +1434,7 @@ var fms = {
 
     'getPerfInitData': getPerfInitData,
     'setPerfInitData': setPerfInitData,
+    'getTransitionAlt': getTransitionAlt,
 
     'setDeparture': setDeparture,
     'getDeparture': getDeparture,

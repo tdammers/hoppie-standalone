@@ -35,6 +35,7 @@ import Data.Text.Encoding
 import Data.Word
 import Text.Printf
 import Text.Read (readMaybe)
+import Safe (atMay)
 
 formatETE :: Double -> String
 formatETE minutesRaw =
@@ -59,21 +60,38 @@ formatDistanceCompact dist
   | otherwise
   = printf "%4.0f" dist
 
-formatAltitude :: Maybe Double -> Maybe Text -> String
-formatAltitude (Just alt) (Just cstr) =
+formatAltitude :: Double -> Maybe Double -> Maybe Text -> String
+formatAltitude transAlt (Just alt) (Just cstr) =
   altStr ++ conStr
   where
     altStr = case () of
-      () | alt <= 18000
+      () | alt <= transAlt
          -> printf "%5.0f" alt
       () | otherwise
-         -> printf "FL%3.0f" (alt / 100)
+         -> printf "FL%03.0f" (alt / 100)
     conStr = case cstr of
       "above" -> "A"
       "below" -> "B"
       "at" -> " "
       _ -> " "
-formatAltitude _ _ = "  ---"
+formatAltitude _ _ _ = "  ---"
+
+formatAltitudeCompact :: Double -> Maybe Double -> Maybe Text -> String
+formatAltitudeCompact transAlt (Just alt) (Just cstr) =
+  altStr ++ conStr
+  where
+    altStr = case () of
+      () | alt <= transAlt
+         -> printf "%1.0f" alt
+      () | otherwise
+         -> printf "FL%1.0f" (alt / 100)
+    conStr = case cstr of
+      "above" -> "A"
+      "below" -> "B"
+      "at" -> ""
+      _ -> ""
+formatAltitudeCompact _ _ _ = "-"
+
 
 formatSpeed :: Maybe Double -> Maybe Text -> String
 formatSpeed (Just speed) (Just cstr) =
@@ -102,22 +120,6 @@ formatEFOB defcolor finres cont maxFOB (Just efob)
       = yellow
       | otherwise
       = defcolor
-
-formatAltitudeCompact :: Maybe Double -> Maybe Text -> String
-formatAltitudeCompact (Just alt) (Just cstr) =
-  altStr ++ conStr
-  where
-    altStr = case () of
-      () | alt <= 18000
-         -> printf "%1.0f" alt
-      () | otherwise
-         -> printf "FL%1.0f" (alt / 100)
-    conStr = case cstr of
-      "above" -> "A"
-      "below" -> "B"
-      "at" -> ""
-      _ -> ""
-formatAltitudeCompact _ _ = "-"
 
 formatSpeedCompact :: Maybe Double -> Maybe Text -> String
 formatSpeedCompact (Just speed) (Just cstr) =
@@ -900,11 +902,12 @@ fplViewLoad = withFGView $ do
   (utcMinutes :: Double) <- getUTCMinutes
 
   planSize <- getFlightplanSize
-  currentLeg <- fmap (max 1) <$> getCurrentLeg
+  currentLeg <- getCurrentLeg
 
-  curLegs <- getFlightplanLegs legsPerPage curPage (fromMaybe 1 currentLeg - 1)
+  let offset = max 1 $ fromMaybe 1 currentLeg - 1
+  curLegs <- getFlightplanLegs legsPerPage curPage offset
   flightplanModified <- hasFlightplanModifications
-  let legsDropped = curPage * legsPerPage
+  let legsDropped = curPage * legsPerPage + offset
   let numPages = (planSize - fromMaybe 0 currentLeg + legsPerPage) `div` legsPerPage
   massUnit <- gets mcduMassUnit
   let massFactor = case massUnit of
@@ -912,51 +915,59 @@ fplViewLoad = withFGView $ do
                       Pounds -> 1 / lbs2kg
   perfInit <- getPerfInitData
   fuelCapacity <- (* massFactor) <$> getFuelCapacity
+  transAlt <- getTransitionAlt
   let finres = maybe 0 (* massFactor) $ perfInitReserveFuel perfInit
       cont = maybe 0 (* massFactor) $ perfInitContingencyFuel perfInit
 
   let putWaypoint :: Int -> Maybe ByteString -> MCDU Bool
-      putWaypoint n Nothing = deleteWaypoint n
+      putWaypoint n Nothing = do
+        forM_ (atMay curLegs n) $ \leg -> do
+          forM_ [legIdxFrom leg .. legIdxTo leg] deleteWaypoint
+        return True
       putWaypoint n (Just targetWPName) = do
         mcduResolveWaypoint "FPL" targetWPName $ \case
           Nothing -> do
             loadView fplView
           Just toWP -> do
-            getFlightplanLeg n $ \fromWPMay -> do
-              toIndexMay <- findFPWaypoint toWP
-              fromIndexMay <- join <$> mapM findFPWaypoint fromWPMay
-              case (toIndexMay :: Maybe Int, fromIndexMay :: Maybe Int) of
-                (Nothing, Nothing) -> do
-                  scratchWarn "INVALID"
-                  releaseWaypointCandidate toWP
-                  mapM_ releaseWaypointCandidate fromWPMay
-                  reloadView
-                (Just toIndex, Just fromIndex) ->
-                  if toIndex < fromIndex then
-                    loadDirectToViewWith (Just toWP) fromWPMay
-                  else
+            forM_ (atMay curLegs n) $ \leg -> do
+              getFlightplanLeg (legIdxTo leg) $ \fromWPMay -> do
+                toIndexMay <- findFPWaypoint toWP
+                fromIndexMay <- join <$> mapM findFPWaypoint fromWPMay
+                case (toIndexMay :: Maybe Int, fromIndexMay :: Maybe Int) of
+                  (Nothing, Nothing) -> do
+                    scratchWarn "INVALID"
+                    releaseWaypointCandidate toWP
+                    mapM_ releaseWaypointCandidate fromWPMay
+                    reloadView
+                  (Just toIndex, Just fromIndex) ->
+                    if toIndex < fromIndex then
+                      loadDirectToViewWith (Just toWP) fromWPMay
+                    else
+                      loadDirectToViewWith fromWPMay (Just toWP)
+                  _ ->
                     loadDirectToViewWith fromWPMay (Just toWP)
-                _ ->
-                  loadDirectToViewWith fromWPMay (Just toWP)
         return True
       getWaypoint n = do
-        getWaypointName n
+        return $ encodeUtf8 . legName <$> atMay curLegs n
 
       putRestrictions :: Int -> Maybe ByteString -> MCDU Bool
       putRestrictions n Nothing = do
-        err1 <- setFPLegSpeed n Nothing ""
-        case err1 of
-          Just e -> do
-            scratchWarn e
-            return False
-          Nothing -> do
-            err2 <- setFPLegAltitude n Nothing ""
-            case err2 of
-              Just e -> do
-                scratchWarn e
-                return False
-              Nothing ->
-                return True
+        fmap (maybe False and) $
+          forM (atMay curLegs n) $ \leg -> do
+            forM [legIdxFrom leg .. legIdxTo leg] $ \i -> do
+              err1 <- setFPLegSpeed i Nothing ""
+              case err1 of
+                Just e -> do
+                  scratchWarn e
+                  return False
+                Nothing -> do
+                  err2 <- setFPLegAltitude i Nothing ""
+                  case err2 of
+                    Just e -> do
+                      scratchWarn e
+                      return False
+                    Nothing ->
+                      return True
       putRestrictions n (Just rbs) = do
         let parseResult = parseRestrictions rbs
         case parseResult of
@@ -964,31 +975,36 @@ fplViewLoad = withFGView $ do
             scratchWarn e
             return False
           Right (speedMay, speedType, altMay, altType) -> do
-            err1 <- if speedType == "keep" then
-                      return Nothing
-                    else
-                      setFPLegSpeed n speedMay speedType
-            case err1 of
-              Just e -> do
-                scratchWarn e
-                return False
-              Nothing -> do
-                err2 <- if altType == "keep" then
-                          return Nothing
-                        else
-                          setFPLegAltitude n altMay altType
-                case err2 of
-                  Just e -> do
-                    scratchWarn e
-                    return False
-                  Nothing ->
-                    return True
+            liftIO . print $ (speedMay, speedType, altMay, altType)
+            fmap (maybe False and) $
+              forM (atMay curLegs n) $ \leg -> do
+                liftIO . print $ leg
+                forM [legIdxFrom leg .. legIdxTo leg] $ \i -> do
+                  liftIO . print $ i
+                  err1 <- if speedType == "keep" then
+                            return Nothing
+                          else
+                            setFPLegSpeed i speedMay speedType
+                  case err1 of
+                    Just e -> do
+                      scratchWarn e
+                      return False
+                    Nothing -> do
+                      err2 <- if altType == "keep" then
+                                return Nothing
+                              else
+                                setFPLegAltitude i altMay altType
+                      case err2 of
+                        Just e -> do
+                          scratchWarn e
+                          return False
+                        Nothing ->
+                          return True
       getRestrictions n = do
-        let n' = n - legsDropped + 1 - fromMaybe 0 currentLeg
-        case drop n' curLegs of
+        case drop n curLegs of
           (leg:_) -> do
             let spdStr = BS8.pack $ formatSpeedCompact (legSpeed leg) (legSpeedType leg)
-                altStr = BS8.pack $ formatAltitudeCompact (legAlt leg) (legAltType leg)
+                altStr = BS8.pack $ formatAltitudeCompact transAlt (legAlt leg) (legAltType leg)
             return . Just $ spdStr <> "/" <> altStr
           _ -> do
             scratchWarn "NO WPT"
@@ -1001,8 +1017,8 @@ fplViewLoad = withFGView $ do
     , mcduViewLSKBindings = Map.fromList $
         [ (LSKL n, ("", do
               scratchInteract
-                (putWaypoint (n + legsDropped - 1 + fromMaybe 0 currentLeg))
-                (getWaypoint (n + legsDropped - 1 + fromMaybe 0 currentLeg))
+                (putWaypoint n)
+                (getWaypoint n)
               reloadView
           ))
         | n <- [0 .. legsPerPage ]
@@ -1010,8 +1026,8 @@ fplViewLoad = withFGView $ do
         ++
         [ (LSKR n, ("", do
               scratchInteract
-                (putRestrictions (n + legsDropped - 1 + fromMaybe 0 currentLeg))
-                (getRestrictions (n + legsDropped - 1 + fromMaybe 0 currentLeg))
+                (putRestrictions n)
+                (getRestrictions n)
               reloadView
           ))
         | n <- [0 .. legsPerPage ]
@@ -1025,8 +1041,8 @@ fplViewLoad = withFGView $ do
           mcduPrintC (screenW `div` 2) (screenH `div` 2) white "NO FPL"
         zipWithM_
           (\n leg -> do
-            let isCurrent = n + legsDropped == 1
-                isPrevious = n + legsDropped == 0
+            let isCurrent = Just (n + legsDropped) == currentLeg
+                isPrevious = Just (n + legsDropped + 1) == currentLeg
                 color
                   | isPrevious = yellow
                   | isCurrent = magenta
@@ -1051,7 +1067,7 @@ fplViewLoad = withFGView $ do
             unless (legIsDiscontinuity leg) $ do
               mcduPrint (screenW - 11) (n * 2 + 2) color (BS8.pack $ formatSpeed (legSpeed leg) (legSpeedType leg))
               mcduPrint (screenW - 7) (n * 2 + 2) color "/"
-              mcduPrint (screenW - 6) (n * 2 + 2) color (BS8.pack $ formatAltitude (legAlt leg) (legAltType leg))
+              mcduPrint (screenW - 6) (n * 2 + 2) color (BS8.pack $ formatAltitude transAlt (legAlt leg) (legAltType leg))
 
           ) [0,1..] curLegs
     }
