@@ -417,7 +417,6 @@ var findWaypoint = func (needle) {
     }
     var sortfunc = func (a, b) {
         # Sort FP legs first
-        debug.dump(a.type, a.distance, b.type, b.distance);
         if (a.type == "leg" and b.type != "leg")
             return -1;
         elsif (b.type == "leg" and a.type != "leg")
@@ -731,9 +730,11 @@ appendViaTo = func (via, toWP) {
 
     fp = fms.getModifyableFlightplan();
 
+    var current = fp.current;
     if (insertIndex != nil) {
         fp.insertWPAfter(leg, insertIndex - 1);
     }
+    fp.current = current;
     return nil;
 };
 
@@ -760,9 +761,11 @@ appendDirectTo = func (toWP) {
 
     fp = fms.getModifyableFlightplan();
 
+    var current = fp.current;
     if (insertIndex != nil) {
         fp.insertWPAfter(leg, insertIndex - 1);
     }
+    fp.current = current;
     return nil;
 };
 
@@ -899,7 +902,6 @@ var setDeparture = func (icao) {
     }
     else {
         var airport = airportinfo(icao);
-        debug.dump(airport);
         if (airport == nil) return 0;
         fp.departure = airport;
         return 1;
@@ -1323,7 +1325,6 @@ var setPerfInitData = func (data) {
 
     calcTOD();
     calcTOC();
-    debug.dump(mcdu.vnav);
 
     return nil;
 }
@@ -1337,7 +1338,6 @@ var calcTOD = func {
     if (fp.destination != nil) {
         destAlt = (fp.destination.elevation or 0) * M2FT;
     }
-    debug.dump(mcdu.perfInitData);
     var cruiseAlt = getprop('/autopilot/route-manager/cruise/altitude-ft');
     var cruiseFL = getprop('/autopilot/route-manager/cruise/flight-level');
     if (cruiseFL > 0)
@@ -1395,7 +1395,6 @@ var calcTOD = func {
 }
 calcTOD();
 calcTOC();
-debug.dump(mcdu.vnav);
 
 var fms = {
     '_updateFuelSampler': updateFuelSampler,
