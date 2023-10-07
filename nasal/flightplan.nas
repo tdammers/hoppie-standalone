@@ -129,7 +129,7 @@ var getUTCMinutes = func {
     return (hour * 60 + minute + second / 60);
 };
 
-var makeLegInfo = func (wp, totalDistance, totalDistanceRemaining, fuelOnBoard, groundspeed, fuelFlow) {
+var makeLegInfo = func (idx, wp, totalDistance, totalDistanceRemaining, fuelOnBoard, groundspeed, fuelFlow) {
     var parent_id = nil;
     if (wp.wp_parent != nil)
         parent_id = wp.wp_parent.id;
@@ -158,6 +158,8 @@ var makeLegInfo = func (wp, totalDistance, totalDistanceRemaining, fuelOnBoard, 
         , "efob": fuelRemaining
         , "ete": timeRemaining
         , "disc": (wp.wp_type == "discontinuity" or wp.wp_type == "vectors")
+        , "ifrom": idx
+        , "ito": idx
         });
 };
 
@@ -285,6 +287,7 @@ var getProgressInfo = func () {
     var wpCurrent = fp.getWP(fp.current);
     var wpNext = fp.getWP(fp.current + 1);
     var wpDest = nil;
+    var destIdx = -1;
     for (var i = fp.current; i < fp.getPlanSize(); i += 1) {
         var wp = fp.getWP(i);
         if (wp != nil) {
@@ -296,6 +299,7 @@ var getProgressInfo = func () {
                 # This happens when the destination exists and has a runway
                 # selected.
                 wpDest = wp;
+                destIdx = i;
                 break;
             }
             if (wp.wp_role == 'approach' and fp.destination != nil and
@@ -304,17 +308,18 @@ var getProgressInfo = func () {
                 # if any.
                 wp.wp_name == fp.destination.id) {
                 wpDest = wp;
+                destIdx = i;
             }
         }
     }
 
     var info = {};
     if (wpCurrent != nil)
-        info.current = makeLegInfo(wpCurrent, totalDistance, totalDistanceRemaining, fuelOnBoard, fuelGS, fuelFlow);
+        info.current = makeLegInfo(fp.current, wpCurrent, totalDistance, totalDistanceRemaining, fuelOnBoard, fuelGS, fuelFlow);
     if (wpNext != nil)
-        info.next = makeLegInfo(wpNext, totalDistance, totalDistanceRemaining, fuelOnBoard, fuelGS, fuelFlow);
+        info.next = makeLegInfo(fp.current + 1, wpNext, totalDistance, totalDistanceRemaining, fuelOnBoard, fuelGS, fuelFlow);
     if (wpDest != nil)
-        info.destination = makeLegInfo(wpDest, totalDistance, totalDistanceRemaining, fuelOnBoard, fuelGS, fuelFlow);
+        info.destination = makeLegInfo(destIdx, wpDest, totalDistance, totalDistanceRemaining, fuelOnBoard, fuelGS, fuelFlow);
     info.fob = fuelOnBoard;
     return info;
 };
