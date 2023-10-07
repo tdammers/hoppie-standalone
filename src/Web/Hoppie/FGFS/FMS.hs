@@ -298,7 +298,7 @@ insertDirect fromWPMay toWP = do
     Just err -> return $ Left err
     Nothing -> return $ Right ()
 
-getRoute :: (MonadFG m) => m [RouteLeg]
+getRoute :: (MonadFG m) => m [Maybe RouteLeg]
 getRoute =
   fgCallNasal "fms.getRoute" ()
 

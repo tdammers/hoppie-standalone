@@ -548,6 +548,9 @@ var getRoute = func {
     var lastSid = nil;
     var lastSidWP = nil;
     var firstEnroute = nil;
+    var firstEnrouteWP = nil;
+    var lastEnroute = nil;
+    var lastEnrouteWP = nil;
     var firstArrival = nil;
     var firstArrivalWP = nil;
 
@@ -557,9 +560,15 @@ var getRoute = func {
             lastSid = i;
             lastSidWP = wp;
         }
-        if (firstEnroute == nil and wp.wp_role == nil)
+        elsif (firstEnroute == nil and wp.wp_role == nil) {
             firstEnroute = i;
-        if (firstArrival == nil and firstEnroute != nil and (wp.wp_role != nil or wp.id == destinationName)) {
+            firstEnrouteWP = wp;
+        }
+        elsif (wp.wp_role == nil) {
+            lastEnroute = i;
+            lastEnrouteWP = wp;
+        }
+        elsif (firstArrival == nil and (wp.wp_role != nil or wp.id == destinationName)) {
             firstArrival = i;
             firstArrivalWP = wp;
         }
@@ -569,6 +578,19 @@ var getRoute = func {
     if (firstArrival == nil) {
         firstArrival = fp.getPlanSize() - 1;
         firstArrivalWP = fp.getWP(firstArrival);
+    }
+
+    var rteClosed = 0;
+    if (firstArrivalWP != nil) {
+        printf("First Arrival: %s", firstArrivalWP.id);
+        if (lastEnrouteWP != nil) {
+            printf("Last Enroute: %s", lastEnrouteWP.id);
+            rteClosed = lastEnrouteWP.id == firstArrivalWP.id;
+        }
+        elsif (lastSidWP != nil) {
+            printf("Last on SID: %s", lastSidWP.id);
+            rteClosed = lastSidWP.id == firstArrivalWP.id;
+        }
     }
 
     var lastIndex = firstEnroute;
@@ -606,13 +628,17 @@ var getRoute = func {
         isSid = (i == firstEnroute);
         dist += wp.leg_distance;
     }
+    if (firstEnrouteWP == nil and fp.sid != nil) {
+        isSid = 1;
+    }
     if (curParent != nil and curWP != nil and dist > 0) {
         var entry = { 'via': curParent, 'to': curWP.id, 'dist': dist, 'fromIndex': lastIndex, 'toIndex': firstArrival };
         if (isSid)
             entry['is'] = 'sid';
         append(entries, entry);
     }
-    debug.dump(fp.destination);
+    if (!rteClosed)
+        append(entries, nil);
     if (fp.destination != nil) {
         var parentNameParts = [];
         if (fp.star_trans != nil and fp.star == nil) {
@@ -740,7 +766,11 @@ appendViaTo = func (via, toWP) {
 
     var current = fp.current;
     if (insertIndex != nil) {
-        fp.insertWPAfter(leg, insertIndex - 1);
+        call(fp.insertWPAfter, [leg, insertIndex - 1], fp, {}, err);
+        if (size(err) > 0) {
+            debug.dump(err);
+            return "INVALID"
+        }
     }
     fp.current = current;
     return nil;

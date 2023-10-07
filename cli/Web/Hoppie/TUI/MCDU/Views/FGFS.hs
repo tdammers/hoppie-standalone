@@ -1087,14 +1087,11 @@ rteViewLoad = withFGView $ do
   flightplanModified <- hasFlightplanModifications
   routeLegs <- getRoute
   curPage <- gets (mcduViewPage . mcduView)
-  let (numRoutePages, curRouteLegs') = paginateWithHeadroom 2 6 (curPage - 1) routeLegs
+  let (numRoutePages, curRouteLegs) = paginateWithHeadroom 1 6 (curPage - 1) routeLegs
       numPages = numRoutePages + 1
       numLegs = length routeLegs
-  let curRouteLegs
-        | curPage == numPages - 1
-        = curRouteLegs' ++ drop (length routeLegs - 1) routeLegs
-        | otherwise
-        = curRouteLegs'
+
+  liftIO $ mapM_ print curRouteLegs
 
   let setViaTo :: Maybe ByteString -> MCDU Bool
       setViaTo Nothing =
@@ -1138,24 +1135,24 @@ rteViewLoad = withFGView $ do
       setLeg :: Int -> Maybe ByteString -> MCDU Bool
       setLeg i Nothing = do
         case drop i routeLegs of
-          [] -> do
-            scratchWarn "INVALID"
-            return False
-          (leg:_) -> do
+          (Just leg:_) -> do
             deleteRouteLeg (routeLegFromIndex leg) (routeLegToIndex leg)
             return True
+          _ -> do
+            scratchWarn "INVALID"
+            return False
       setLeg _ _ = do
         scratchWarn "NOT ALLOWED"
         return False
       getLeg :: Int -> MCDU (Maybe ByteString)
       getLeg i =
         case drop i routeLegs of
-          [] -> do
-            scratchWarn "INVALID"
-            return Nothing
-          (leg:_) -> case routeLegVia leg of
+          (Just leg:_) -> case routeLegVia leg of
             Nothing -> return . Just $ routeLegTo leg
             Just via -> return . Just $ via <> "." <> routeLegTo leg
+          _ -> do
+            scratchWarn "INVALID"
+            return Nothing
 
   modifyView $ \v -> v
     { mcduViewNumPages = numPages
@@ -1206,7 +1203,6 @@ rteViewLoad = withFGView $ do
         }
     _ -> do
       let offset = 6 * (curPage - 1)
-          newLegN = if numLegs == 0 then numLegs - offset else numLegs - offset - 1
           lastLegN = numLegs - offset
       modifyView $ \v -> v
         { mcduViewLSKBindings = mempty
@@ -1214,46 +1210,42 @@ rteViewLoad = withFGView $ do
             mcduPrint  0 1 white "VIA"
             mcduPrint 11 1 white "TO"
             mcduPrintR screenW 1 white "DIST"
-            zipWithM_ (\n' leg -> do
-                let n | n' == newLegN
-                      = lastLegN
-                      | otherwise
-                      = n'
-                if routeLegTo leg == "DISCONTINUITY" then do
-                  mcduPrint  0 (n * 2 + 2) white "-DISCONTINUITY-"
-                  mcduPrintR screenW (n * 2 + 2) white (BS8.pack $ maybe "" formatDistance $ routeLegDistance leg)
-                else do
-                  let via = fromMaybe "DCT" $ routeLegVia leg
-                      viaColor = if isNothing (routeLegArrDep leg) then green else cyan
-                  if BS.length via > 10 then
-                    mcduPrint  0 (n * 2 + 2) viaColor (BS.take 8 via <> "..")
-                  else
-                    mcduPrint  0 (n * 2 + 2) viaColor via
-                  mcduPrint 11 (n * 2 + 2) green (routeLegTo leg)
-                  mcduPrintR screenW (n * 2 + 2) green (BS8.pack $ maybe "" formatDistance $ routeLegDistance leg)
+            zipWithM_ (\n legMay -> do
+              case legMay of
+                Just leg -> do
+                  if routeLegTo leg == "DISCONTINUITY" then do
+                    mcduPrint  0 (n * 2 + 2) white "-DISCONTINUITY-"
+                    mcduPrintR screenW (n * 2 + 2) white (BS8.pack $ maybe "" formatDistance $ routeLegDistance leg)
+                  else do
+                    let via = fromMaybe "DCT" $ routeLegVia leg
+                        viaColor = if isNothing (routeLegArrDep leg) then green else cyan
+                    if BS.length via > 10 then
+                      mcduPrint  0 (n * 2 + 2) viaColor (BS.take 8 via <> "..")
+                    else
+                      mcduPrint  0 (n * 2 + 2) viaColor via
+                    mcduPrint 11 (n * 2 + 2) green (routeLegTo leg)
+                    mcduPrintR screenW (n * 2 + 2) green (BS8.pack $ maybe "" formatDistance $ routeLegDistance leg)
+                Nothing -> do
+                  mcduPrint  1 (n * 2 + 2) green "-----"
+                  mcduPrint 11 (n * 2 + 2) green "-----"
+                  mcduPrintR screenW (n * 2 + 2) green "-----"
               ) [0,1..] curRouteLegs
-            when (newLegN >= 0 && newLegN < 6) $ do
-              mcduPrint  1 (newLegN * 2 + 2) green "-----"
-              mcduPrint 11 (newLegN * 2 + 2) green "-----"
-              mcduPrintR screenW (newLegN * 2 + 2) green "-----"
         }
-      zipWithM_ (\n' leg -> do
-          let n | n' == newLegN
-                = lastLegN
-                | otherwise
-                = n'
-          when (routeLegArrDep leg == Just "sid") $
-            addLskBinding (LSKL n) "" (loadView departureView)
-          when (routeLegArrDep leg == Just "star") $
-            addLskBinding (LSKL n) "" (loadView arrivalView)
-          when (isNothing $ routeLegArrDep leg) $
-            addLskBinding (LSKR n) "" (scratchInteract (setLeg (n + offset)) (getLeg (n + offset)) >> reloadView)
+      zipWithM_ (\n legMay -> do
+          case legMay of
+            Just leg -> do
+              when (routeLegArrDep leg == Just "sid") $
+                addLskBinding (LSKL n) "" (loadView departureView)
+              when (routeLegArrDep leg == Just "star") $
+                addLskBinding (LSKL n) "" (loadView arrivalView)
+              when (isNothing $ routeLegArrDep leg) $
+                addLskBinding (LSKR n) "" (scratchInteract (setLeg (n + offset)) (getLeg (n + offset)) >> reloadView)
+            Nothing -> do
+              addLskBinding
+                (LSKR n)
+                ""
+                (scratchInteract setViaTo getViaTo >> reloadView)
         ) [0,1..] curRouteLegs
-      when (newLegN >= 0 && newLegN < 6) $ do
-        addLskBinding
-          (LSKR newLegN)
-          ""
-          (scratchInteract setViaTo getViaTo >> reloadView)
       when (flightplanModified && lastLegN + 1 >= 0 && lastLegN + 1 < 6) $ do
         addLskBinding (LSKL 5) "CANCEL" (cancelFlightplanEdits >> reloadView)
         addLskBinding (LSKR 5) "CONFIRM" (commitFlightplanEdits >> reloadView)
