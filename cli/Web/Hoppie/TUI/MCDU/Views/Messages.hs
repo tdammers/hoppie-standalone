@@ -433,7 +433,7 @@ formatCPDLCPart part =
 
 
     goTy :: CPDLC.MessageType -> Colored ByteString
-    goTy _ | ("TXT" `BS.isPrefixOf` CPDLC.cpdlcType part) =
+    goTy _ | "TXT" `BS.isPrefixOf` CPDLC.cpdlcType part =
       colorize white $ wordJoin (CPDLC.cpdlcArgs part)
     goTy ty =
       wordJoin $ (flip map) (CPDLC.messagePatternItems $ CPDLC.msgPattern ty) $ \case
