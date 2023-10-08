@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Web.Hoppie.Trans
 ( module Web.Hoppie.Trans
@@ -13,14 +14,14 @@ module Web.Hoppie.Trans
 , WithMeta (..)
 , Network.defURL
 , Network.Config (..)
+, Network.AtisSource (..)
 )
 where
 
-import Web.Hoppie.StringUtil
-import qualified Web.Hoppie.Network as Network
 import Web.Hoppie.CPDLC.Message (CPDLCMessage (..), CPDLCPart (..))
 import Web.Hoppie.CPDLC.MessageTypes (ReplyOpts (..), allMessageTypes)
 import qualified Web.Hoppie.CPDLC.MessageTypes as CPDLC
+import qualified Web.Hoppie.Network as Network
 import Web.Hoppie.Response
   ( TypedMessage (..)
   , TypedPayload (..)
@@ -31,22 +32,26 @@ import Web.Hoppie.Response
   , toTypedUplink
   , parseResponse
   )
+import Web.Hoppie.StringUtil
+import qualified Web.Vatsim as Vatsim
 
 import Control.Applicative
+import Control.Concurrent.MVar
+import Control.Concurrent.Async (Async)
+import qualified Control.Concurrent.Async as Async
 import Control.Monad
 import Control.Monad.Reader
-import Data.ByteString (ByteString)
-import Data.Time (UTCTime)
-import Data.Time.Clock (getCurrentTime)
-import Data.Text (Text)
-import Data.Map (Map)
-import qualified Data.Map.Strict as Map
-import Control.Concurrent.MVar
-import Data.List
 import Data.Aeson.TH (deriveJSON)
 import qualified Data.Aeson.TH as JSON
-import Data.Text.Encoding (encodeUtf8, decodeUtf8)
+import Data.ByteString (ByteString)
+import Data.List
+import Data.Map (Map)
+import qualified Data.Map.Strict as Map
+import Data.Text (Text)
 import qualified Data.Text as Text
+import Data.Text.Encoding (encodeUtf8, decodeUtf8)
+import Data.Time (UTCTime)
+import Data.Time.Clock (getCurrentTime)
 
 type HoppieT m = ReaderT (HoppieEnv m) m
 
@@ -68,6 +73,8 @@ data HoppieEnv m =
     , hoppieNextUID :: !(MVar Word)
     , hoppieNetworkStatus :: !(MVar NetworkStatus)
     , hoppieFastPollingCounter :: !(MVar Int)
+    , hoppieVatsimThread :: !(MVar (Async ()))
+    , hoppieVatsimFeedVar :: !(MVar Vatsim.Datafeed)
     }
 
 data HoppieHooks m =
@@ -117,6 +124,8 @@ makeHoppieEnv hooks callsign config =
     <*> newMVar 0
     <*> newMVar NetworkOK
     <*> newMVar 0
+    <*> newEmptyMVar
+    <*> newEmptyMVar
 
 runHoppieTWith :: HoppieEnv m -> HoppieT m a -> m a
 runHoppieTWith = flip runReaderT
@@ -125,6 +134,23 @@ runHoppieT :: MonadIO m => HoppieHooks m -> ByteString -> Network.Config -> Hopp
 runHoppieT hooks callsign config action = do
   env <- makeHoppieEnv hooks callsign config
   runHoppieTWith env action
+
+startVatsimFetcher :: MonadIO m => HoppieT m ()
+startVatsimFetcher = do
+  threadVar <- asks hoppieVatsimThread
+  feedVar <- asks hoppieVatsimFeedVar
+  liftIO $ do
+    threadMay <- tryTakeMVar threadVar
+    forM_ threadMay Async.cancel
+    thread <- Vatsim.runDatafeedFetcherWith feedVar
+    putMVar threadVar thread
+
+stopVatsimFetcher :: MonadIO m => HoppieT m ()
+stopVatsimFetcher = do
+  threadVar <- asks hoppieVatsimThread
+  liftIO $ do
+    threadMay <- tryTakeMVar threadVar
+    forM_ threadMay Async.cancel
 
 data LinkDirection
   = Downlink
@@ -531,7 +557,27 @@ send tm = do
   saveDownlink rq
   sentHook <- asks (onDownlink . hoppieHooks)
   sentHook rq
-  rawResponse <- liftIO $ Network.sendRequestEither config (toUntypedRequest sender tm)
+  rawResponse <- case (Network.configAtisSource config, typedMessagePayload tm) of
+    (Network.AtisSourceVatsimDatafeed, InfoPayload infoStr)
+      | "VATATIS " `Text.isPrefixOf` decodeUtf8 infoStr
+      -> do
+        let station = Text.replace "-" "_" . mconcat . take 1 . drop 1 . Text.words . decodeUtf8 $ infoStr
+        feedVar <- asks hoppieVatsimFeedVar
+        atisMay <- liftIO $ Vatsim.getCurrentAtis feedVar station
+        liftIO $ print atisMay
+        case atisMay of
+          Nothing -> return $ Left "VATSIM DATA NOT AVAIL"
+          Just [] -> return . Right $ "ok {VATSIM info {THIS ATIS IS NOT AVAILABLE}}"
+          Just atises -> return . Right $
+            "ok" <>
+              mconcat [ " {VATSIM info {" <> encodeUtf8 atis <> "}}"
+                      | atis <- atises
+                      ]
+
+
+    _ -> do
+      liftIO $ Network.sendRequestEither config (toUntypedRequest sender tm)
+  liftIO $ print rawResponse
   handleRawResponse (Just uid) rawResponse
 
 handleRawResponse :: MonadIO m => Maybe Word -> Either String ByteString -> HoppieT m [Word]

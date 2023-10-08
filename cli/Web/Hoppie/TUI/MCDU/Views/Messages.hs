@@ -394,7 +394,7 @@ messageLogView mlf = defView
             <>
             Map.fromList
               ( zip
-                [LSKL 0 .. LSKL (numLSKs - 2)]
+                (LSKL <$> [0 .. (numLSKs - 2)])
                 [ ("", loadView $
                     messageView
                     (messageUID message) ) | message <- curMessages
@@ -402,10 +402,13 @@ messageLogView mlf = defView
               )
         , mcduViewDraw = do
             zipWithM_ (\n message -> do
-                let (statusLine, msgText) = formatMessage message
+                let (statusLine, msgText') = formatMessage message
+                    msgText = case wordSplit msgText' of
+                                ("THIS" : "IS" : xs) -> wordJoin xs
+                                xs -> wordJoin xs
 
                 mcduPrintColored 1 (n * 2 + 1) statusLine
-                mcduPrintColored 1 (n * 2 + 2) (wordJoin . wordSplit $ msgText)
+                mcduPrintColored 1 (n * 2 + 2) msgText
               ) [0,1..] curMessages
         }
   }
@@ -451,8 +454,8 @@ messageColorCallsignStatus = \case
     let cs = typedMessageCallsign $ payload m
     in case metaStatus m of
       NewUplink -> (green, cs, "NEW")
-      OldUplink -> (white, cs, "OLD")
-      RepliedUplink -> (white, cs, "REPL")
+      OldUplink -> (cyan, cs, "OLD")
+      RepliedUplink -> (blue, cs, "REPL")
       OpenUplink -> (green, cs, "OPEN")
   DownlinkMessage m ->
     let cs = typedMessageCallsign $ payload m

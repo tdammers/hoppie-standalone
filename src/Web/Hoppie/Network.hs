@@ -12,6 +12,23 @@ import qualified Network.HTTP.Client as HTTP
 import qualified Network.HTTP.Simple as HTTP
 import qualified Network.HTTP.Types as HTTP
 import Control.Exception
+import Data.Aeson (FromJSON (..), ToJSON (..))
+import qualified Data.Aeson as JSON
+import qualified Data.Aeson.Types as JSON
+
+data AtisSource
+  = AtisSourceHoppie
+  | AtisSourceVatsimDatafeed
+  deriving (Show)
+
+instance ToJSON AtisSource where
+  toJSON AtisSourceHoppie = JSON.String "hoppie"
+  toJSON AtisSourceVatsimDatafeed = JSON.String "vatsim"
+
+instance FromJSON AtisSource where
+  parseJSON (JSON.String "hoppie") = pure AtisSourceHoppie
+  parseJSON (JSON.String "vatsim") = pure AtisSourceVatsimDatafeed
+  parseJSON x = JSON.unexpected x
 
 data Config =
   Config
@@ -19,6 +36,7 @@ data Config =
     , configURL :: String
     , configPollingInterval :: Int
     , configFastPollingInterval :: Int
+    , configAtisSource :: AtisSource
     }
     deriving (Show)
 

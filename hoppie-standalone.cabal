@@ -36,6 +36,7 @@ library
         Web.Hoppie.FGFS.Monad
         Web.Hoppie.FGFS.FMS
         Web.Hoppie.StringUtil
+        Web.Vatsim
         Paths_hoppie_standalone
     -- other-modules:
     -- other-extensions:
@@ -43,6 +44,7 @@ library
                  , aeson >=2.2.0.0 && <2.3
                  , async >=2.2.4 && <2.3
                  , bytestring >=0.11.0 && <0.13
+                 , casing >=0.1.4.1 && <0.2
                  , containers >=0.6.7 && <0.7
                  , SHA >=1.6.4.4 && <1.7
                  , mtl >=2.3.1 && <2.4

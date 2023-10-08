@@ -12,34 +12,37 @@ import Web.Hoppie.TUI.Input
 import Web.Hoppie.TUI.MCDU
 import Web.Hoppie.TUI.StringUtil
 import Web.Hoppie.Telex
+import qualified Web.Vatsim as Vatsim
 
 import Control.Applicative
 import Control.Concurrent
-import Control.Concurrent.Async (race_)
+import Control.Concurrent.Async (race_, cancel)
 import Control.Concurrent.STM
 import Control.Exception
 import Control.Monad
 import Control.Monad.Except
 import Control.Monad.IO.Class
 import Control.Monad.State
+import Control.Monad.Reader (asks)
 import Control.Monad.Trans.Maybe
 import qualified Data.Aeson as JSON
 import Data.Aeson.TH (deriveJSON)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as BS8
-import qualified Data.Text as Text
 import Data.List
 import qualified Data.Map.Strict as Map
 import Data.Maybe
+import qualified Data.Text as Text
+import qualified Data.Text.IO as Text
 import Data.Word
 import qualified Data.Yaml as YAML
 import Options.Applicative
 import System.Environment
 import System.FilePath
+import System.IO.Error
 import Text.Casing
 import Text.Printf
 import Text.Read (readMaybe)
-import System.IO.Error
 
 data ProgramOptions =
   ProgramOptions
@@ -57,6 +60,7 @@ data ProgramOptions =
     , poFlightgearPort :: Maybe Int
     , poFlightgearSyncCallsign :: Maybe Bool
     , poSessionFilename :: Maybe FilePath
+    , poAtisSource :: Maybe AtisSource
     }
     deriving (Show)
 
@@ -77,6 +81,7 @@ emptyProgramOptions =
     , poFlightgearPort = Nothing
     , poFlightgearSyncCallsign = Nothing
     , poSessionFilename = Nothing
+    , poAtisSource = Nothing
     }
 
 defaultProgramOptions :: ProgramOptions
@@ -96,11 +101,12 @@ defaultProgramOptions =
     , poFlightgearPort = Nothing
     , poFlightgearSyncCallsign = Nothing
     , poSessionFilename = Nothing
+    , poAtisSource = Nothing
     }
 
 instance Semigroup ProgramOptions where
-  ProgramOptions l1 c1 ty1 fp1 sp1 url1 sl1 httph1 http1 hl1 fgh1 fgp1 fgsc1 sfn1 <>
-    ProgramOptions l2 c2 ty2 fp2 sp2 url2 sl2 httph2 http2 hl2 fgh2 fgp2 fgsc2 sfn2 =
+  ProgramOptions l1 c1 ty1 fp1 sp1 url1 asrc1 sl1 httph1 http1 hl1 fgh1 fgp1 fgsc1 sfn1 <>
+    ProgramOptions l2 c2 ty2 fp2 sp2 url2 asrc2 sl2 httph2 http2 hl2 fgh2 fgp2 fgsc2 sfn2 =
       ProgramOptions
         (l1 <|> l2)
         (c1 <|> c2)
@@ -108,6 +114,7 @@ instance Semigroup ProgramOptions where
         (fp1 <|> fp2)
         (sp1 <|> sp2)
         (url1 <|> url2)
+        (asrc1 <|> asrc2)
         (sl1 <|> sl2)
         (httph1 <|> httph2)
         (http1 <|> http2)
@@ -224,6 +231,17 @@ optionsP = ProgramOptions
         <> help "Where to store session"
         <> value Nothing
         )
+  <*> option (Just <$> maybeReader parseAtisSrc)
+        (  long "atis-source"
+        <> metavar "SOURCE"
+        <> help "Where to source ATIS"
+        <> value Nothing
+        )
+
+parseAtisSrc :: String -> Maybe AtisSource
+parseAtisSrc "hoppie" = Just AtisSourceHoppie
+parseAtisSrc "vatsim" = Just AtisSourceVatsimDatafeed
+parseAtisSrc _ = Nothing
 
 optionsFromArgs :: IO ProgramOptions
 optionsFromArgs =
@@ -282,17 +300,19 @@ optionsToConfig po = runExcept $ do
   url <- maybe (throwError "No URL configured") return $ poHoppieUrl po
   fastPollingInterval <- maybe (throwError "No fast polling configured") return $ poFastPollingInterval po
   slowPollingInterval <- maybe (throwError "No slow polling configured") return $ poSlowPollingInterval po
+  let hoppieAtisSource = fromMaybe AtisSourceHoppie $ poAtisSource po
   return $
     Config
       (BS8.pack logon)
       url
       slowPollingInterval
       fastPollingInterval
+      hoppieAtisSource
 
 hoppieMainOptionsFromProgramOptions :: ProgramOptions -> HoppieMainOptions
 hoppieMainOptionsFromProgramOptions po =
   let headless = fromMaybe False $ poHeadless po
-      actype = fmap BS8.pack $ poAircraftType po
+      actype = BS8.pack <$> poAircraftType po
       showLog = fromMaybe False $ poShowLog po
       httpPort = poHttpServerPort po
       httpHostname = poHttpServerHostname po
@@ -468,6 +488,10 @@ hoppieMain hmo eventChan rawSend = do
             atomically $ writeTChan eventChan $ LogEvent ("Error reading session file " <> Text.pack ppath <> ": " <> Text.pack (show e))
             return Nothing
         )
+  atisSource <- asks $ configAtisSource . hoppieNetworkConfig
+  case atisSource of
+    AtisSourceVatsimDatafeed -> startVatsimFetcher
+    _ -> return ()
   runMCDU rawSend $ do
     forM_ sessionMay restoreData
     modify (applyHoppieMainOptions hmo)
@@ -477,6 +501,13 @@ runColoredTests :: IO ()
 runColoredTests = do
   print $ lineWrap 20
     ("Hello, this is a long string that should be split into several lines." :: String)
+
+runVatsimTest :: IO ()
+runVatsimTest = do
+  (fetcherThread, fetcherVar) <- Vatsim.runDatafeedFetcher
+  threadDelay 1000000
+  maybe (putStrLn "NO ATIS AVAILABLE") (mapM_ Text.putStrLn) =<< Vatsim.getCurrentAtis fetcherVar "EDDF" 
+  cancel fetcherThread
 
 runInputTest :: IO ()
 runInputTest = do

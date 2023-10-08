@@ -32,6 +32,7 @@ mkConfig l =
     , configLogon = BS8.pack l
     , configFastPollingInterval = 20
     , configPollingInterval = 60
+    , configAtisSource = AtisSourceHoppie
     }
 
 sendTestPeekRequest :: String -> IO ByteString
