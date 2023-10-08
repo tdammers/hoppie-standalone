@@ -109,7 +109,18 @@ formatEFOB :: Word8 -> Double -> Double -> Double -> Maybe Double -> Colored Byt
 formatEFOB _ _ _ _ Nothing = ""
 formatEFOB defcolor finres cont maxFOB (Just efob)
   | maxFOB >= 10000
+  , efob >= 1000000
+  = colorize color "+++.+"
+  | maxFOB >= 10000
+  , efob <= -1000000
+  = colorize color "---.-"
+  | maxFOB >= 10000
   = colorize color . BS8.pack $ printf "%5.1f" (efob / 1000)
+  | efob >= 10000
+  = colorize color "++++"
+  | maxFOB >= 10000
+  , efob <= -10000
+  = colorize color "----"
   | otherwise
   = colorize color . BS8.pack $ printf "%5.0f" efob
   where
@@ -179,15 +190,15 @@ loadWaypointSelect returnTitle candidates cont = do
         cont candidateMay
     )
 
-mcduResolveWaypoint :: ByteString -> ByteString -> (Maybe WaypointCandidate -> MCDU ()) -> MCDU ()
-mcduResolveWaypoint returnTitle name cont =
-  resolveWaypoint name scratchWarn (loadWaypointSelect returnTitle) cont
+mcduResolveWaypoint :: Bool -> ByteString -> ByteString -> (Maybe WaypointCandidate -> MCDU ()) -> MCDU ()
+mcduResolveWaypoint includeLegs returnTitle name =
+  resolveWaypoint includeLegs name scratchWarn (loadWaypointSelect returnTitle)
 
 loadDirectToView :: Maybe ByteString -> MCDU ()
 loadDirectToView Nothing = do
   loadDirectToViewWith Nothing Nothing
 loadDirectToView (Just toName) = do
-  mcduResolveWaypoint "NO WPT" toName (loadDirectToViewWith Nothing)
+  mcduResolveWaypoint True "NO WPT" toName (loadDirectToViewWith Nothing)
 
 loadDirectToViewWith :: Maybe WaypointCandidate -> Maybe WaypointCandidate -> MCDU ()
 loadDirectToViewWith fromMayOrig toMayOrig = do
@@ -224,7 +235,7 @@ loadDirectToViewWith fromMayOrig toMayOrig = do
         reload
         return True
       setTo (Just n) = do
-        mcduResolveWaypoint "DIRECT TO" n $ \wpMay -> do
+        mcduResolveWaypoint True "DIRECT TO" n $ \wpMay -> do
           store toVar wpMay
           reload
         return True
@@ -925,7 +936,7 @@ fplViewLoad = withFGView $ do
           forM_ [legIdxFrom leg .. legIdxTo leg] deleteWaypoint
         return True
       putWaypoint n (Just targetWPName) = do
-        mcduResolveWaypoint "FPL" targetWPName $ \case
+        mcduResolveWaypoint True "FPL" targetWPName $ \case
           Nothing -> do
             loadView fplView
           Just toWP -> do
@@ -1105,13 +1116,10 @@ rteViewLoad = withFGView $ do
                   scratchWarn err
                 Nothing -> do
                   return ()
-              loadView rteView
-              modifyView $ \v -> v
-                { mcduViewPage = numLegs `div` 6 + 1 }
-              reloadView
+              loadViewAtPage ((numLegs - 1)`div` 6 + 1) rteView
               return ()
         if BS.null toStr then do
-          mcduResolveWaypoint "RTE" viaStr $ \case
+          mcduResolveWaypoint False "RTE" viaStr $ \case
             Nothing -> do
               scratchWarn "NO WPT"
               return ()
@@ -1120,14 +1128,8 @@ rteViewLoad = withFGView $ do
               releaseWaypointCandidate wp
               goResult result
         else do
-          mcduResolveWaypoint "RTE" toStr $ \case
-            Nothing -> do
-              scratchWarn "NO WPT"
-              return ()
-            Just wp -> do
-              result <- appendViaTo viaStr wp
-              releaseWaypointCandidate wp
-              goResult result
+          result <- appendViaTo viaStr toStr
+          goResult result
         return True
       getViaTo :: MCDU (Maybe ByteString)
       getViaTo = return Nothing

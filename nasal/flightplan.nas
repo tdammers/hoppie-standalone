@@ -316,8 +316,8 @@ var getProgressInfo = func () {
 
     var wpCurrent = fp.getWP(fp.current);
     var wpNext = fp.getWP(fp.current + 1);
-    var wpDest = nil;
     var destIdx = getDestinationIndex(fp);
+    var wpDest = (destIdx == nil) ? nil : fp.getWP(destIdx);
 
     var info = {};
     if (wpCurrent != nil)
@@ -336,7 +336,6 @@ var setLegAltitude = func (n, alt, altType) {
     if (wp == nil)
         return "NO WPT";
     wp = fms.getModifyableFlightplan().getWP(n);
-    printf("Set altitude %i: %s %i", n, altType, alt);
     wp.setAltitude(alt, altType);
     return nil;
 };
@@ -346,7 +345,6 @@ var setLegSpeed = func (n, speed, speedType) {
     if (wp == nil)
         return "NO WPT";
     wp = fms.getModifyableFlightplan().getWP(n);
-    printf("Set speed: %s %i", speedType, speed);
     wp.setSpeed(speed, speedType);
     return nil;
 };
@@ -378,15 +376,17 @@ var getFPLegIndex = func (needle) {
     return nil;
 };
 
-var findWaypoint = func (needle) {
+var findWaypoint = func (includeLegs, needle) {
     var fp = fms.getVisibleFlightplan();
     var acpos = geo.aircraft_position();
     var results = [];
-    for (var i = math.max(0, fp.current or 0); i < fp.getPlanSize(); i += 1) {
-        var wp = fp.getWP(i);
-        if (wp.wp_name == needle)
-            append(results,
-                completeWaypoint({ "type": "leg" , "id": wp.id, "name": wp.wp_name, "wp": wp }, acpos));
+    if (includeLegs) {
+        for (var i = math.max(0, fp.current or 0); i < fp.getPlanSize(); i += 1) {
+            var wp = fp.getWP(i);
+            if (wp.wp_name == needle)
+                append(results,
+                    completeWaypoint({ "type": "leg" , "id": wp.id, "name": wp.wp_name, "wp": wp }, acpos));
+        }
     }
     if (size(needle) == 4) {
         var airports = findAirportsByICAO(needle);
@@ -588,13 +588,10 @@ var getRoute = func {
 
     var rteClosed = 0;
     if (firstArrivalWP != nil) {
-        printf("First Arrival: %s", firstArrivalWP.id);
         if (lastEnrouteWP != nil) {
-            printf("Last Enroute: %s", lastEnrouteWP.id);
             rteClosed = lastEnrouteWP.id == firstArrivalWP.id;
         }
         elsif (lastSidWP != nil) {
-            printf("Last on SID: %s", lastSidWP.id);
             rteClosed = lastSidWP.id == firstArrivalWP.id;
         }
     }

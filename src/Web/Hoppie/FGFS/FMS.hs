@@ -302,9 +302,9 @@ getRoute :: (MonadFG m) => m [Maybe RouteLeg]
 getRoute =
   fgCallNasal "fms.getRoute" ()
 
-appendViaTo :: (MonadFG m) => ByteString -> WaypointCandidate -> m (Maybe ByteString)
-appendViaTo via toWP =
-  fgCallNasal "fms.appendViaTo" (via, wpValue toWP)
+appendViaTo :: (MonadFG m) => ByteString -> ByteString -> m (Maybe ByteString)
+appendViaTo via to =
+  fgCallNasal "fms.appendViaTo" (via, to)
 
 appendDirectTo :: (MonadFG m) => WaypointCandidate -> m (Maybe ByteString)
 appendDirectTo toWP =
@@ -328,13 +328,14 @@ getFlightplanLeg index cont = do
 
 resolveWaypoint :: forall m.
                    (MonadFG m)
-                => ByteString
+                => Bool
+                -> ByteString
                 -> (ByteString -> m ())
                 -> ([WaypointCandidate] -> (Maybe WaypointCandidate -> m ()) -> m ())
                 -> (Maybe WaypointCandidate -> m ())
                 -> m ()
-resolveWaypoint name warn sel cont = do
-  candidates :: [WaypointCandidate] <- fgCallNasal "fms.findWaypoint" [name]
+resolveWaypoint includeLegs name warn sel cont = do
+  candidates :: [WaypointCandidate] <- fgCallNasal "fms.findWaypoint" (includeLegs, name)
   case candidates of
     [] -> do
       warn "NO WPT"

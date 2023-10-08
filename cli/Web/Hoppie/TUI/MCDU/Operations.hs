@@ -233,6 +233,13 @@ loadView view = do
   modify $ \s -> s { mcduView = view }
   reloadView
 
+loadViewAtPage :: Int -> MCDUView -> MCDU ()
+loadViewAtPage page view = do
+  join $ gets (mcduViewOnUnload . mcduView)
+  modify $ \s -> s
+    { mcduView = view { mcduViewPage = page } }
+  reloadView
+
 nextPage :: MCDU ()
 nextPage = do
   view <- gets mcduView
