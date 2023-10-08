@@ -388,10 +388,17 @@ mapInputCommand InputF12 = Just $ KeyEvent (MCDULSK $ LSKR 5)
 mapInputCommand InputEscape = Just $ KeyEvent (MCDUFunction Menu)
 mapInputCommand InputDel = Just $ KeyEvent (MCDUFunction DEL)
 mapInputCommand InputBackspace = Just $ KeyEvent (MCDUFunction CLR)
-mapInputCommand InputF13 = Just $ KeyEvent (MCDUFunction DLK)
-mapInputCommand InputF14 = Just $ KeyEvent (MCDUFunction ATC)
-mapInputCommand InputF15 = Just $ KeyEvent (MCDUFunction FPL)
-mapInputCommand InputF16 = Just $ KeyEvent (MCDUFunction RTE)
+
+mapInputCommand InputF13 = Just $ KeyEvent (MCDUFunction NAV)
+mapInputCommand InputF14 = Just $ KeyEvent (MCDUFunction PROG)
+mapInputCommand InputF15 = Just $ KeyEvent (MCDUFunction INIT)
+mapInputCommand InputF16 = Just $ KeyEvent (MCDUFunction DLK)
+-- mapInputCommand InputF17 = Just $ KeyEvent (MCDUFunction Radio)
+
+mapInputCommand InputF18 = Just $ KeyEvent (MCDUFunction FPL)
+mapInputCommand InputF19 = Just $ KeyEvent (MCDUFunction RTE)
+mapInputCommand InputF21 = Just $ KeyEvent (MCDUFunction ATC)
+
 mapInputCommand InputPgUp = Just $ KeyEvent (MCDUFunction PageUp)
 mapInputCommand InputPgDn = Just $ KeyEvent (MCDUFunction PageDown)
 mapInputCommand _ = Nothing

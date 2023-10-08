@@ -229,7 +229,7 @@ drawKey x y key label = do
   moveTo x (y+1)
   setBG 0
   setFG 15
-  putStr (centerTo 6 label)
+  putStr (centerTo 5 label)
 
 centerTo :: Int -> String -> String
 centerTo w xs
@@ -312,12 +312,18 @@ drawMCDU screenBuf = do
   putStr "-"
 
   drawKey 1 (screenH + 1) "PgUp" "PREV"
+  drawKey 7 (screenH + 1) "F13" "NAV"
+  drawKey 13 (screenH + 1) "F14" "PROG"
+  drawKey 19 (screenH + 1) "F15" "INIT"
+  drawKey 25 (screenH + 1) "F16" "DLK"
+  drawKey 31 (screenH + 1) "F17" "RADIO"
+
   drawKey 1 (screenH + 3) "PgDn" "NEXT"
-  drawKey 8 (screenH + 1) "Esc" "MENU"
-  drawKey 15 (screenH + 1) "F13" "DLK"
-  drawKey 15 (screenH + 3) "F14" "ATC"
-  drawKey 22 (screenH + 1) "F15" "FPL"
-  drawKey 22 (screenH + 3) "F16" "RTE"
+  drawKey 7 (screenH + 3) "F18" "FPL"
+  drawKey 13 (screenH + 3) "F19" "RTE"
+  drawKey 19 (screenH + 3) "F20" ""
+  drawKey 25 (screenH + 3) "F21" "ATC"
+  drawKey 31 (screenH + 3) "Esc" "MENU"
 
   resetFG
   resetBG
