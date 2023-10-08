@@ -16,6 +16,120 @@ if (!contains(mcdu, 'vnav')) {
     };
 }
 
+var ON_STAND = 0;
+var TAXI_OUT = 1;
+var TAKEOFF = 2;
+var CLIMB = 3;
+var CRUISE = 4;
+var DESCENT = 5;
+var APPROACH = 6;
+var TAXI_IN = 7;
+var GO_AROUND = 8;
+
+var flightPhaseName = [
+        'ON_STAND',
+        'TAXI_OUT',
+        'TAKEOFF',
+        'CLIMB',
+        'CRUISE',
+        'DESCENT',
+        'APPROACH',
+        'TAXI_IN',
+        'GO_AROUND',
+    ];
+
+if (!contains(mcdu, 'flightPhase')) {
+    mcdu.flightPhase = ON_STAND;
+}
+
+if (!contains(mcdu, 'flightPhaseChecker')) {
+    mcdu.flightPhaseChecker = maketimer(1, func { mcdu.fms._checkFlightPhase(); });
+    mcdu.flightPhaseChecker.simulatedTime = 1;
+}
+var checkFlightPhase = func {
+    var groundspeed = getprop('/velocities/groundspeed-kt');
+    var altitude = getprop('/instrumentation/altimeter/indicated-altitude-ft');
+    var agl = getprop('/position/altitude-agl-ft');
+    var vspeed = getprop('/instrumentation/vertical-speed-indicator/indicated-speed-fpm');
+    var wow = getprop('/gear/gear/wow');
+    var phasePrev = mcdu.flightPhase;
+    if (mcdu.flightPhase == ON_STAND) {
+        if (groundspeed > 5)
+            mcdu.flightPhase = TAXI_OUT;
+    }
+    if (mcdu.flightPhase == TAXI_OUT) {
+        if (groundspeed > 40)
+            mcdu.flightPhase = TAKEOFF;
+    }
+    if (mcdu.flightPhase == TAKEOFF or mcdu.flightPhase == GO_AROUND) {
+        if (agl > 800)
+            mcdu.flightPhase = CLIMB;
+    }
+    if (mcdu.flightPhase == CLIMB) {
+        var cruiseAlt = getprop('/autopilot/route-manager/cruise/altitude-ft');
+        if (cruiseAlt == nil or cruiseAlt == 0) {
+            cruiseAlt = getprop('/autopilot/route-manager/cruise/flight-level');
+            if (cruiseAlt != nil)
+                cruiseAlt *= 100;
+        }
+        if (cruiseAlt > 0) {
+            if (altitude >= cruiseAlt - 100) {
+                mcdu.flightPhase = CRUISE;
+            }
+        }
+        else {
+            if (altitude >= 4000 and vspeed < 100) {
+                mcdu.flightPhase = CRUISE;
+            }
+        }
+    }
+    if (mcdu.flightPhase == CRUISE) {
+        var cruiseAlt = getprop('/autopilot/route-manager/cruise/altitude-ft');
+        if (cruiseAlt == nil or cruiseAlt == 0) {
+            cruiseAlt = getprop('/autopilot/route-manager/cruise/flight-level');
+            if (cruiseAlt != nil)
+                cruiseAlt *= 100;
+        }
+        if (cruiseAlt > 0) {
+            if (altitude < cruiseAlt - 500) {
+                mcdu.flightPhase = DESCENT;
+            }
+        }
+        else {
+            if (vspeed < -400) {
+                mcdu.flightPhase = DESCENT;
+            }
+        }
+    }
+    if (mcdu.flightPhase == DESCENT) {
+        if (agl < 3000) {
+            mcdu.flightPhase = APPROACH;
+        }
+    }
+    if (mcdu.flightPhase == APPROACH) {
+        if (wow and groundspeed < 40) {
+            mcdu.flightPhase = TAXI_IN;
+        }
+        elsif (vspeed > 300) {
+            mcdu.flightPhase = GO_AROUND;
+        }
+    }
+    if (mcdu.flightPhase == TAXI_IN) {
+        var enginesRunning = 0;
+        foreach (var e; props.globals.getNode('engines').getChildren('engine')) {
+            isRunning = e.getBoolValue('running');
+            if (isRunning)
+                enginesRunning += 1;
+        }
+        if (enginesRunning == 0 and groundspeed < 5) {
+            mcdu.flightPhase = ON_STAND;
+        }
+    }
+    if (mcdu.flightPhase != phasePrev) {
+        printf("%s -> %s", flightPhaseName[phasePrev], flightPhaseName[mcdu.flightPhase]);
+    }
+};
+
 var fuelSamplerVars = {
     deltat: 10,
     lastKG: nil,
@@ -25,6 +139,7 @@ var fuelSamplerVars = {
 };
 
 mcdu.fuelSampler.restart(fuelSamplerVars.deltat);
+mcdu.flightPhaseChecker.restart(1);
 
 var updateFuelSampler = func {
     fuelSamplerVars.lastKG = fuelSamplerVars.currentKG;
@@ -114,6 +229,8 @@ var commitFlightplanEdits = func {
     else
         flightplan().current = -1;
     mcdu.modifiedFlightplan = nil;
+    calcTOD();
+    calcTOC();
     # reportFlightplanCurrent('commitFlightplanEdits[post]');
     return nil;
 };
@@ -327,6 +444,7 @@ var getProgressInfo = func () {
     if (wpDest != nil)
         info.destination = makeLegInfo(destIdx, wpDest, totalDistance, totalDistanceRemaining, fuelOnBoard, fuelGS, fuelFlow);
     info.fob = fuelOnBoard;
+    info.phase = mcdu.flightPhase;
     return info;
 };
 
@@ -1441,6 +1559,7 @@ calcTOC();
 
 var fms = {
     '_updateFuelSampler': updateFuelSampler,
+    '_checkFlightPhase': checkFlightPhase,
 
     'hasFlightplanModifications': hasFlightplanModifications,
     'getModifyableFlightplan': getModifyableFlightplan,

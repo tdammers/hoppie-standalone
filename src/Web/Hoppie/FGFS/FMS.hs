@@ -110,12 +110,29 @@ instance FromNasal WaypointCandidate where
       <*> fromNasalField "bearing" nv
       <*> fromNasalField "wp" nv
 
+data FlightPhase
+      = ON_STAND
+      | TAXI_OUT
+      | TAKEOFF
+      | CLIMB
+      | CRUISE
+      | DESCENT
+      | APPROACH
+      | TAXI_IN
+      | GO_AROUND
+  deriving (Show, Read, Eq, Enum, Ord, Bounded)
+
+instance FromNasal FlightPhase where
+  fromNasal nv =
+    toEnum <$> fromNasal nv
+
 data ProgressInfo =
   ProgressInfo
     { progressCurrent :: Maybe FPLeg
     , progressNext :: Maybe FPLeg
     , progressDestination :: Maybe FPLeg
     , progressFOB :: Maybe Double
+    , progressFlightPhase :: FlightPhase
     }
     deriving (Show)
 
@@ -126,6 +143,7 @@ instance FromNasal ProgressInfo where
       <*> fromNasalFieldMaybe "next" nv
       <*> fromNasalFieldMaybe "destination" nv
       <*> fromNasalFieldMaybe "fob" nv
+      <*> fromNasalField "phase" nv
 
 data IASOrMach
   = IAS Int

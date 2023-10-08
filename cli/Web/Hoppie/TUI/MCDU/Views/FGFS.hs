@@ -836,6 +836,10 @@ perfInitViewLoad = withFGView $ do
     }
   doLoad
 
+formatFlightPhase :: FlightPhase -> ByteString
+formatFlightPhase f =
+  BS8.pack . map (\case { '_' -> ' '; c -> c }) . show $ f
+
 progView :: MCDUView
 progView = defView
   { mcduViewTitle = "PROGRESS"
@@ -894,6 +898,8 @@ progViewLoad = withFGView $ do
           ) <>
           " " <>
           ( colorize white massUnitStr )
+
+        mcduPrintC (screenW `div` 2) 10 white (maybe "-------" formatFlightPhase $ progressFlightPhase <$> progress)
 
     }
 
