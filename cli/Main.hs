@@ -23,7 +23,6 @@ import Control.Monad
 import Control.Monad.Except
 import Control.Monad.IO.Class
 import Control.Monad.State
-import Control.Monad.Reader (asks)
 import Control.Monad.Trans.Maybe
 import qualified Data.Aeson as JSON
 import Data.Aeson.TH (deriveJSON)
@@ -495,10 +494,6 @@ hoppieMain hmo eventChan rawSend = do
             atomically $ writeTChan eventChan $ LogEvent ("Error reading session file " <> Text.pack ppath <> ": " <> Text.pack (show e))
             return Nothing
         )
-  atisSource <- asks $ configAtisSource . hoppieNetworkConfig
-  case atisSource of
-    AtisSourceVatsimDatafeed -> startVatsimFetcher
-    _ -> return ()
   runMCDU rawSend $ do
     forM_ sessionMay restoreData
     modify (applyHoppieMainOptions hmo)

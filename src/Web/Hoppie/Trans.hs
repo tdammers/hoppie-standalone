@@ -73,6 +73,7 @@ data HoppieEnv m =
     , hoppieNextUID :: !(MVar Word)
     , hoppieNetworkStatus :: !(MVar NetworkStatus)
     , hoppieFastPollingCounter :: !(MVar Int)
+    , hoppieAtisSrc :: !(MVar Network.AtisSource)
     , hoppieVatsimThread :: !(MVar (Async ()))
     , hoppieVatsimFeedVar :: !(MVar Vatsim.Datafeed)
     }
@@ -126,14 +127,31 @@ makeHoppieEnv hooks callsign config =
     <*> newMVar 0
     <*> newEmptyMVar
     <*> newEmptyMVar
+    <*> newEmptyMVar
 
 runHoppieTWith :: HoppieEnv m -> HoppieT m a -> m a
 runHoppieTWith = flip runReaderT
 
-runHoppieT :: MonadIO m => HoppieHooks m -> ByteString -> Network.Config -> HoppieT m a -> m a
-runHoppieT hooks callsign config action = do
-  env <- makeHoppieEnv hooks callsign config
-  runHoppieTWith env action
+setAtisSource :: MonadIO m => Network.AtisSource -> HoppieT m ()
+setAtisSource src = do
+  srcVar <- asks hoppieAtisSrc
+  currentSrc <- liftIO $ tryTakeMVar srcVar
+  case currentSrc of
+    Just Network.AtisSourceVatsimDatafeed -> do
+      stopVatsimFetcher
+    _ ->
+      return ()
+  case src of
+    Network.AtisSourceVatsimDatafeed -> do
+      startVatsimFetcher
+    _ ->
+      return ()
+  liftIO $ putMVar srcVar src
+
+getAtisSource :: MonadIO m => HoppieT m (Maybe Network.AtisSource)
+getAtisSource = do
+  srcVar <- asks hoppieAtisSrc
+  liftIO $ tryReadMVar srcVar
 
 startVatsimFetcher :: MonadIO m => HoppieT m ()
 startVatsimFetcher = do
@@ -557,7 +575,8 @@ send tm = do
   saveDownlink rq
   sentHook <- asks (onDownlink . hoppieHooks)
   sentHook rq
-  rawResponse <- case (Network.configAtisSource config, typedMessagePayload tm) of
+  atisSrc <- asks hoppieAtisSrc >>= liftIO . readMVar
+  rawResponse <- case (atisSrc, typedMessagePayload tm) of
     (Network.AtisSourceVatsimDatafeed, InfoPayload infoStr)
       | "VATATIS " `Text.isPrefixOf` decodeUtf8 infoStr
       -> do

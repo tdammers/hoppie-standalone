@@ -19,6 +19,7 @@ runSystem :: ByteString
           -> IO ()
 runSystem callsign config hooks runUI = do
   env <- makeHoppieEnv hooks callsign config
+  runHoppieTWith env $ setAtisSource (configAtisSource config)
   race_
     (runHoppieTWith env (runUI send'))
     (runHoppieTWith env runPolling)

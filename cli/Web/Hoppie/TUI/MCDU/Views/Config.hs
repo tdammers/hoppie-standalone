@@ -24,6 +24,7 @@ import qualified Data.Map.Strict as Map
 import Data.Maybe
 import Text.Read (readMaybe)
 import System.IO
+import Text.Casing
 
 configView :: MCDUView
 configView = defView
@@ -48,6 +49,7 @@ configView = defView
           callsign <- mcduGetCallsign
           units <- gets mcduMassUnit
           serverEnabled <- gets (isJust . mcduHttpServer)
+          atisSrc <- lift $ getAtisSource
           let setACType :: Maybe ByteString -> MCDU Bool
               setACType actypeMay = do
                 modify (\s -> s { mcduAircraftType = actypeMay })
@@ -56,6 +58,15 @@ configView = defView
               getACType :: MCDU (Maybe ByteString)
               getACType =
                 gets mcduAircraftType
+
+              toggleAtisSource =
+                case atisSrc of
+                  Just AtisSourceVatsimDatafeed ->
+                    lift $ setAtisSource AtisSourceHoppie
+                  Just AtisSourceHoppie ->
+                    lift $ setAtisSource AtisSourceVatsimDatafeed
+                  Nothing ->
+                    lift $ setAtisSource AtisSourceVatsimDatafeed
 
           modifyView $ \v -> v
             { mcduViewTitle = "CONFIG"
@@ -80,6 +91,8 @@ configView = defView
                   else
                     mcduPrintR (screenW - 1) 6 yellow "DISABLED"
                   mcduPrintR (screenW - 1) 7 white "(HTTP SERVER OFF)"
+                mcduPrint 1 7 white "ATIS SRC"
+                mcduPrint 1 8 green (maybe "----" (BS8.pack . map toUpper . toWords . dropPrefix . dropPrefix . fromHumps . show) atisSrc)
             , mcduViewLSKBindings = Map.fromList $ 
                 [ (LSKL 5, ("MAIN MENU", loadViewByID MainMenuView))
                 , (LSKL 0, ("", scratchInteract setACType getACType >> reloadView))
@@ -95,6 +108,7 @@ configView = defView
                            )
                   )
                 , (LSKL 2, ("", modify (\s -> s { mcduShowLog = not (mcduShowLog s) }) >> flushAll >> reloadView))
+                , (LSKL 3, ("", toggleAtisSource >> reloadView))
                 ]
                 ++
                 if serverEnabled then
@@ -257,12 +271,12 @@ configView = defView
                 [ (LSKL 5, ("MAIN MENU", loadViewByID MainMenuView))
                 , (LSKL 0, ( ""
                            , do
-                               if fgConnected then do
+                               if connect then do
                                  modify $ \s -> s { mcduFlightgearConnect = False }
-                                 mcduDisconnectFlightgear
+                                 when fgConnected mcduDisconnectFlightgear
                                else do
                                  modify $ \s -> s { mcduFlightgearConnect = True }
-                                 mcduConnectFlightgear
+                                 unless fgConnected mcduConnectFlightgear
                                reloadView
                            )
                   )
