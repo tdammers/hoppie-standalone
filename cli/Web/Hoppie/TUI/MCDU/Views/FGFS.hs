@@ -902,9 +902,20 @@ progViewLoad = withFGView $ do
                 forM_ (progressDistToTOD =<< progress) $ \tod -> do
                   mcduPrint 1 7 white "TOP OF DESCENT"
                   printWP cyan 8 (Just tod)
-                
-            mcduPrint 1 5 white "DEST"
-            printWP green 6 (progressDestination =<< progress)
+
+            forM_ (listToMaybe . progressAlerts =<< progress) $ \alert -> do
+              mcduPrintC (screenW `div` 2) 9 red alert
+
+            let rnpColor = case ( progress >>= progressRNP >>= rnpRNP
+                                , progress >>= progressRNP >>= rnpANP
+                                ) of
+                              (Just rnp, Just anp) | rnp < anp -> red
+                              _ -> green
+            mcduPrint 1 10 rnpColor $ fromMaybe "-----" (progress >>= progressRNP >>= rnpSensorName)
+            mcduPrint 7 10 white "RNP-"
+            mcduPrint 11 10 rnpColor $ maybe "-.--" (BS8.pack . printf "%3.2f") (progress >>= progressRNP >>= rnpRNP)
+            mcduPrint 16 10 white "EPU-"
+            mcduPrint 20 10 rnpColor $ maybe "-.--" (BS8.pack . printf "%3.2f") (progress >>= progressRNP >>= rnpANP)
 
         , mcduViewLSKBindings = Map.fromList $
             []

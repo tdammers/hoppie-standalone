@@ -139,6 +139,21 @@ instance FromNasal FlightPhase where
 instance ToNasal FlightPhase where
   toNasal = toNasal . fromEnum
 
+data RnpInfo =
+  RnpInfo
+    { rnpRNP :: Maybe Double
+    , rnpANP :: Maybe Double
+    , rnpSensorName :: Maybe ByteString
+    }
+    deriving Show
+
+instance FromNasal RnpInfo where
+  fromNasal nv =
+    RnpInfo
+      <$> fromNasalFieldMaybe "rnp" nv
+      <*> fromNasalFieldMaybe "anp" nv
+      <*> fromNasalFieldMaybe "sensor" nv
+
 data ProgressInfo =
   ProgressInfo
     { progressCurrent :: Maybe FPLeg
@@ -149,6 +164,8 @@ data ProgressInfo =
     , progressFlightPhase :: FlightPhase
     , progressDistToTOC :: Maybe FPLeg
     , progressDistToTOD :: Maybe FPLeg
+    , progressRNP :: Maybe RnpInfo
+    , progressAlerts :: [ByteString]
     }
     deriving (Show)
 
@@ -163,6 +180,8 @@ instance FromNasal ProgressInfo where
       <*> fromNasalField "phase" nv
       <*> fromNasalFieldMaybe "toc" nv
       <*> fromNasalFieldMaybe "tod" nv
+      <*> fromNasalFieldMaybe "rnp" nv
+      <*> (fromMaybe [] <$> fromNasalFieldMaybe "alerts" nv)
 
 data IASOrMach
   = IAS Int

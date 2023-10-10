@@ -49,6 +49,29 @@ if (!contains(mcdu, 'flightPhase')) {
     mcdu.flightPhase = ON_STAND;
 }
 
+if (!contains(mcdu, 'alerts')) {
+    mcdu.alerts = {};
+}
+
+var setAlert = func(name) {
+    if (!contains(mcdu.alerts, name))
+        mcdu.alerts[name] = 2;
+}
+
+var clearAlert = func(name) {
+    delete(mcdu.alerts, name);
+}
+
+var getNewAlert = func {
+    foreach (var k; keys(mcdu.alerts)) {
+        if (mcdu.alerts[k] > 1) {
+            mcdu.alerts[k] = 1;
+            return k;
+        }
+    }
+    return nil;
+}
+
 if (!contains(mcdu, 'flightPhaseChecker')) {
     mcdu.flightPhaseChecker = maketimer(1, func { mcdu.fms._checkFlightPhase(); });
     mcdu.flightPhaseChecker.simulatedTime = 1;
@@ -136,6 +159,65 @@ var checkFlightPhase = func {
     if (mcdu.flightPhase != phasePrev) {
         printf("%s -> %s", flightPhaseName[phasePrev], flightPhaseName[mcdu.flightPhase]);
     }
+    checkFlightPhaseAlerts(mcdu.flightPhase);
+};
+
+var checkMinimumTakeoffFuel = func {
+    if (mcdu.flightPhase == TAXI_OUT) {
+        var fuelOnBoard = fuelSamplerVars.currentKG;
+        if (!contains(mcdu, 'perfInitData') or
+            !contains(mcdu.perfInitData, 'toFuel') or
+            mcdu.perfInitData.toFuel == nil or
+            fuelOnBoard == nil) {
+            clearAlert('LOW TAKEOFF FUEL');
+        }
+        elsif (fuelOnBoard < mcdu.perfInitData.toFuel) {
+            setAlert('LOW TAKEOFF FUEL');
+        }
+        else {
+            clearAlert('LOW TAKEOFF FUEL');
+        }
+    }
+    else {
+        clearAlert('LOW TAKEOFF FUEL');
+    }
+};
+
+var checkCurrentFuel = func {
+    debug.dump(mcdu.flightPhase);
+    if (mcdu.flightPhase > TAKEOFF) {
+        var fuelOnBoard = fuelSamplerVars.currentKG;
+        debug.dump(mcdu['perfInitData']);
+        if (!contains(mcdu, 'perfInitData') or
+            mcdu.perfInitData['contFuel'] == nil or
+            mcdu.perfInitData['reserveFuel'] == nil or
+            fuelOnBoard == nil) {
+            clearAlert('FUEL WARN');
+            clearAlert('FUEL EMERGENCY');
+        }
+        elsif (fuelOnBoard < mcdu.perfInitData.reserveFuel) {
+            clearAlert('FUEL WARN');
+            setAlert('FUEL EMERGENCY');
+        }
+        elsif (fuelOnBoard < mcdu.perfInitData.reserveFuel + mcdu.perfInitData.contFuel) {
+            setAlert('FUEL WARN');
+            clearAlert('FUEL EMERGENCY');
+        }
+        else {
+            clearAlert('FUEL WARN');
+            clearAlert('FUEL EMERGENCY');
+        }
+    }
+    else {
+            clearAlert('FUEL WARN');
+            clearAlert('FUEL EMERGENCY');
+    }
+};
+
+var checkFlightPhaseAlerts = func {
+    checkMinimumTakeoffFuel();
+    checkCurrentFuel();
+    debug.dump(mcdu.alerts);
 };
 
 var getFlightPhase = func {
@@ -459,6 +541,53 @@ var getDestinationIndex = func (fp = nil) {
     return -1;
 }
 
+var gpsNode = props.globals.getNode('/instrumentation/gps');
+
+var getRnpInfo = func {
+    var fp = flightplan();
+    if (fp == nil)
+        return nil;
+    var wp = fp.getWP(fp.current);
+    var rnp = nil;
+    var totalDistanceRemaining = getprop('/autopilot/route-manager/distance-remaining-nm');
+    if (wp != nil) {
+        if (wp.wp_role == 'approach') {
+            if (totalDistanceRemaining < 8.0)
+                rnp = 0.3;
+            else
+                rnp = 1.0;
+        }
+        elsif (wp.wp_role == 'sid' or wp.wp_role == 'star') {
+            rnp = 1.0;
+        }
+        else {
+            rnp = 5.0;
+        }
+    }
+
+    var anp = nil;
+    var sensorName = nil;
+
+    if (gpsNode != nil and gpsNode.getValue('serviceable')) {
+        var gpsPosition = geo.Coord.new();
+        gpsPosition.set_latlon(
+            gpsNode.getValue('indicated-latitude-deg'), 
+            gpsNode.getValue('indicated-longitude-deg'));
+        var actualPosition = geo.aircraft_position();
+        var distError = actualPosition.distance_to(gpsPosition);
+        anp = distError * 2.0;
+        sensorName = 'GPS-D';
+    }
+    if (rnp == nil and anp == nil and sensor == nil)
+        return nil;
+    else
+        return removeNilFields({
+            "rnp": rnp,
+            "anp": anp,
+            "sensor": sensorName
+        });
+}
+
 var getProgressInfo = func () {
     var fp = fms.getVisibleFlightplan();
     var groundspeed = getprop('/velocities/groundspeed-kt');
@@ -491,6 +620,15 @@ var getProgressInfo = func () {
             info.toc = makeVirtualLegInfo('TOC', totalDistanceRemaining - mcdu.vnav.tocDist, totalDistance, totalDistanceRemaining, fuelOnBoard, fuelGS, fuelFlow);
         if (mcdu.vnav['todDist'] != nil)
             info.tod = makeVirtualLegInfo('TOD', totalDistanceRemaining - mcdu.vnav.todDist, totalDistance, totalDistanceRemaining, fuelOnBoard, fuelGS, fuelFlow);
+    }
+    info.rnp = getRnpInfo();
+    var alerts = [];
+    foreach (var k; keys(mcdu.alerts)) {
+        if (mcdu.alerts[k] > 0)
+            append(alerts, k);
+    }
+    if (size(alerts) > 0) {
+        info.alerts = alerts;
     }
     return info;
 };
