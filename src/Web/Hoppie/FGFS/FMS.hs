@@ -562,8 +562,8 @@ hasFlightplanModifications =
 deleteWaypoint :: (MonadFG m) => Int -> m Bool
 deleteWaypoint n = fgCallNasalBool "fms.deleteWaypoint" [n]
 
-getTransitionAlt :: (MonadFG m) => m Double
-getTransitionAlt = fgCallNasalDef 18000 "fms.getTransitionAlt" ()
+getTransitionAlt :: (MonadFG m) => m (Maybe Double)
+getTransitionAlt = fgCallNasalDef Nothing "fms.getTransitionAlt" ()
 
 getPerfInitData :: (MonadFG m) => m PerfInitData
 getPerfInitData = fgCallNasalDef defPerfInitData "fms.getPerfInitData" ()

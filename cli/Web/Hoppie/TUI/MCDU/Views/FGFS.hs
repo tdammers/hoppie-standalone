@@ -1085,7 +1085,7 @@ fplViewLoad = withFGView $ do
         case drop n curLegs of
           (leg:_) -> do
             let spdStr = BS8.pack $ formatSpeedCompact (legSpeed leg) (legSpeedType leg)
-                altStr = BS8.pack $ formatAltitudeCompact transAlt (legAlt leg) (legAltType leg)
+                altStr = BS8.pack $ formatAltitudeCompact (fromMaybe 18000 transAlt) (legAlt leg) (legAltType leg)
             return . Just $ spdStr <> "/" <> altStr
           _ -> do
             scratchWarn "NO WPT"
@@ -1148,7 +1148,7 @@ fplViewLoad = withFGView $ do
             unless (legIsDiscontinuity leg) $ do
               mcduPrint (screenW - 11) (n * 2 + 2) color (BS8.pack $ formatSpeed (legSpeed leg) (legSpeedType leg))
               mcduPrint (screenW - 7) (n * 2 + 2) color "/"
-              mcduPrint (screenW - 6) (n * 2 + 2) color (BS8.pack $ formatAltitude transAlt (legAlt leg) (legAltType leg))
+              mcduPrint (screenW - 6) (n * 2 + 2) color (BS8.pack $ formatAltitude (fromMaybe 18000 transAlt) (legAlt leg) (legAltType leg))
 
           ) [0,1..] curLegs
     }

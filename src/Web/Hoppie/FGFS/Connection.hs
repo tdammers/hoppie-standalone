@@ -78,6 +78,7 @@ data FGFSNetworkError
   deriving (Show)
 
 instance Exception FGFSNetworkError where
+
 withFGFSConnection :: ByteString -> Int -> (String -> IO ()) -> (FGFSConnection -> IO ()) -> IO ()
 withFGFSConnection host port logger action = do
   connFailedVar <- newEmptyTMVarIO
@@ -215,7 +216,7 @@ callNasalOrError conn fun args =
     json <- runNasalRaw conn script'
     case JSON.eitherDecodeStrict json of
       Left err ->
-        throw $ JSONDecodeError err
+        throw $ JSONDecodeError (Just $ Text.unpack fun) err
       Right val ->
         return val
 
@@ -283,10 +284,11 @@ runNasalOrError conn script = do
 
   let script'finish = "externalMCDU.finishScript(" <> uniq <> ");"
   (JSON.eitherDecodeStrict <$> runNasalRaw conn script'finish) >>= \case
-    Left err -> throw $ JSONDecodeError err
+    Left err -> throw $ JSONDecodeError Nothing err
     Right a -> return a
 
-newtype JSONError = JSONDecodeError String
+data JSONError =
+  JSONDecodeError !(Maybe String) !String
   deriving (Show)
 
 instance Exception JSONError where

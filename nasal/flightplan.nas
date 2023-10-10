@@ -184,10 +184,8 @@ var checkMinimumTakeoffFuel = func {
 };
 
 var checkCurrentFuel = func {
-    debug.dump(mcdu.flightPhase);
     if (mcdu.flightPhase > TAKEOFF) {
         var fuelOnBoard = fuelSamplerVars.currentKG;
-        debug.dump(mcdu['perfInitData']);
         if (!contains(mcdu, 'perfInitData') or
             mcdu.perfInitData['contFuel'] == nil or
             mcdu.perfInitData['reserveFuel'] == nil or
@@ -217,7 +215,6 @@ var checkCurrentFuel = func {
 var checkFlightPhaseAlerts = func {
     checkMinimumTakeoffFuel();
     checkCurrentFuel();
-    debug.dump(mcdu.alerts);
 };
 
 var getFlightPhase = func {

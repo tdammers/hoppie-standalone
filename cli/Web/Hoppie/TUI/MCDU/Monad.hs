@@ -361,7 +361,9 @@ instance MonadFG MCDU where
                     | (fileMay, lineMay) <- stackTrace
                     ]
         , MCDUHandler $ \case
-            JSONDecodeError err -> do
+            JSONDecodeError (Just context) err -> do
+              handleError "JSON ERROR" . Just $ "JSON decoder error in " <> context <> ": " <> err
+            JSONDecodeError Nothing err -> do
               handleError "JSON ERROR" . Just $ "JSON decoder error: " <> err
         , MCDUHandler $ \case
             FGFSConnectionClosed ->
