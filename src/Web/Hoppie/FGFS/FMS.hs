@@ -122,9 +122,22 @@ data FlightPhase
       | GO_AROUND
   deriving (Show, Read, Eq, Enum, Ord, Bounded)
 
+nextFlightPhase :: FlightPhase -> FlightPhase
+nextFlightPhase GO_AROUND = CLIMB
+nextFlightPhase TAXI_IN = ON_STAND
+nextFlightPhase x = succ x
+
+prevFlightPhase :: FlightPhase -> Maybe FlightPhase
+prevFlightPhase ON_STAND = Nothing
+prevFlightPhase GO_AROUND = Just APPROACH
+prevFlightPhase x = Just (pred x)
+
 instance FromNasal FlightPhase where
   fromNasal nv =
     toEnum <$> fromNasal nv
+
+instance ToNasal FlightPhase where
+  toNasal = toNasal . fromEnum
 
 data ProgressInfo =
   ProgressInfo
@@ -132,7 +145,10 @@ data ProgressInfo =
     , progressNext :: Maybe FPLeg
     , progressDestination :: Maybe FPLeg
     , progressFOB :: Maybe Double
+    , progressGrossWeight :: Maybe Double
     , progressFlightPhase :: FlightPhase
+    , progressDistToTOC :: Maybe FPLeg
+    , progressDistToTOD :: Maybe FPLeg
     }
     deriving (Show)
 
@@ -143,7 +159,10 @@ instance FromNasal ProgressInfo where
       <*> fromNasalFieldMaybe "next" nv
       <*> fromNasalFieldMaybe "destination" nv
       <*> fromNasalFieldMaybe "fob" nv
+      <*> fromNasalFieldMaybe "gw" nv
       <*> fromNasalField "phase" nv
+      <*> fromNasalFieldMaybe "toc" nv
+      <*> fromNasalFieldMaybe "tod" nv
 
 data IASOrMach
   = IAS Int
@@ -538,3 +557,9 @@ getFuelOnBoard = fgCallNasalDef Nothing "fms.getFuelOnBoard" ()
 
 getFuelCapacity :: (MonadFG m) => m Double
 getFuelCapacity = fgCallNasalDef 0 "fms.getFuelCapacity" ()
+
+getFlightPhase :: (MonadFG m) => m (Maybe FlightPhase)
+getFlightPhase = fgCallNasalDef Nothing "fms.getFlightPhase" ()
+
+setFlightPhase :: (MonadFG m) => FlightPhase -> m ()
+setFlightPhase p = fgCallNasal "fms.setFlightPhase" [p]

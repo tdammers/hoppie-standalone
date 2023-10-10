@@ -16,6 +16,13 @@ if (!contains(mcdu, 'vnav')) {
     };
 }
 
+var fdm = getprop('/sim/flight-model');
+var grossWeightProp = nil;
+if (fdm == 'yasim')
+    grossWeightProp = props.globals.getNode('/yasim/gross-weight-lbs');
+elsif (fdm == 'jsb')
+    grossWeightProp = props.globals.getNode('/fdm/jsbsim/inertia/weight-lbs');
+
 var ON_STAND = 0;
 var TAXI_OUT = 1;
 var TAKEOFF = 2;
@@ -46,6 +53,7 @@ if (!contains(mcdu, 'flightPhaseChecker')) {
     mcdu.flightPhaseChecker = maketimer(1, func { mcdu.fms._checkFlightPhase(); });
     mcdu.flightPhaseChecker.simulatedTime = 1;
 }
+
 var checkFlightPhase = func {
     var groundspeed = getprop('/velocities/groundspeed-kt');
     var altitude = getprop('/instrumentation/altimeter/indicated-altitude-ft');
@@ -128,6 +136,15 @@ var checkFlightPhase = func {
     if (mcdu.flightPhase != phasePrev) {
         printf("%s -> %s", flightPhaseName[phasePrev], flightPhaseName[mcdu.flightPhase]);
     }
+};
+
+var getFlightPhase = func {
+    return mcdu.flightPhase;
+};
+
+var setFlightPhase = func (p) {
+    mcdu.flightPhase = p;
+    return nil;
 };
 
 var fuelSamplerVars = {
@@ -277,6 +294,28 @@ var makeLegInfo = func (idx, wp, totalDistance, totalDistanceRemaining, fuelOnBo
         , "disc": (wp.wp_type == "discontinuity" or wp.wp_type == "vectors")
         , "ifrom": idx
         , "ito": idx
+        });
+};
+
+var makeVirtualLegInfo = func (name, distanceAlongRoute, totalDistance, totalDistanceRemaining, fuelOnBoard, groundspeed, fuelFlow) {
+    var distanceRemaining = totalDistance - distanceAlongRoute;
+    var distanceToWP = totalDistanceRemaining - distanceRemaining;
+    var fuelRemaining = nil;
+    var fuelGS = math.max(40, groundspeed);
+    if (fuelFlow != nil and fuelOnBoard != nil) {
+        fuelRemaining = fuelOnBoard + fuelFlow * distanceToWP / fuelGS * 3600;
+    }
+    var timeRemaining = nil;
+    # if (groundspeed > 40)
+        timeRemaining = distanceToWP * 60 / fuelGS;
+    return removeNilFields(
+        { "name": name
+        , "cdist": distanceAlongRoute
+        , "rdist": distanceToWP
+        , "efob": fuelRemaining
+        , "ete": timeRemaining
+        , "ifrom": -1
+        , "ito": -1
         });
 };
 
@@ -444,7 +483,15 @@ var getProgressInfo = func () {
     if (wpDest != nil)
         info.destination = makeLegInfo(destIdx, wpDest, totalDistance, totalDistanceRemaining, fuelOnBoard, fuelGS, fuelFlow);
     info.fob = fuelOnBoard;
+    if (grossWeightProp != nil)
+        info.gw = grossWeightProp.getValue() * LB2KG;
     info.phase = mcdu.flightPhase;
+    if (contains(mcdu, 'vnav')) {
+        if (mcdu.vnav['tocDist'] != nil)
+            info.toc = makeVirtualLegInfo('TOC', totalDistanceRemaining - mcdu.vnav.tocDist, totalDistance, totalDistanceRemaining, fuelOnBoard, fuelGS, fuelFlow);
+        if (mcdu.vnav['todDist'] != nil)
+            info.tod = makeVirtualLegInfo('TOD', totalDistanceRemaining - mcdu.vnav.todDist, totalDistance, totalDistanceRemaining, fuelOnBoard, fuelGS, fuelFlow);
+    }
     return info;
 };
 
@@ -1554,12 +1601,12 @@ var calcTOD = func {
                 (criticalWP == nil) ? "destination" : criticalWP.id);
     }
 }
-calcTOD();
-calcTOC();
 
 var fms = {
     '_updateFuelSampler': updateFuelSampler,
     '_checkFlightPhase': checkFlightPhase,
+    'getFlightPhase': getFlightPhase,
+    'setFlightPhase': setFlightPhase,
 
     'hasFlightplanModifications': hasFlightplanModifications,
     'getModifyableFlightplan': getModifyableFlightplan,
