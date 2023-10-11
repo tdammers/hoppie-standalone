@@ -84,6 +84,10 @@ executable hoppie-mcdu
                  , Web.Hoppie.TUI.MCDU.Views.Config
                  , Web.Hoppie.TUI.MCDU.Views.Messages
                  , Web.Hoppie.TUI.MCDU.Views.FGFS
+                 , Web.Hoppie.TUI.MCDU.Views.FGFS.Common
+                 , Web.Hoppie.TUI.MCDU.Views.FGFS.PerfInit
+                 , Web.Hoppie.TUI.MCDU.Views.FGFS.Progress
+                 , Web.Hoppie.TUI.MCDU.Views.FGFS.RouteFpl
                  , Web.Hoppie.TUI.MCDU.HttpServer
                  , Web.Hoppie.TUI.MCDU.Main
                  , Web.Hoppie.TUI.MCDU.Keys
