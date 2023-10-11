@@ -57,7 +57,7 @@ var calcTOC = func {
         }
         else {
             var dt = (cruiseAlt - alt) / perfEntry.roc;
-            distRemaining += tas * perfEntry.roc / (cruiseAlt - alt) / 60;
+            distRemaining += tas * dt / 60;
             alt = cruiseAlt;
             t += dt;
         }

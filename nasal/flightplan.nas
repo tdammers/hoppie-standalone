@@ -336,7 +336,7 @@ var getProgressInfo = func () {
     info.phase = mcdu.currentFlightPhase;
     if (contains(mcdu, 'vnav')) {
         if (mcdu.vnav['tocDist'] != nil)
-            info.toc = makeVirtualLegInfo('TOC', totalDistance - mcdu.vnav.tocDist, totalDistance, totalDistanceRemaining, fuelOnBoard, fuelGS, fuelFlow);
+            info.toc = makeVirtualLegInfo('TOC', mcdu.vnav.tocDist, totalDistance, totalDistanceRemaining, fuelOnBoard, fuelGS, fuelFlow);
         if (mcdu.vnav['todDist'] != nil)
             info.tod = makeVirtualLegInfo('TOD', totalDistance - mcdu.vnav.todDist, totalDistance, totalDistanceRemaining, fuelOnBoard, fuelGS, fuelFlow);
     }
