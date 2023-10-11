@@ -36,17 +36,19 @@ import Web.Hoppie.StringUtil
 import qualified Web.Vatsim as Vatsim
 
 import Control.Applicative
-import Control.Concurrent.MVar
 import Control.Concurrent.Async (Async)
 import qualified Control.Concurrent.Async as Async
+import Control.Concurrent.MVar
 import Control.Monad
 import Control.Monad.Reader
+import Data.Aeson (ToJSON (..), FromJSON (..), (.=), (.:?))
+import qualified Data.Aeson as JSON
 import Data.Aeson.TH (deriveJSON)
-import qualified Data.Aeson.TH as JSON
 import Data.ByteString (ByteString)
 import Data.List
 import Data.Map (Map)
 import qualified Data.Map.Strict as Map
+import Data.Maybe (maybeToList)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.Text.Encoding (encodeUtf8, decodeUtf8)
@@ -102,6 +104,19 @@ defDataAuthorities =
     , nextDataAuthority = Nothing
     , logonDataAuthority = Nothing
     }
+
+instance ToJSON DataAuthorities where
+  toJSON da = JSON.object $
+    [ "current" .= decodeUtf8 x | x <- maybeToList (currentDataAuthority da) ] ++
+    [ "next" .= decodeUtf8 x | x <- maybeToList (nextDataAuthority da) ] ++
+    [ "logon" .= decodeUtf8 x | x <- maybeToList (logonDataAuthority da) ]
+
+instance FromJSON DataAuthorities where
+  parseJSON = JSON.withObject "DataAuthorities" $ \obj ->
+    DataAuthorities
+      <$> (fmap encodeUtf8 <$> obj .:? "current")
+      <*> (fmap encodeUtf8 <$> obj .:? "next")
+      <*> (fmap encodeUtf8 <$> obj .:? "logon")
 
 data NetworkStatus
   = NetworkOK
@@ -210,6 +225,7 @@ data PersistentHoppieData =
     , phdDownlinks :: [WithMeta DownlinkStatus TypedMessage]
     , phdNextMIN :: Word
     , phdNextUID :: Word
+    , phdCpdlcDataAuthorities :: DataAuthorities
     }
     deriving (Show, Eq)
 
@@ -226,6 +242,7 @@ getPersistentData =
     <*> (Map.elems <$> (asks hoppieDownlinks >>= liftIO . readMVar))
     <*> (asks hoppieCpdlcNextMIN >>= liftIO . readMVar)
     <*> (asks hoppieNextUID >>= liftIO . readMVar)
+    <*> (asks hoppieCpdlcDataAuthorities >>= liftIO . readMVar)
 
 restorePersistentData :: MonadIO m => PersistentHoppieData -> HoppieT m ()
 restorePersistentData phd = do
@@ -237,6 +254,8 @@ restorePersistentData phd = do
     liftIO $ modifyMVar_ var (const . return $ phdNextMIN phd)
   asks hoppieNextUID >>= \var ->
     liftIO $ modifyMVar_ var (const . return $ phdNextUID phd)
+  asks hoppieCpdlcDataAuthorities >>= \var ->
+    liftIO $ modifyMVar_ var (const . return $ phdCpdlcDataAuthorities phd)
 
 isCPDLC :: TypedMessage -> Bool
 isCPDLC tm = case typedMessagePayload tm of
