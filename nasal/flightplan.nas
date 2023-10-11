@@ -159,6 +159,8 @@ var checkFlightPhase = func {
     if (mcdu.flightPhase != phasePrev) {
         printf("%s -> %s", flightPhaseName[phasePrev], flightPhaseName[mcdu.flightPhase]);
     }
+    calcTOC();
+    calcTOD();
     checkFlightPhaseAlerts(mcdu.flightPhase);
 };
 
@@ -614,9 +616,9 @@ var getProgressInfo = func () {
     info.phase = mcdu.flightPhase;
     if (contains(mcdu, 'vnav')) {
         if (mcdu.vnav['tocDist'] != nil)
-            info.toc = makeVirtualLegInfo('TOC', totalDistanceRemaining - mcdu.vnav.tocDist, totalDistance, totalDistanceRemaining, fuelOnBoard, fuelGS, fuelFlow);
+            info.toc = makeVirtualLegInfo('TOC', totalDistance - mcdu.vnav.tocDist, totalDistance, totalDistanceRemaining, fuelOnBoard, fuelGS, fuelFlow);
         if (mcdu.vnav['todDist'] != nil)
-            info.tod = makeVirtualLegInfo('TOD', totalDistanceRemaining - mcdu.vnav.todDist, totalDistance, totalDistanceRemaining, fuelOnBoard, fuelGS, fuelFlow);
+            info.tod = makeVirtualLegInfo('TOD', totalDistance - mcdu.vnav.todDist, totalDistance, totalDistanceRemaining, fuelOnBoard, fuelGS, fuelFlow);
     }
     info.rnp = getRnpInfo();
     var alerts = [];
