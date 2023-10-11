@@ -1,280 +1,6 @@
 if (!contains(mcdu, 'modifiedFlightplan'))
     mcdu.modifiedFlightplan = nil;
 
-if (!contains(mcdu, 'fuelSampler')) {
-    mcdu.fuelSampler = maketimer(10, func { mcdu.fms._updateFuelSampler(); });
-    mcdu.fuelSampler.simulatedTime = 1;
-}
-
-if (!contains(mcdu, 'perfInitData')) {
-    mcdu.perfInitData = {};
-}
-
-if (!contains(mcdu, 'vnav')) {
-    mcdu.vnav = {
-        'todDist': nil,
-    };
-}
-
-var fdm = getprop('/sim/flight-model');
-var grossWeightProp = nil;
-if (fdm == 'yasim')
-    grossWeightProp = props.globals.getNode('/yasim/gross-weight-lbs');
-elsif (fdm == 'jsb')
-    grossWeightProp = props.globals.getNode('/fdm/jsbsim/inertia/weight-lbs');
-
-var ON_STAND = 0;
-var TAXI_OUT = 1;
-var TAKEOFF = 2;
-var CLIMB = 3;
-var CRUISE = 4;
-var DESCENT = 5;
-var APPROACH = 6;
-var TAXI_IN = 7;
-var GO_AROUND = 8;
-
-var flightPhaseName = [
-        'ON_STAND',
-        'TAXI_OUT',
-        'TAKEOFF',
-        'CLIMB',
-        'CRUISE',
-        'DESCENT',
-        'APPROACH',
-        'TAXI_IN',
-        'GO_AROUND',
-    ];
-
-if (!contains(mcdu, 'flightPhase')) {
-    mcdu.flightPhase = ON_STAND;
-}
-
-if (!contains(mcdu, 'alerts')) {
-    mcdu.alerts = {};
-}
-
-var setAlert = func(name) {
-    if (!contains(mcdu.alerts, name))
-        mcdu.alerts[name] = 2;
-}
-
-var clearAlert = func(name) {
-    delete(mcdu.alerts, name);
-}
-
-var getNewAlert = func {
-    foreach (var k; keys(mcdu.alerts)) {
-        if (mcdu.alerts[k] > 1) {
-            mcdu.alerts[k] = 1;
-            return k;
-        }
-    }
-    return nil;
-}
-
-if (!contains(mcdu, 'flightPhaseChecker')) {
-    mcdu.flightPhaseChecker = maketimer(1, func { mcdu.fms._checkFlightPhase(); });
-    mcdu.flightPhaseChecker.simulatedTime = 1;
-}
-
-var checkFlightPhase = func {
-    var groundspeed = getprop('/velocities/groundspeed-kt');
-    var altitude = getprop('/instrumentation/altimeter/indicated-altitude-ft');
-    var agl = getprop('/position/altitude-agl-ft');
-    var vspeed = getprop('/instrumentation/vertical-speed-indicator/indicated-speed-fpm');
-    var wow = getprop('/gear/gear/wow');
-    var phasePrev = mcdu.flightPhase;
-    if (mcdu.flightPhase == ON_STAND) {
-        if (groundspeed > 5)
-            mcdu.flightPhase = TAXI_OUT;
-    }
-    if (mcdu.flightPhase == TAXI_OUT) {
-        if (groundspeed > 40)
-            mcdu.flightPhase = TAKEOFF;
-    }
-    if (mcdu.flightPhase == TAKEOFF or mcdu.flightPhase == GO_AROUND) {
-        if (agl > 800)
-            mcdu.flightPhase = CLIMB;
-    }
-    if (mcdu.flightPhase == CLIMB) {
-        var cruiseAlt = getprop('/autopilot/route-manager/cruise/altitude-ft');
-        if (cruiseAlt == nil or cruiseAlt == 0) {
-            cruiseAlt = getprop('/autopilot/route-manager/cruise/flight-level');
-            if (cruiseAlt != nil)
-                cruiseAlt *= 100;
-        }
-        if (cruiseAlt > 0) {
-            if (altitude >= cruiseAlt - 100) {
-                mcdu.flightPhase = CRUISE;
-            }
-        }
-        else {
-            if (altitude >= 4000 and vspeed < 100) {
-                mcdu.flightPhase = CRUISE;
-            }
-        }
-    }
-    if (mcdu.flightPhase == CRUISE) {
-        var cruiseAlt = getprop('/autopilot/route-manager/cruise/altitude-ft');
-        if (cruiseAlt == nil or cruiseAlt == 0) {
-            cruiseAlt = getprop('/autopilot/route-manager/cruise/flight-level');
-            if (cruiseAlt != nil)
-                cruiseAlt *= 100;
-        }
-        if (cruiseAlt > 0) {
-            if (altitude < cruiseAlt - 500) {
-                mcdu.flightPhase = DESCENT;
-            }
-        }
-        else {
-            if (vspeed < -400) {
-                mcdu.flightPhase = DESCENT;
-            }
-        }
-    }
-    if (mcdu.flightPhase == DESCENT) {
-        if (agl < 3000) {
-            mcdu.flightPhase = APPROACH;
-        }
-    }
-    if (mcdu.flightPhase == APPROACH) {
-        if (wow and groundspeed < 40) {
-            mcdu.flightPhase = TAXI_IN;
-        }
-        elsif (vspeed > 300) {
-            mcdu.flightPhase = GO_AROUND;
-        }
-    }
-    if (mcdu.flightPhase == TAXI_IN) {
-        var enginesRunning = 0;
-        foreach (var e; props.globals.getNode('engines').getChildren('engine')) {
-            isRunning = e.getBoolValue('running');
-            if (isRunning)
-                enginesRunning += 1;
-        }
-        if (enginesRunning == 0 and groundspeed < 5) {
-            mcdu.flightPhase = ON_STAND;
-        }
-    }
-    if (mcdu.flightPhase != phasePrev) {
-        printf("%s -> %s", flightPhaseName[phasePrev], flightPhaseName[mcdu.flightPhase]);
-    }
-    calcTOC();
-    calcTOD();
-    checkFlightPhaseAlerts(mcdu.flightPhase);
-};
-
-var checkMinimumTakeoffFuel = func {
-    if (mcdu.flightPhase == TAXI_OUT) {
-        var fuelOnBoard = fuelSamplerVars.currentKG;
-        if (!contains(mcdu, 'perfInitData') or
-            !contains(mcdu.perfInitData, 'toFuel') or
-            mcdu.perfInitData.toFuel == nil or
-            fuelOnBoard == nil) {
-            clearAlert('LOW TAKEOFF FUEL');
-        }
-        elsif (fuelOnBoard < mcdu.perfInitData.toFuel) {
-            setAlert('LOW TAKEOFF FUEL');
-        }
-        else {
-            clearAlert('LOW TAKEOFF FUEL');
-        }
-    }
-    else {
-        clearAlert('LOW TAKEOFF FUEL');
-    }
-};
-
-var checkCurrentFuel = func {
-    if (mcdu.flightPhase > TAKEOFF) {
-        var fuelOnBoard = fuelSamplerVars.currentKG;
-        if (!contains(mcdu, 'perfInitData') or
-            mcdu.perfInitData['contFuel'] == nil or
-            mcdu.perfInitData['reserveFuel'] == nil or
-            fuelOnBoard == nil) {
-            clearAlert('FUEL WARN');
-            clearAlert('FUEL EMERGENCY');
-        }
-        elsif (fuelOnBoard < mcdu.perfInitData.reserveFuel) {
-            clearAlert('FUEL WARN');
-            setAlert('FUEL EMERGENCY');
-        }
-        elsif (fuelOnBoard < mcdu.perfInitData.reserveFuel + mcdu.perfInitData.contFuel) {
-            setAlert('FUEL WARN');
-            clearAlert('FUEL EMERGENCY');
-        }
-        else {
-            clearAlert('FUEL WARN');
-            clearAlert('FUEL EMERGENCY');
-        }
-    }
-    else {
-            clearAlert('FUEL WARN');
-            clearAlert('FUEL EMERGENCY');
-    }
-};
-
-var checkFlightPhaseAlerts = func {
-    checkMinimumTakeoffFuel();
-    checkCurrentFuel();
-};
-
-var getFlightPhase = func {
-    return mcdu.flightPhase;
-};
-
-var setFlightPhase = func (p) {
-    mcdu.flightPhase = p;
-    return nil;
-};
-
-var fuelSamplerVars = {
-    deltat: 10,
-    lastKG: nil,
-    currentKG: nil,
-    ffKG: nil,
-    propKG: props.globals.getNode('/consumables/fuel/total-fuel-kg'),
-};
-
-mcdu.fuelSampler.restart(fuelSamplerVars.deltat);
-mcdu.flightPhaseChecker.restart(1);
-
-var updateFuelSampler = func {
-    fuelSamplerVars.lastKG = fuelSamplerVars.currentKG;
-    fuelSamplerVars.currentKG = fuelSamplerVars.propKG.getValue();
-    if (fuelSamplerVars.lastKG != nil) {
-        fuelSamplerVars.ffKG =
-            (fuelSamplerVars.currentKG - fuelSamplerVars.lastKG) /
-            fuelSamplerVars.deltat;
-    }
-};
-
-# Update fuel sampler twice, so that the current fuel field is already filled
-updateFuelSampler();
-updateFuelSampler();
-
-var getFuelCapacity = func {
-    var baseNode = props.globals.getNode('/consumables/fuel');
-    var tanks = baseNode.getChildren('tank');
-    var totalCapacity = 0;
-    foreach (var tank; tanks) {
-        var capacity = tank.getValue('capacity-m3');
-        var density = tank.getValue('density-kgpm3');
-        if (capacity == nil or density == nil)
-            continue;
-        totalCapacity += density * capacity;
-    }
-    return totalCapacity;
-};
-
-var getFuelFlow = func {
-    return fuelSamplerVars.ffKG;
-};
-
-var getFuelOnBoard = func {
-    return fuelSamplerVars.currentKG;
-};
-
 var hasFlightplanModifications = func {
     return (mcdu.modifiedFlightplan != nil);
 };
@@ -327,21 +53,8 @@ var commitFlightplanEdits = func {
     else
         flightplan().current = -1;
     mcdu.modifiedFlightplan = nil;
-    calcTOD();
-    calcTOC();
     # reportFlightplanCurrent('commitFlightplanEdits[post]');
     return nil;
-};
-
-var getGroundspeed = func {
-    return getprop('/velocities/groundspeed-kt');
-};
-
-var getUTCMinutes = func {
-    var hour = getprop('/sim/time/utc/hour');
-    var minute = getprop('/sim/time/utc/minute');
-    var second = getprop('/sim/time/utc/second');
-    return (hour * 60 + minute + second / 60);
 };
 
 var makeLegInfo = func (idx, wp, totalDistance, totalDistanceRemaining, fuelOnBoard, groundspeed, fuelFlow) {
@@ -358,7 +71,7 @@ var makeLegInfo = func (idx, wp, totalDistance, totalDistanceRemaining, fuelOnBo
     var timeRemaining = nil;
     # if (groundspeed > 40)
         timeRemaining = distanceToWP * 60 / fuelGS;
-    return removeNilFields(
+    return mcdu.fms.removeNilFields(
         { "name": wp.wp_name
         , "hdg": math.round(wp.leg_bearing)
         , "ldist": wp.leg_distance
@@ -389,7 +102,7 @@ var makeVirtualLegInfo = func (name, distanceAlongRoute, totalDistance, totalDis
     var timeRemaining = nil;
     # if (groundspeed > 40)
         timeRemaining = distanceToWP * 60 / fuelGS;
-    return removeNilFields(
+    return mcdu.fms.removeNilFields(
         { "name": name
         , "cdist": distanceAlongRoute
         , "rdist": distanceToWP
@@ -402,7 +115,7 @@ var makeVirtualLegInfo = func (name, distanceAlongRoute, totalDistance, totalDis
 
 var getFlightplanSize = func {
     var current = nil;
-    var fp = fms.getVisibleFlightplan();
+    var fp = mcdu.fms.getVisibleFlightplan();
 
     var n = 0;
     for (var i = 0; i < fp.getPlanSize(); i += 1) {
@@ -427,15 +140,15 @@ var getFlightplanSize = func {
 
 var getFlightplanLegs = func (pageSize = nil, curPage = nil, offset = nil) {
     var acpos = geo.aircraft_position();
-    var fp = fms.getVisibleFlightplan();
+    var fp = mcdu.fms.getVisibleFlightplan();
     var result = [];
     var groundspeed = getprop('/velocities/groundspeed-kt');
     var fuelGS = math.max(40, groundspeed);
     var distanceToCurrent = getprop('/autopilot/route-manager/wp/dist');
     var totalDistanceRemaining = getprop('/autopilot/route-manager/distance-remaining-nm');
     var distanceRemaining = 0;
-    var fuelRemaining = fuelSamplerVars.currentKG;
-    var fuelFlow = fuelSamplerVars.ffKG;
+    var fuelRemaining = mcdu.fuelSamplerVars.currentKG;
+    var fuelFlow = mcdu.fuelSamplerVars.ffKG;
     var first = 0;
     var length = fp.getPlanSize();
     if (pageSize != nil) {
@@ -484,7 +197,7 @@ var getFlightplanLegs = func (pageSize = nil, curPage = nil, offset = nil) {
         }
         else {
             if (current != nil and n >= first and n < end)
-                append(result, removeNilFields(current));
+                append(result, mcdu.fms.removeNilFields(current));
             current =
                 { "name": wp.wp_name
                 , "hdg": math.round(geo.normdeg(wp.leg_bearing))
@@ -506,13 +219,13 @@ var getFlightplanLegs = func (pageSize = nil, curPage = nil, offset = nil) {
         }
     }
     if (current != nil and n >= first and n < end)
-        append(result, removeNilFields(current));
+        append(result, mcdu.fms.removeNilFields(current));
     return result;
 };
 
 var getDestinationIndex = func (fp = nil) {
     if (fp == nil)
-        fp = fms.getVisibleFlightplan();
+        fp = mcdu.fms.getVisibleFlightplan();
     for (var i = 1; i < fp.getPlanSize(); i += 1) {
         var wp = fp.getWP(i);
         if (wp != nil) {
@@ -580,21 +293,28 @@ var getRnpInfo = func {
     if (rnp == nil and anp == nil and sensor == nil)
         return nil;
     else
-        return removeNilFields({
+        return mcdu.fms.removeNilFields({
             "rnp": rnp,
             "anp": anp,
             "sensor": sensorName
         });
 }
 
+var grossWeightProp = nil;
+var fdm = getprop('/sim/flight-model');
+if (fdm == 'yasim')
+    grossWeightProp = props.globals.getNode('/yasim/gross-weight-lbs');
+elsif (fdm == 'jsb')
+    grossWeightProp = props.globals.getNode('/fdm/jsbsim/inertia/weight-lbs');
+
 var getProgressInfo = func () {
-    var fp = fms.getVisibleFlightplan();
+    var fp = mcdu.fms.getVisibleFlightplan();
     var groundspeed = getprop('/velocities/groundspeed-kt');
     var fuelGS = math.max(40, groundspeed);
     var totalDistanceRemaining = getprop('/autopilot/route-manager/distance-remaining-nm');
     var totalDistance = getprop('/autopilot/route-manager/total-distance');
-    var fuelOnBoard = fuelSamplerVars.currentKG;
-    var fuelFlow = fuelSamplerVars.ffKG;
+    var fuelOnBoard = mcdu.fuelSamplerVars.currentKG;
+    var fuelFlow = mcdu.fuelSamplerVars.ffKG;
     var first = 0;
     var length = fp.getPlanSize();
 
@@ -613,7 +333,7 @@ var getProgressInfo = func () {
     info.fob = fuelOnBoard;
     if (grossWeightProp != nil)
         info.gw = grossWeightProp.getValue() * LB2KG;
-    info.phase = mcdu.flightPhase;
+    info.phase = mcdu.currentFlightPhase;
     if (contains(mcdu, 'vnav')) {
         if (mcdu.vnav['tocDist'] != nil)
             info.toc = makeVirtualLegInfo('TOC', totalDistance - mcdu.vnav.tocDist, totalDistance, totalDistanceRemaining, fuelOnBoard, fuelGS, fuelFlow);
@@ -621,11 +341,8 @@ var getProgressInfo = func () {
             info.tod = makeVirtualLegInfo('TOD', totalDistance - mcdu.vnav.todDist, totalDistance, totalDistanceRemaining, fuelOnBoard, fuelGS, fuelFlow);
     }
     info.rnp = getRnpInfo();
-    var alerts = [];
-    foreach (var k; keys(mcdu.alerts)) {
-        if (mcdu.alerts[k] > 0)
-            append(alerts, k);
-    }
+    
+    var alerts = mcdu.fms.getActiveAlerts();
     if (size(alerts) > 0) {
         info.alerts = alerts;
     }
@@ -634,33 +351,25 @@ var getProgressInfo = func () {
 
 
 var setLegAltitude = func (n, alt, altType) {
-    var wp = fms.getVisibleFlightplan().getWP(n);
+    var wp = mcdu.fms.getVisibleFlightplan().getWP(n);
     if (wp == nil)
         return "NO WPT";
-    wp = fms.getModifyableFlightplan().getWP(n);
+    wp = mcdu.fms.getModifyableFlightplan().getWP(n);
     wp.setAltitude(alt, altType);
     return nil;
 };
 
 var setLegSpeed = func (n, speed, speedType) {
-    var wp = fms.getVisibleFlightplan().getWP(n);
+    var wp = mcdu.fms.getVisibleFlightplan().getWP(n);
     if (wp == nil)
         return "NO WPT";
-    wp = fms.getModifyableFlightplan().getWP(n);
+    wp = mcdu.fms.getModifyableFlightplan().getWP(n);
     wp.setSpeed(speed, speedType);
     return nil;
 };
 
-var removeNilFields = func (h) {
-    foreach (var k; keys(h)) {
-        if (h[k] == nil)
-            delete(h, k);
-    }
-    return h;
-};
-
 var getWaypoint = func (index) {
-    var fp = fms.getVisibleFlightplan();
+    var fp = mcdu.fms.getVisibleFlightplan();
     var wp = fp.getWP(index);
     if (wp == nil)
         return nil;
@@ -669,7 +378,7 @@ var getWaypoint = func (index) {
 };
 
 var getFPLegIndex = func (needle) {
-    var fp = fms.getVisibleFlightplan();
+    var fp = mcdu.fms.getVisibleFlightplan();
     for (var i = fp.current or 0; i < fp.getPlanSize(); i += 1) {
         var wp = fp.getWP(i);
         if (wp.wp_name == needle)
@@ -679,7 +388,7 @@ var getFPLegIndex = func (needle) {
 };
 
 var findWaypoint = func (includeLegs, needle) {
-    var fp = fms.getVisibleFlightplan();
+    var fp = mcdu.fms.getVisibleFlightplan();
     var acpos = geo.aircraft_position();
     var results = [];
     if (includeLegs) {
@@ -757,7 +466,7 @@ var completeWaypoint = func (wp, acpos = nil) {
 
 var getCurrentLeg = func {
     var current = nil;
-    var fp = fms.getVisibleFlightplan();
+    var fp = mcdu.fms.getVisibleFlightplan();
 
     var n = 0;
     var i = 0;
@@ -787,14 +496,14 @@ var getCurrentLeg = func {
 
 
 var getWaypointName = func (i) {
-    var fp = fms.getVisibleFlightplan();
+    var fp = mcdu.fms.getVisibleFlightplan();
     var wp = fp.getWP(i);
     if (wp == nil) return nil;
     return wp.wp_name;
 };
 
 var deleteWaypoint = func (i) {
-    var fp = fms.getModifyableFlightplan();
+    var fp = mcdu.fms.getModifyableFlightplan();
     if (i >= fp.getPlanSize() - 1)
         return 0;
     if (i <= 0)
@@ -805,7 +514,7 @@ var deleteWaypoint = func (i) {
 
 var findFPWaypoint = func (fp, wp) {
     if (fp == nil)
-        fp = fms.getVisibleFlightplan();
+        fp = mcdu.fms.getVisibleFlightplan();
     if (wp == nil)
         return nil;
     var fpWP = nil;
@@ -821,7 +530,7 @@ var findFPWaypoint = func (fp, wp) {
 };
 
 var insertDirect = func (wp, from) {
-    var fp = fms.getModifyableFlightplan();
+    var fp = mcdu.fms.getModifyableFlightplan();
     var acpos = geo.aircraft_position();
     if (typeof(from) == 'ghost') {
         # print("from is ghost, finding in flightplan");
@@ -845,7 +554,7 @@ var insertDirect = func (wp, from) {
 
 var getRoute = func {
     print("getRoute");
-    var fp = fms.getVisibleFlightplan();
+    var fp = mcdu.fms.getVisibleFlightplan();
     var curParent = 'DCT';
     var curWP = nil;
     var entries = [];
@@ -980,11 +689,11 @@ var getRoute = func {
 };
 
 var deleteRouteLeg = func (fromIndex, toIndex) {
-    var fp = fms.getVisibleFlightplan();
+    var fp = mcdu.fms.getVisibleFlightplan();
     var destinationName = (fp.destination == nil) ? nil : fp.destination.id;
 
     var count = toIndex - fromIndex;
-    var fp = fms.getModifyableFlightplan();
+    var fp = mcdu.fms.getModifyableFlightplan();
 
     var nextWP = fp.getWP(toIndex);
     var lastWP = fp.getWP(toIndex - 1);
@@ -1008,7 +717,7 @@ var deleteRouteLeg = func (fromIndex, toIndex) {
 };
 
 var insertDirectFP = func (toWP, fromWP) {
-    var fp = fms.getVisibleFlightplan();
+    var fp = mcdu.fms.getVisibleFlightplan();
     var acpos = geo.aircraft_position();
     toIndex = findFPWaypoint(fp, toWP);
     fromIndex = findFPWaypoint(fp, fromWP);
@@ -1016,7 +725,7 @@ var insertDirectFP = func (toWP, fromWP) {
         insertDirect(toWP, fromIndex);
     }
     elsif (fromIndex == nil) {
-        var fp = fms.getModifyableFlightplan();
+        var fp = mcdu.fms.getModifyableFlightplan();
         var direct = createWP(acpos.lat(), acpos.lon(), "DIRECT");
         fp.insertWP(direct, toIndex);
         fp.current = toIndex + 1;
@@ -1024,7 +733,7 @@ var insertDirectFP = func (toWP, fromWP) {
     else {
         if (toIndex <= fromIndex)
             return "INVALID SEQ";
-        var fp = fms.getModifyableFlightplan();
+        var fp = mcdu.fms.getModifyableFlightplan();
         var fpIndex = fp.current;
         if (fpIndex > fromIndex and fpIndex < toIndex) {
             fpIndex = fromIndex + 1;
@@ -1050,7 +759,7 @@ appendViaTo = func (via, toWP) {
         else
             return "INVALID"
     }
-    var fp = fms.getVisibleFlightplan();
+    var fp = mcdu.fms.getVisibleFlightplan();
     var insertIndex = 0;
 
     for (var i = 1; i < fp.getPlanSize(); i += 1) {
@@ -1069,7 +778,7 @@ appendViaTo = func (via, toWP) {
         }
     }
 
-    fp = fms.getModifyableFlightplan();
+    fp = mcdu.fms.getModifyableFlightplan();
 
     var current = fp.current;
     if (insertIndex != nil) {
@@ -1085,7 +794,7 @@ appendViaTo = func (via, toWP) {
 
 appendDirectTo = func (toWP) {
     var leg = createWPFrom(toWP);
-    var fp = fms.getVisibleFlightplan();
+    var fp = mcdu.fms.getVisibleFlightplan();
     var insertIndex = 0;
 
     for (var i = 1; i < fp.getPlanSize(); i += 1) {
@@ -1104,7 +813,7 @@ appendDirectTo = func (toWP) {
         }
     }
 
-    fp = fms.getModifyableFlightplan();
+    fp = mcdu.fms.getModifyableFlightplan();
 
     var current = fp.current;
     if (insertIndex != nil) {
@@ -1115,7 +824,7 @@ appendDirectTo = func (toWP) {
 };
 
 var clearFlightplan = func {
-    var fp = fms.getModifyableFlightplan();
+    var fp = mcdu.fms.getModifyableFlightplan();
     fp.cleanPlan();
     fp.departure = nil;
     fp.sid = nil;
@@ -1470,19 +1179,6 @@ var getApproachTransition = func {
     return ((fp.approach_trans == nil) ? nil : fp.approach_trans.id);
 }
 
-var getFGCallsign = func {
-    return getprop('/sim/multiplay/callsign');
-}
-
-var setFGCallsign = func (callsign) {
-    setprop('/sim/multiplay/callsign', callsign);
-    return nil;
-}
-
-var getFGAircraftType = func {
-    return string.uc(getprop('/sim/aircraft'));
-}
-
 var isValidSID = func () {
     var fp = getVisibleFlightplan();
     if (fp.departure == nil) return 1;
@@ -1503,257 +1199,12 @@ var isValidSTAR = func () {
     return contains(runways, runway);
 }
 
-var iasToTAS = func (alt, ias) {
-    return ias * (1.0 + 0.015 * alt / 1000);
-}
-
-var machToTAS = func (alt, mach) {
-    # temperature: we'll use a simplified model here, where the tropopause is
-    # assumed to be at FL350, sea level temperature is 20°C, and a constant
-    # -51°C throughout the stratosphere.
-    var tropopause = 35000;
-    var tempC = (alt > tropopause) ? -51.0 : alt / tropopause * (-51 - 20) + 20;
-    var gamma = 1.4;
-    var R = 287.053;
-    var T = tempC + 273.15;
-    var c = math.sqrt(gamma * R * T);
-    var tas_mps = mach * c;
-    var tas = tas_mps * MPS2KT;
-    return tas;
-}
-
-var dumpPerfProfile = func {
-    var alt = 0;
-    var dist = 0;
-    var perfIdx = 0;
-    print("-- PERF PROFILE --");
-    if (!contains(mcdu, 'perfInitData') or !contains(mcdu.perfInitData, 'climb'))
-        return;
-    debug.dump(mcdu.perfInitData.climb);
-    for (var t = 0; t < 30; t += 1) {
-        var fl = alt / 100;
-        var perfEntry = mcdu.perfInitData.climb[perfIdx];
-        while (perfEntry != nil and fl > perfEntry.fl) {
-            perfIdx += 1;
-            if (perfIdx >= size(mcdu.perfInitData.climb))
-                perfEntry = nil;
-            else
-                perfEntry = mcdu.perfInitData.climb[perfIdx];
-        }
-        if (perfEntry == nil)
-            break;
-        var tas = (substr(perfEntry.spd ~ '', 0, 1) == 'M')
-                        ? machToTAS(alt, substr(perfEntry.spd ~ '', 1) / 100)
-                        : iasToTAS(alt, perfEntry.spd);
-        printf("%02i FL%03i SPD %3s TAS %3i %5.1fnmi", t, alt / 100, perfEntry.spd, tas, dist);
-        alt += perfEntry.roc;
-        dist += tas / 60;
-    }
-}
-
-var calcTOC = func {
-    var pressureAlt = getprop('/instrumentation/altimeter/pressure-alt-ft');
-    var cruiseAlt = getprop('/autopilot/route-manager/cruise/altitude-ft');
-    if (cruiseAlt == nil or cruiseAlt == 0) {
-        cruiseAlt = getprop('/autopilot/route-manager/cruise/flight-level');
-        if (cruiseAlt != nil)
-            cruiseAlt *= 100;
-    }
-    if (cruiseAlt == nil) {
-        mcdu.vnav.tocDist = nil;
-        mcdu.vnav.tocDistRemaining = nil;
-        return;
-    }
-    if (pressureAlt >= cruiseAlt - 100) {
-        mcdu.vnav.tocDist = nil;
-        mcdu.vnav.tocDistRemaining = 0;
-    }
-    var t = 0;
-    var alt = pressureAlt;
-    var distRemaining = 0;
-    var perfIdx = 0;
-    if (!contains(mcdu, 'perfInitData') or !contains(mcdu.perfInitData, 'climb')) {
-        mcdu.vnav.tocDist = nil;
-        mcdu.vnav.tocDistRemaining = nil;
-        return;
-    }
-    printf("Cruise alt: %i", math.floor(cruiseAlt));
-    var perfEntry = mcdu.perfInitData.climb[perfIdx];
-    while (alt < cruiseAlt and perfEntry != nil) {
-        var fl = alt / 100;
-        while (perfEntry != nil and fl > perfEntry.fl) {
-            printf("Next perf entry, because %f > %f", fl, perfEntry.fl);
-            perfIdx += 1;
-            if (perfIdx >= size(mcdu.perfInitData.climb))
-                perfEntry = nil;
-            else
-                perfEntry = mcdu.perfInitData.climb[perfIdx];
-        }
-        if (perfEntry == nil) {
-            mcdu.vnav.tocDist = nil;
-            mcdu.vnav.tocDistRemaining = nil;
-            return;
-        }
-        var tas = (substr(perfEntry.spd ~ '', 0, 1) == 'M')
-                        ? machToTAS(alt, substr(perfEntry.spd ~ '', 1) / 100)
-                        : iasToTAS(alt, perfEntry.spd);
-        if (perfEntry.roc < cruiseAlt - alt) {
-            alt += perfEntry.roc;
-            distRemaining += tas / 60;
-            t += 1;
-        }
-        else {
-            var dt = (cruiseAlt - alt) / perfEntry.roc;
-            distRemaining += tas * perfEntry.roc / (cruiseAlt - alt) / 60;
-            alt = cruiseAlt;
-            t += dt;
-        }
-        var minutes = math.fmod(math.floor(t), 60);
-        var hours = math.floor(t / 60);
-        printf("%02i%02i FL%03i TAS %3i dist %1.1fnmi", hours, minutes, math.round(alt / 100), math.round(tas), distRemaining);
-    }
-    mcdu.vnav.tocDistRemaining = distRemaining;
-    var totalDistance = getprop('/autopilot/route-manager/total-distance');
-    var totalDistanceRemaining = getprop('/autopilot/route-manager/distance-remaining-nm');
-    var distanceTravelled = totalDistance - totalDistanceRemaining;
-    mcdu.vnav.tocDist = distRemaining + distanceTravelled;
-}
-
-var getTransitionAlt = func {
-    if (!contains(mcdu, 'perfInitData') or !contains(mcdu.perfInitData, 'transAlt'))
-        return 18000;
-    else
-        return mcdu.perfInitData.transAlt;
-}
-
-var getPerfInitData = func {
-    var result = {};
-    foreach (var k; keys(mcdu.perfInitData)) {
-        result[k] = mcdu.perfInitData[k];
-    }
-    var crzAlt = getprop('/autopilot/route-manager/cruise/altitude-ft') or nil;
-    var crzFL = getprop('/autopilot/route-manager/cruise/flight-level') or nil;
-    var crzIAS = getprop('/autopilot/route-manager/cruise/speed-kts') or nil;
-    var crzMach = getprop('/autopilot/route-manager/cruise/mach') or nil;
-
-    if (crzAlt != nil) result.crzAlt = crzAlt else delete(result, 'crzAlt');
-    if (crzFL != nil) result.crzFL = crzFL else delete(result, 'crzFL');
-    if (crzIAS != nil) result.crzIAS = crzIAS else delete(result, 'crzIAS');
-    if (crzMach != nil) result.crzMach = crzMach else delete(result, 'crzMach');
-
-    return result;
-}
-
-var setPerfInitData = func (data) {
-    foreach (var k; keys(data)) {
-        var val = data[k];
-        if (k == 'crzAlt') {
-            if (val == nil) val = 0;
-            setprop('/autopilot/route-manager/cruise/altitude-ft', math.round(val));
-        }
-        if (k == 'crzFL') {
-            if (val == nil) val = 0;
-            setprop('/autopilot/route-manager/cruise/flight-level', math.round(val));
-        }
-        elsif (k == 'crzIAS') {
-            if (val == nil) val = 0;
-            setprop('/autopilot/route-manager/cruise/speed-kts', math.round(val));
-        }
-        elsif (k == 'crzMach') {
-            if (val == nil) val = 0;
-            setprop('/autopilot/route-manager/cruise/mach', val);
-        }
-        else {
-            mcdu.perfInitData[k] = val;
-        }
-    }
-
-    calcTOD();
-    calcTOC();
-
-    return nil;
-}
-
-var calcTOD = func {
-    var fpa = mcdu.perfInitData['desFPA'];
-    if (fpa == nil)
-        fpa = 3.0;
-    var destAlt = 0;
-    var fp = flightplan();
-    if (fp.destination != nil) {
-        destAlt = (fp.destination.elevation or 0) * M2FT;
-    }
-    var cruiseAlt = getprop('/autopilot/route-manager/cruise/altitude-ft');
-    var cruiseFL = getprop('/autopilot/route-manager/cruise/flight-level');
-    if (cruiseFL > 0)
-        cruiseAlt = cruiseFL * 100;
-    printf("Cruise alt: %s", cruiseAlt);
-    printf("Dest. alt: %s", destAlt);
-    printf("FPA: %s", fpa);
-    var criticalWP = nil;
-    if (cruiseAlt == 0 or fpa < 0.01) {
-        mcdu.vnav.todDistNominal = nil;
-        mcdu.vnav.todDist = nil;
-    }
-    else {
-        mcdu.vnav.todDistNominal = (cruiseAlt - destAlt) * FT2M / math.sin(D2R * fpa) * M2NM;
-        mcdu.vnav.todDist = (cruiseAlt - destAlt) * FT2M / math.sin(D2R * fpa) * M2NM;
-        var i = 0;
-        for (i = 1; i < fp.getPlanSize(); i += 1) {
-            var wp = fp.getWP(i);
-            if (wp == nil or wp.wp_role == nil)
-                break;
-        }
-        while (i < fp.getPlanSize()) {
-            var wp = fp.getWP(i);
-            if (wp == nil or wp.wp_role == 'missed')
-                break;
-            if (wp.alt_cstr_type == "at" or wp.alt_cstr_type == "below" or (wp.wp_role == "approach" and wp.wp_parent == nil)) {
-                var constraintAlt = (wp.wp_role == "runway") ? destAlt : wp.alt_cstr;
-                var totalDistance = getprop('/autopilot/route-manager/total-distance');
-                var distToGo = totalDistance - wp.distance_along_route;
-                var todWP = (cruiseAlt - constraintAlt) * FT2M / math.sin(D2R * fpa) * M2NM + distToGo;
-                printf("%s %s %1.0i (%1.1fnmi to go) -> TOD = %1.1fnmi",
-                    wp.id,
-                    wp.alt_cstr_type,
-                    wp.alt_cstr,
-                    distToGo,
-                    todWP);
-                if (todWP > mcdu.vnav.todDist) {
-                    criticalWP = wp;
-                    mcdu.vnav.todDist = todWP;
-                }
-            }
-            i += 1;
-        }
-        if (mcdu.vnav.todDistNominal == nil)
-            printf("Nominal TOD to destination: unknown.");
-        else
-            printf("Nominal TOD to destination: %1.1fnmi", mcdu.vnav.todDistNominal);
-        if (mcdu.vnav.todDist == nil)
-            printf("Effective TOD to destination: unknown.");
-        else
-            printf("Effective TOD to destination: %1.1fnmi, based on %s",
-                mcdu.vnav.todDist,
-                (criticalWP == nil) ? "destination" : criticalWP.id);
-    }
-}
-
-var fms = {
-    '_updateFuelSampler': updateFuelSampler,
-    '_checkFlightPhase': checkFlightPhase,
-    'getFlightPhase': getFlightPhase,
-    'setFlightPhase': setFlightPhase,
-
+return {
     'hasFlightplanModifications': hasFlightplanModifications,
     'getModifyableFlightplan': getModifyableFlightplan,
     'getVisibleFlightplan': getVisibleFlightplan,
     'cancelFlightplanEdits': cancelFlightplanEdits,
     'commitFlightplanEdits': commitFlightplanEdits,
-
-    'getFGCallsign': getFGCallsign,
-    'setFGCallsign': setFGCallsign,
-    'getAircraftType': getFGAircraftType,
 
     'getWaypointName': getWaypointName,
     'deleteWaypoint': deleteWaypoint,
@@ -1772,19 +1223,10 @@ var fms = {
     'appendDirectTo': appendDirectTo,
     'deleteRouteLeg': deleteRouteLeg,
 
-    'getGroundspeed': getGroundspeed,
-    'getFuelFlow': getFuelFlow,
-    'getFuelOnBoard': getFuelOnBoard,
-    'getFuelCapacity': getFuelCapacity,
-    'getUTCMinutes': getUTCMinutes,
     'getFlightplanLegs': getFlightplanLegs,
     'getFlightplanSize': getFlightplanSize,
     'getCurrentLeg': getCurrentLeg,
     'getProgressInfo': getProgressInfo,
-
-    'getPerfInitData': getPerfInitData,
-    'setPerfInitData': setPerfInitData,
-    'getTransitionAlt': getTransitionAlt,
 
     'setDeparture': setDeparture,
     'getDeparture': getDeparture,
@@ -1827,5 +1269,3 @@ var fms = {
     'listApproachTransitions': listApproachTransitions,
     'getApproachTransition': getApproachTransition,
 };
-
-return fms;

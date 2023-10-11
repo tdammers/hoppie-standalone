@@ -40,7 +40,7 @@ fgRunNasalBool = fgRunNasalDef False
 fgRunNasalDef :: forall a m. (FromNasal a, MonadIO m, MonadFG m) => a -> Text -> m a
 fgRunNasalDef defval script = do
   withFGNasalDef defval $ \conn -> do
-    runNasal conn script
+    runNasal conn script script
 
 withFGNasal_ :: (MonadFG m) => (FGFSConnection -> m ()) -> m ()
 withFGNasal_ = withFGNasalDef ()

@@ -194,17 +194,17 @@
         return "\n";
     };
 
-    var finishScript = func (h) {
-        var result = runScript(scripts[h]);
+    var finishScript = func (h, name='websocket') {
+        var result = runScript(scripts[h], name);
         delete(scripts, h);
         return result;
     };
 
-    var runScript = func (script) {
+    var runScript = func (script, name='websocket') {
         var err = [];
         callCounter += 1;
 
-        var f = call(func { compile(script, 'websocket'); }, nil, nil, err);
+        var f = call(func { compile(script, name); }, nil, nil, err);
         if (size(err) > 0) {
             result = { "e": err, "n": callCounter, "caller": caller() };
         }
@@ -237,6 +237,9 @@
         globals.externalMCDU = {};
 
     delete(globals.externalMCDU, 'flightplan');
+    if (!contains(globals.externalMCDU, 'globals')) {
+        globals.externalMCDU.globals = {};
+    }
     globals.externalMCDU.jsonEncode = jsonEncode;
     globals.externalMCDU.runScript = runScript;
     globals.externalMCDU.beginScript = beginScript;

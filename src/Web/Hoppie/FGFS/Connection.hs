@@ -66,8 +66,8 @@ loadNasalLibrary conn moduleName filePath = liftIO $ do
           encodeNasal hash <> ", " <>
           encodeNasal moduleName <>
           ", func (mcdu) { " <> src <>
-          "}, 0);"
-  runNasal conn wrappedSrc
+          "}, 1);"
+  runNasal conn wrappedSrc (Text.pack filePath)
 
 
 data FGFSNetworkError
@@ -96,8 +96,15 @@ withFGFSConnection host port logger action = do
                  shimSrc <- Text.readFile =<< getDataFileName "nasal/shim.nas"
                  void $ runNasalRaw conn shimSrc
                  logger "FGSF: Loaded shim"
-                 loadNasalLibrary conn "fms" "nasal/flightplan.nas"
-                 logger "FGFS: Loaded FMS library"
+                 loadNasalLibrary conn "common" "nasal/common.nas"
+                 loadNasalLibrary conn "alerts" "nasal/alerts.nas"
+                 loadNasalLibrary conn "vnav" "nasal/vnav.nas"
+                 loadNasalLibrary conn "fuelSampler" "nasal/fuel-sampler.nas"
+                 loadNasalLibrary conn "flightPhase" "nasal/flight-phase.nas"
+                 loadNasalLibrary conn "perf" "nasal/perf.nas"
+                 loadNasalLibrary conn "flightplan" "nasal/flightplan.nas"
+                 loadNasalLibrary conn "fms" "nasal/fms.nas"
+                 logger "FGFS: Loaded FMS libraries"
                  action conn
               )
         runReader = do
@@ -250,14 +257,23 @@ runNasalRaw conn script = do
       when (sent < BS.length bs) $ do
         send (BS.drop sent bs)
 
-runNasal_ :: MonadIO m => FGFSConnection -> Text -> m ()
-runNasal_ conn script = do
-  (_ :: NasalValue) <- runNasal conn script
+runNasal_ :: MonadIO m
+          => FGFSConnection
+          -> Text
+          -> Text
+          -> m ()
+runNasal_ conn script name = do
+  (_ :: NasalValue) <- runNasal conn script name
   return ()
 
-runNasal :: MonadIO m => FromNasal a => FGFSConnection -> Text -> m a
-runNasal conn script = liftIO $ do
-  runNasalOrError conn script >>= \case
+runNasal :: MonadIO m
+         => FromNasal a
+         => FGFSConnection
+         -> Text
+         -> Text
+         -> m a
+runNasal conn script name = liftIO $ do
+  runNasalOrError conn script name >>= \case
     NasalError err ->
       throw err
     NasalValue nval ->
@@ -269,8 +285,8 @@ runNasal conn script = liftIO $ do
 
 {-# ANN runNasalOrError ("HLint: ignore Redundant <$>" :: String) #-}
 
-runNasalOrError :: FGFSConnection -> Text -> IO NasalValueOrError
-runNasalOrError conn script = do
+runNasalOrError :: FGFSConnection -> Text -> Text -> IO NasalValueOrError
+runNasalOrError conn script name = do
   let hash = Text.pack . showDigest . sha256 . LBS.fromStrict . encodeUtf8 $ script
       uniq = encodeNasal hash
   let scriptChunks = Text.chunksOf 4096 script
@@ -282,7 +298,7 @@ runNasalOrError conn script = do
     let script'chunk = "externalMCDU.pushScriptCode(" <> uniq <> ", " <> encodeNasal chunk <> ");"
     void $ runNasalRaw conn script'chunk
 
-  let script'finish = "externalMCDU.finishScript(" <> uniq <> ");"
+  let script'finish = "externalMCDU.finishScript(" <> uniq <> "," <> encodeNasal name <> ");"
   (JSON.eitherDecodeStrict <$> runNasalRaw conn script'finish) >>= \case
     Left err -> throw $ JSONDecodeError Nothing err
     Right a -> return a
