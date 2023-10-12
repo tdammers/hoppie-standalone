@@ -319,7 +319,12 @@ var getProgressInfo = func () {
     var length = fp.getPlanSize();
 
     var wpCurrent = fp.getWP(fp.current);
-    var wpNext = fp.getWP(fp.current + 1);
+    var nextIdx = fp.current + 1;
+    var wpNext = fp.getWP(nextIdx);
+    while (wpNext != nil and wpCurrent != nil and wpNext.wp_name == wpCurrent.wp_name) {
+        nextIdx += 1;
+        wpNext = fp.getWP(nextIdx);
+    }
     var destIdx = getDestinationIndex(fp);
     var wpDest = (destIdx == nil) ? nil : fp.getWP(destIdx);
 
