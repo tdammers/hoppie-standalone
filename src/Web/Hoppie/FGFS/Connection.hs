@@ -8,6 +8,7 @@
 module Web.Hoppie.FGFS.Connection
 where
 
+import Control.Concurrent
 import Control.Concurrent.Async
 import Control.Concurrent.STM
 import Control.Exception
@@ -217,9 +218,9 @@ callNasalFunc conn funcname args = liftIO $ do
 callNasalOrError :: FGFSConnection -> Text -> Vector NasalValue -> IO NasalValueOrError
 callNasalOrError conn fun args = 
   logTime ("callNasalOrError " <> Text.unpack fun) conn $ \_ -> do
-    (fgfsLogger conn) (show args)
+    fgfsLogger conn (show args)
     let script' = "externalMCDU.callFunction(" <> encodeNasal fun <> "," <> encodeNasal args  <> ");"
-    (fgfsLogger conn) (show script')
+    fgfsLogger conn (show script')
     json <- runNasalRaw conn script'
     case JSON.eitherDecodeStrict json of
       Left err ->
@@ -227,9 +228,21 @@ callNasalOrError conn fun args =
       Right val ->
         return val
 
+data TimeoutException = TimeoutException
+  deriving (Show)
+
+instance Exception TimeoutException where
+
+withTimeout :: Int -> IO a -> IO a
+withTimeout t action = do
+  result <- race (threadDelay t >> return TimeoutException) action
+  case result of
+    Left ex -> throw ex
+    Right x -> return x
+
 getRawResponse :: FGFSConnection -> IO ByteString
 getRawResponse conn =
-  go ""
+  withTimeout 5000000 $ go ""
   where
     chan = fgfsOutputChan conn
 

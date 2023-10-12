@@ -6,8 +6,10 @@ module Web.Hoppie.TUI.MCDU.Views.FGFS.Common
 where
 
 import Web.Hoppie.FGFS.NasalValue
+import Web.Hoppie.FGFS.Connection (TimeoutException (..))
 import Web.Hoppie.TUI.MCDU.Draw
 import Web.Hoppie.TUI.MCDU.Monad
+import Web.Hoppie.TUI.MCDU.Operations
 import Web.Hoppie.TUI.StringUtil
 
 import Control.Exception
@@ -59,6 +61,12 @@ withFGView go = do
                   | (fileMay, lineMay) <- stackTrace
                   ]
             fgErrorView "SERVER ERROR"
+      , MCDUHandler $ \TimeoutException -> do
+            debugPrint $
+              colorize red . Text.pack $
+                "Operation timed out"
+            fgErrorView "ERROR"
+            mcduDisconnectFlightgear
       , MCDUHandler $ \(e :: SomeException) -> do
             debugPrint $
               colorize red . Text.pack $
