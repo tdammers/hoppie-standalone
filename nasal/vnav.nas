@@ -85,9 +85,6 @@ var calcTOD = func {
     var cruiseFL = getprop('/autopilot/route-manager/cruise/flight-level');
     if (cruiseFL > 0)
         cruiseAlt = cruiseFL * 100;
-    printf("Cruise alt: %s", cruiseAlt);
-    printf("Dest. alt: %s", destAlt);
-    printf("FPA: %s", fpa);
     var criticalWP = nil;
     if (cruiseAlt == 0 or fpa < 0.01) {
         mcdu.vnav.todDistNominal = nil;
@@ -106,15 +103,25 @@ var calcTOD = func {
             var wp = fp.getWP(i);
             if (wp == nil or wp.wp_role == 'missed')
                 break;
-            if (wp.alt_cstr_type == "at" or wp.alt_cstr_type == "below" or (wp.wp_role == "approach" and wp.wp_parent == nil)) {
-                var constraintAlt = (wp.wp_role == "runway") ? destAlt : wp.alt_cstr;
+            if (wp.wp_role == nil and wp.alt_cstr_type == "at") {
+                cruiseAlt = wp.alt_cstr;
+                printf("%s: step climb to %1.0i", wp.id, cruiseAlt);
+            }
+            elsif (
+                ( (wp.wp_role == "star" or wp.wp_role == "approach") and
+                  (wp.alt_cstr_type == "at" or wp.alt_cstr_type == "below")
+                ) or
+                (wp.wp_role == "approach" and wp.wp_parent == nil)
+            ) {
+                var constraintAlt = (wp.wp_role == "runway" or wp.alt_cstr_type == nil) ? destAlt : wp.alt_cstr;
                 var totalDistance = getprop('/autopilot/route-manager/total-distance');
                 var distToGo = totalDistance - wp.distance_along_route;
                 var todWP = (cruiseAlt - constraintAlt) * FT2M / math.sin(D2R * fpa) * M2NM + distToGo;
-                printf("%s %s %1.0i (%1.1fnmi to go) -> TOD = %1.1fnmi",
+                printf("%s (%s) %s %1.0i (%1.1fnmi to destination) -> TOD = %1.1fnmi",
                     wp.id,
-                    wp.alt_cstr_type,
-                    wp.alt_cstr,
+                    wp.wp_role,
+                    wp.alt_cstr_type or 'auto',
+                    constraintAlt,
                     distToGo,
                     todWP);
                 if (todWP > mcdu.vnav.todDist) {
@@ -124,6 +131,9 @@ var calcTOD = func {
             }
             i += 1;
         }
+        printf("Cruise alt: %s", cruiseAlt);
+        printf("Dest. alt: %s", destAlt);
+        printf("FPA: %s", fpa);
         if (mcdu.vnav.todDistNominal == nil)
             printf("Nominal TOD to destination: unknown.");
         else
