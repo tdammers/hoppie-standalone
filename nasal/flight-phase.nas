@@ -29,6 +29,13 @@ if (!contains(mcdu, 'flightPhaseChecker')) {
     mcdu.flightPhaseChecker.simulatedTime = 1;
 }
 
+if (!contains(mcdu, 'takeoffMetrics')) {
+    mcdu.takeoffMetrics = {
+        'startPos': nil,
+        'endPos': nil,
+    };
+}
+
 var checkFlightPhase = func {
     var groundspeed = getprop('/velocities/groundspeed-kt');
     var altitude = getprop('/instrumentation/altimeter/indicated-altitude-ft');
@@ -38,13 +45,34 @@ var checkFlightPhase = func {
     var phasePrev = mcdu.currentFlightPhase;
     if (mcdu.currentFlightPhase == ON_STAND) {
         if (groundspeed > 5)
+            mcdu.takeoffMetrics.startPos = nil;
+            mcdu.takeoffMetrics.endPos = nil;
             mcdu.currentFlightPhase = TAXI_OUT;
     }
     if (mcdu.currentFlightPhase == TAXI_OUT) {
         if (groundspeed > 40)
             mcdu.currentFlightPhase = TAKEOFF;
+        else {
+            foreach (var engine; props.globals.getNode('controls/engines').getChildren('engine')) {
+                var throttle = engine.getValue('throttle');
+                if (throttle != nil and throttle > 0.7) {
+                    mcdu.currentFlightPhase = TAKEOFF;
+                    break;
+                }
+            }
+        }
+        if (mcdu.currentFlightPhase == TAKEOFF) {
+            mcdu.takeoffMetrics.startPos = geo.aircraft_position();
+        }
     }
     if (mcdu.currentFlightPhase == TAKEOFF or mcdu.currentFlightPhase == GO_AROUND) {
+        if (mcdu.takeoffMetrics.endPos == nil and agl >= 50) {
+            mcdu.takeoffMetrics.endPos = geo.aircraft_position();
+            var takeoffDistance = mcdu.takeoffMetrics.startPos.distance_to(mcdu.takeoffMetrics.endPos);
+            printf("Takeoff distance: %i m / %i ft",
+                takeoffDistance,
+                takeoffDistance * M2FT);
+        }
         if (agl > 800)
             mcdu.currentFlightPhase = CLIMB;
     }
@@ -123,7 +151,7 @@ var checkMinimumTakeoffFuel = func {
             !contains(mcdu.perfInitData, 'toFuel') or
             mcdu.perfInitData.toFuel == nil or
             fuelOnBoard == nil) {
-            clearAlert('LOW TAKEOFF FUEL');
+            mcdu.fms.clearAlert('LOW TAKEOFF FUEL');
         }
         elsif (fuelOnBoard < mcdu.perfInitData.toFuel) {
             mcdu.fms.setAlert('LOW TAKEOFF FUEL');
@@ -138,8 +166,6 @@ var checkMinimumTakeoffFuel = func {
 };
 
 var checkCurrentFuel = func {
-    debug.dump(mcdu.currentFlightPhase);
-    debug.dump(TAKEOFF);
     if (mcdu.currentFlightPhase > TAKEOFF) {
         var fuelOnBoard = mcdu.fuelSamplerVars.currentKG;
         if (!contains(mcdu, 'perfInitData') or

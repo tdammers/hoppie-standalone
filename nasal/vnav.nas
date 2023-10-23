@@ -30,12 +30,12 @@ var calcTOC = func {
         mcdu.vnav.tocDistRemaining = nil;
         return;
     }
-    printf("Cruise alt: %i", math.floor(cruiseAlt));
+    # printf("Cruise alt: %i", math.floor(cruiseAlt));
     var perfEntry = mcdu.perfInitData.climb[perfIdx];
     while (alt < cruiseAlt and perfEntry != nil) {
         var fl = alt / 100;
         while (perfEntry != nil and fl > perfEntry.fl) {
-            printf("Next perf entry, because %f > %f", fl, perfEntry.fl);
+            # printf("Next perf entry, because %f > %f", fl, perfEntry.fl);
             perfIdx += 1;
             if (perfIdx >= size(mcdu.perfInitData.climb))
                 perfEntry = nil;
@@ -63,7 +63,7 @@ var calcTOC = func {
         }
         var minutes = math.fmod(math.floor(t), 60);
         var hours = math.floor(t / 60);
-        printf("%02i%02i FL%03i TAS %3i dist %1.1fnmi", hours, minutes, math.round(alt / 100), math.round(tas), distRemaining);
+        # printf("%02i%02i FL%03i TAS %3i dist %1.1fnmi", hours, minutes, math.round(alt / 100), math.round(tas), distRemaining);
     }
     mcdu.vnav.tocDistRemaining = distRemaining;
     var totalDistance = getprop('/autopilot/route-manager/total-distance');
@@ -105,7 +105,7 @@ var calcTOD = func {
                 break;
             if (wp.wp_role == nil and wp.alt_cstr_type == "at") {
                 cruiseAlt = wp.alt_cstr;
-                printf("%s: step climb to %1.0i", wp.id, cruiseAlt);
+                # printf("%s: step climb to %1.0i", wp.id, cruiseAlt);
             }
             elsif (
                 ( (wp.wp_role == "star" or wp.wp_role == "approach") and
@@ -117,13 +117,13 @@ var calcTOD = func {
                 var totalDistance = getprop('/autopilot/route-manager/total-distance');
                 var distToGo = totalDistance - wp.distance_along_route;
                 var todWP = (cruiseAlt - constraintAlt) * FT2M / math.sin(D2R * fpa) * M2NM + distToGo;
-                printf("%s (%s) %s %1.0i (%1.1fnmi to destination) -> TOD = %1.1fnmi",
-                    wp.id,
-                    wp.wp_role,
-                    wp.alt_cstr_type or 'auto',
-                    constraintAlt,
-                    distToGo,
-                    todWP);
+                # printf("%s (%s) %s %1.0i (%1.1fnmi to destination) -> TOD = %1.1fnmi",
+                #     wp.id,
+                #     wp.wp_role,
+                #     wp.alt_cstr_type or 'auto',
+                #     constraintAlt,
+                #     distToGo,
+                #     todWP);
                 if (todWP > mcdu.vnav.todDist) {
                     criticalWP = wp;
                     mcdu.vnav.todDist = todWP;
@@ -131,19 +131,19 @@ var calcTOD = func {
             }
             i += 1;
         }
-        printf("Cruise alt: %s", cruiseAlt);
-        printf("Dest. alt: %s", destAlt);
-        printf("FPA: %s", fpa);
-        if (mcdu.vnav.todDistNominal == nil)
-            printf("Nominal TOD to destination: unknown.");
-        else
-            printf("Nominal TOD to destination: %1.1fnmi", mcdu.vnav.todDistNominal);
-        if (mcdu.vnav.todDist == nil)
-            printf("Effective TOD to destination: unknown.");
-        else
-            printf("Effective TOD to destination: %1.1fnmi, based on %s",
-                mcdu.vnav.todDist,
-                (criticalWP == nil) ? "destination" : criticalWP.id);
+        # printf("Cruise alt: %s", cruiseAlt);
+        # printf("Dest. alt: %s", destAlt);
+        # printf("FPA: %s", fpa);
+        # if (mcdu.vnav.todDistNominal == nil)
+        #     printf("Nominal TOD to destination: unknown.");
+        # else
+        #     printf("Nominal TOD to destination: %1.1fnmi", mcdu.vnav.todDistNominal);
+        # if (mcdu.vnav.todDist == nil)
+        #     printf("Effective TOD to destination: unknown.");
+        # else
+        #     printf("Effective TOD to destination: %1.1fnmi, based on %s",
+        #         mcdu.vnav.todDist,
+        #         (criticalWP == nil) ? "destination" : criticalWP.id);
     }
 }
 

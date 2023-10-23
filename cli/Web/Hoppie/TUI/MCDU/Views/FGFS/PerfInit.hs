@@ -8,6 +8,7 @@ import Web.Hoppie.FGFS.FMS as FMS
 import Web.Hoppie.TUI.MCDU.Draw
 import Web.Hoppie.TUI.MCDU.Monad
 import Web.Hoppie.TUI.MCDU.Operations
+import Web.Hoppie.TUI.MCDU.Views.Common
 import Web.Hoppie.TUI.MCDU.Views.FGFS.Common
 import Web.Hoppie.Telex
 
@@ -311,6 +312,10 @@ perfInitViewLoad = withFGView $ do
               gets mcduAircraftType
 
         curPage <- gets (mcduViewPage . mcduView)
+        let (numClimbPages, curClimbProfile) =
+              paginateWithHeadroom 1 5 (curPage - 1) (perfInitClimbProfile pd)
+        modifyView $ \v -> v
+              { mcduViewNumPages = numClimbPages + 3 }
         case curPage of
           0 -> do
             modifyView $ \v -> v
@@ -353,7 +358,8 @@ perfInitViewLoad = withFGView $ do
                   , ( LSKR 3, ("", scratchInteract setTransFL getTransFL >> reloadView))
                   ]
               }
-          1 -> do
+          page | page >= 1 && page < numClimbPages + 1 -> do
+            let climbPage = page - 1
             let profile = perfInitClimbProfile pd
                 profileSize = length profile
 
@@ -371,14 +377,16 @@ perfInitViewLoad = withFGView $ do
                       (climbRate cp)
 
             let setEntry :: Int -> Maybe ByteString -> MCDU Bool
-                setEntry n Nothing =
+                setEntry n' Nothing = do
+                  let n = n' + climbPage * 5
                   if n < profileSize then do
                     liftIO $ writeIORef pdVar $ pd
                       { perfInitClimbProfile = take n profile ++ drop (n + 1) profile }
                     return True
                   else
                     return False
-                setEntry n (Just str) =
+                setEntry n' (Just str) = do
+                  let n = n' + climbPage * 5
                   case BS.split (ord8 '/') str of
                     [flStr, spdStr, rocStr] -> do
                       let parseResultMay = do
@@ -405,7 +413,8 @@ perfInitViewLoad = withFGView $ do
                     _ -> do
                       scratchWarn "INVALID"
                       return False
-                getEntry n =
+                getEntry n' = do
+                  let n = n' + climbPage * 5
                   case drop n $ profile of
                     [] -> return Nothing
                     (cp:_) -> return . Just . BS8.pack $
@@ -418,16 +427,20 @@ perfInitViewLoad = withFGView $ do
               { mcduViewTitle = "PERF INIT CLB"
               , mcduViewDraw = do
                   mcduPrint 6 1 white "TO FL / SPD / FPM"
-                  zipWithM_ drawClimbPerf [0..4] (perfInitClimbProfile pd)
-                  when (profileSize < 4) $
-                    mcduPrint 6 (profileSize * 2 + 2) green "--- / ---- / ---"
+                  zipWithM_ drawClimbPerf [0..5] curClimbProfile
+                  let psn = profileSize - climbPage * 5
+                  when (psn >= 0 && psn < 5) $
+                          mcduPrint 6 (psn * 2 + 2) green "--- / ---- / ---"
                     
               , mcduViewLSKBindings = Map.fromList $
                   [ ( LSKR n, ("", scratchInteract (setEntry n) (getEntry n) >> reloadView) )
-                  | n <- [0..profileSize]
+                  | n' <- [0..profileSize]
+                  , let n = n' + climbPage * 5
+                  , n >= 0
+                  , n <= 5
                   ]
               }
-          2 -> do
+          page | page == numClimbPages + 1 -> do
             modifyView $ \v -> v
               { mcduViewTitle = "PERF INIT CRZ"
               , mcduViewDraw = do
@@ -456,7 +469,7 @@ perfInitViewLoad = withFGView $ do
                   , ( LSKL 2, ("", scratchInteract setCruiseWind getCruiseWind >> reloadView))
                   ]
               }
-          3 -> do
+          page | page == numClimbPages + 2 -> do
             modifyView $ \v -> v
               { mcduViewTitle = "PERF INIT " <> massUnitStr
               , mcduViewDraw = do
