@@ -402,7 +402,7 @@ handleMCDUEvent ev = do
                                          <> colorize 255 (Text.pack err)
         case ns' of
           NetworkError err -> do
-            lift . void $ makeErrorResponse Nothing (BS8.pack err) "NETWORK ERROR"
+            -- lift . void $ makeErrorResponse Nothing (BS8.pack err) "NETWORK ERROR"
             scratchWarn "NETWORK ERROR"
           _ ->
             return ()

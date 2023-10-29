@@ -44,10 +44,11 @@ var checkFlightPhase = func {
     var wow = getprop('/gear/gear/wow');
     var phasePrev = mcdu.currentFlightPhase;
     if (mcdu.currentFlightPhase == ON_STAND) {
-        if (groundspeed > 5)
+        if (groundspeed > 5) {
             mcdu.takeoffMetrics.startPos = nil;
             mcdu.takeoffMetrics.endPos = nil;
             mcdu.currentFlightPhase = TAXI_OUT;
+        }
     }
     if (mcdu.currentFlightPhase == TAXI_OUT) {
         if (groundspeed > 40)

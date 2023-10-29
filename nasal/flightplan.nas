@@ -393,9 +393,11 @@ var getFPLegIndex = func (needle) {
 };
 
 var findWaypoint = func (includeLegs, needle) {
+    print("findWaypoint: " ~ needle);
     var fp = mcdu.fms.getVisibleFlightplan();
     var acpos = geo.aircraft_position();
     var results = [];
+    print("legs");
     if (includeLegs) {
         for (var i = math.max(0, fp.current or 0); i < fp.getPlanSize(); i += 1) {
             var wp = fp.getWP(i);
@@ -405,6 +407,7 @@ var findWaypoint = func (includeLegs, needle) {
         }
     }
     if (size(needle) == 4) {
+        print("airport");
         var airports = findAirportsByICAO(needle);
         foreach (var airport; airports) {
             append(results,
@@ -412,6 +415,7 @@ var findWaypoint = func (includeLegs, needle) {
         }
     }
     else {
+        print("fixes");
         var fixes = findFixesByID(acpos, needle);
         foreach (var fix; fixes) {
             if (fix.id == needle)
@@ -437,6 +441,7 @@ var findWaypoint = func (includeLegs, needle) {
                     completeWaypoint({ "type": dme.type, "id": dme.id, "name": dme.name, "wp": dme }, acpos));
         }
     }
+    print("sort");
     var sortfunc = func (a, b) {
         # Sort FP legs first
         if (a.type == "leg" and b.type != "leg")

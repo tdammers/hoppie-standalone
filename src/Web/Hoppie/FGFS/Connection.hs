@@ -235,14 +235,14 @@ instance Exception TimeoutException where
 
 withTimeout :: Int -> IO a -> IO a
 withTimeout t action = do
-  result <- race (threadDelay t >> return TimeoutException) action
+  result <- race (threadDelay t) action
   case result of
-    Left ex -> throw ex
+    Left () -> throw TimeoutException
     Right x -> return x
 
 getRawResponse :: FGFSConnection -> IO ByteString
 getRawResponse conn =
-  withTimeout 5000000 $ go ""
+  go ""
   where
     chan = fgfsOutputChan conn
 
@@ -260,9 +260,10 @@ getRawResponse conn =
         go bs'
 
 runNasalRaw :: FGFSConnection -> Text -> IO ByteString
-runNasalRaw conn script = do
-  send $ "nasal\r\n" <> encodeUtf8 script <> "\r\n##EOF##\r\n"
-  getRawResponse conn
+runNasalRaw conn script =
+  withTimeout 1000000 $ do
+    send $ "nasal\r\n" <> encodeUtf8 script <> "\r\n##EOF##\r\n"
+    getRawResponse conn
   where
     send bs = do
       sent <- Socket.send (fgfsSocket conn) (BS.take 2048 bs) Socket.msgNoSignal

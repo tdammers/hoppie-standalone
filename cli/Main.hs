@@ -405,7 +405,7 @@ mapInputCommand _ = Nothing
 runTickTimer :: TChan MCDUEvent -> IO ()
 runTickTimer eventChan = liftIO . forever $ do
   atomically . writeTChan eventChan $ TickEvent
-  threadDelay 10000000
+  threadDelay 50000000
 
 handleUplink :: TChan MCDUEvent -> WithMeta UplinkStatus TypedMessage -> Hoppie ()
 handleUplink eventChan = do
